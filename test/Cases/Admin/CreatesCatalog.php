@@ -19,6 +19,9 @@ use App\Model\MerchantProduct;
 use App\Model\MerchantProductPrice;
 use App\Model\MobileBlacklist;
 use App\Model\MobileSegment;
+use App\Model\Order;
+use App\Model\OrderAttempt;
+use App\Model\OrderNotifyLog;
 use App\Model\Product;
 use App\Model\ProductPrice;
 use App\Model\ProductRoute;
@@ -54,6 +57,10 @@ trait CreatesCatalog
 
     private function cleanUpCatalog(): void
     {
+        $orderIds = Order::whereIn('merchant_id', $this->merchantIds)->pluck('id')->all();
+        OrderAttempt::whereIn('order_id', $orderIds)->delete();
+        OrderNotifyLog::whereIn('order_id', $orderIds)->delete();
+        Order::destroy($orderIds);
         $merchantProductIds = MerchantProduct::whereIn('merchant_id', $this->merchantIds)
             ->orWhereIn('product_id', $this->productIds)
             ->pluck('id')->all();
@@ -83,13 +90,13 @@ trait CreatesCatalog
     /**
      * @param list<string> $provinces
      */
-    private function createSupplier(array $provinces = ['*'], string $status = 'active'): Supplier
+    private function createSupplier(array $provinces = ['*'], string $status = 'active', string $mockResult = 'success'): Supplier
     {
         $supplier = Supplier::create([
             'name' => $this->uniq('供应商'),
             'code' => $this->uniq('s_'),
             'driver' => 'mock',
-            'config' => null,
+            'config' => make(Encrypter::class)->encrypt(json_encode(['result' => $mockResult])),
             'status' => $status,
         ]);
         $this->supplierIds[] = $supplier->id;
@@ -98,6 +105,14 @@ trait CreatesCatalog
         }
 
         return $supplier;
+    }
+
+    /**
+     * 改模拟供应商的返回结果：success / failed / processing / timeout。
+     */
+    private function setMockResult(Supplier $supplier, string $result): void
+    {
+        $supplier->update(['config' => make(Encrypter::class)->encrypt(json_encode(['result' => $result]))]);
     }
 
     /**

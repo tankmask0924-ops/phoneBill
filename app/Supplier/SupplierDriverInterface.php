@@ -12,10 +12,15 @@ declare(strict_types=1);
 
 namespace App\Supplier;
 
+use Psr\Http\Message\ServerRequestInterface;
+
 /**
  * 供应商对接驱动：每接一家供应商写一个实现类，并登记到 SupplierDriverRegistry::DRIVERS。
  *
- * 目前只有声明接口参数的部分；充值、查单、解析回调、查余额在下单主流程（第二阶段）里补上。
+ * 约定：
+ * - 只有供应商明确说成功 / 失败才返回 Success / Failed，拿不准一律 Processing，不能把超时当失败（会重复充值）；
+ * - 网络异常、超时可以直接抛异常，调用方按处理中对待，之后靠回调或查单拿结果；
+ * - 每次调用要在 10 秒内返回（一个订单可能连续试几家，队列任务总时限 60 秒）。
  */
 interface SupplierDriverInterface
 {
@@ -37,4 +42,28 @@ interface SupplierDriverInterface
      * @return list<array{key: string, label: string, type: string, required: bool, options?: list<array{value: string, label: string}>}>
      */
     public function configSchema(): array;
+
+    /**
+     * 提交充值。
+     */
+    public function recharge(RechargeRequest $request): RechargeResult;
+
+    /**
+     * 主动查单。
+     */
+    public function query(RechargeRequest $request): RechargeResult;
+
+    /**
+     * 验签并解析供应商的结果回调。
+     *
+     * @param array<string, string> $config
+     */
+    public function parseCallback(ServerRequestInterface $request, array $config): CallbackResult;
+
+    /**
+     * 查询我们在供应商那边的余额，不支持返回 null。
+     *
+     * @param array<string, string> $config
+     */
+    public function balance(array $config): ?string;
 }

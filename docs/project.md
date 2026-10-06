@@ -26,7 +26,7 @@ phoneBill 是一个话费充值平台。平台自己不直接充话费，而是�
 |---|---|---|
 | 平台管理员 | 平台管理后台（`web/`，已有基础） | 管理供应商、商品、商户、订单、风控 |
 | 商户 | 商户后台（新增，独立前端项目 `merchant-web/`） | 只读：订单记录、资金流水、订单状态 |
-| 商户的系统 | 开放接口 `/api/v1`（新增） | 下单、查单、查余额、查商品，接收结果通知 |
+| 商户的系统 | 开放接口 `/open/v1`（新增，接入文档 [api.md](api.md)） | 下单、查单、查余额、查商品，接收结果通知 |
 | 供应商 | 供应商的接口 | 平台调它充值、查单；它回调平台告知结果 |
 
 ### 1.3 技术基础
@@ -234,15 +234,18 @@ stateDiagram-v2
 
 ### 5.2 开放接口
 
+给商户的接入文档（签名、错误码、通知格式）见 [api.md](api.md)。
+
 | 接口 | 说明 |
 |---|---|
-| `POST /api/v1/recharge` | 下单：`product_code`、`mobile`、`merchant_order_no`、`notify_url`（可选，不传用商户配置的） |
-| `GET /api/v1/order` | 按平台订单号或商户订单号查单 |
-| `GET /api/v1/balance` | 查余额 |
-| `GET /api/v1/products` | 查已开通的商品及各运营商价格 |
+| `POST /open/v1/recharge` | 下单：`product_code`、`mobile`、`merchant_order_no`、`notify_url`（可选，不传用商户配置的） |
+| `GET /open/v1/order` | 按平台订单号或商户订单号查单 |
+| `GET /open/v1/balance` | 查余额 |
+| `GET /open/v1/products` | 查已开通的商品及各运营商价格 |
 
 - 签名：参数按 key 排序拼接，用 `app_secret` 做 HMAC-SHA256；带 `timestamp`（5 分钟内有效）和 `nonce`（Redis 去重防重放）；校验 IP 白名单。
-- 结果通知：订单到达终态（成功/失败）后 POST 到通知地址，带签名；商户返回约定的成功标识才算通知成功，否则按 2.6 的间隔重试。
+- 结果通知：订单到达终态（成功/失败）后 POST JSON 到通知地址，带签名；商户返回 HTTP 200 且响应体为 `success` 才算送达，否则按 2.6 的间隔重试。
+- 供应商回调地址：`/notify/supplier/{供应商编码}`。
 
 ## 6. 数据模型
 

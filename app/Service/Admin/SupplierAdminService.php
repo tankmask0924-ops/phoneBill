@@ -21,6 +21,7 @@ use App\Model\AdminUser;
 use App\Model\Supplier;
 use App\Security\Encrypter;
 use App\Service\AbstractService;
+use App\Service\Supplier\SupplierGateway;
 use App\Supplier\SupplierDriverInterface;
 use App\Supplier\SupplierDriverRegistry;
 use Hyperf\DbConnection\Db;
@@ -59,6 +60,9 @@ class SupplierAdminService extends AbstractService
 
     #[Inject]
     protected Encrypter $encrypter;
+
+    #[Inject]
+    protected SupplierGateway $supplierGateway;
 
     /**
      * 表单要用的选项：可选的对接驱动（含参数定义）、省份。
@@ -245,12 +249,7 @@ class SupplierAdminService extends AbstractService
      */
     public function decryptConfig(Supplier $supplier): array
     {
-        if ($supplier->config === null || $supplier->config === '') {
-            return [];
-        }
-        $config = json_decode($this->encrypter->decrypt($supplier->config), true);
-
-        return is_array($config) ? $config : [];
+        return $this->supplierGateway->decryptConfig($supplier);
     }
 
     private function findOrFail(int $id): Supplier

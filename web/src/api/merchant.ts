@@ -90,6 +90,7 @@ export interface BalanceLog {
   amount: string
   balance_after: string
   order_id: number | null
+  order_no: string | null
   remark: string | null
   admin_user_id: number | null
   admin_name: string | null

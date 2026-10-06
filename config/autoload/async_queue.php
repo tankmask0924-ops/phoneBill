@@ -20,7 +20,8 @@ return [
         'channel' => '{queue}',
         'timeout' => 2,
         'retry_seconds' => 5,
-        'handle_timeout' => 10,
+        // 一个订单可能连续试几家供应商，每家最多几秒，留足余量
+        'handle_timeout' => 60,
         'processes' => 1,
         'concurrent' => [
             'limit' => 10,

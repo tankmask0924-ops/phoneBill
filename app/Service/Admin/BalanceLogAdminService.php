@@ -15,6 +15,7 @@ namespace App\Service\Admin;
 use App\Dao\AdminUserDao;
 use App\Dao\MerchantBalanceLogDao;
 use App\Dao\MerchantDao;
+use App\Dao\OrderDao;
 use App\Model\MerchantBalanceLog;
 use App\Service\AbstractService;
 use Hyperf\Di\Annotation\Inject;
@@ -42,8 +43,11 @@ class BalanceLogAdminService extends AbstractService
     #[Inject]
     protected AdminUserDao $adminUserDao;
 
+    #[Inject]
+    protected OrderDao $orderDao;
+
     /**
-     * @param array<string, mixed> $query merchant_id / type / order_id / created_from / created_to
+     * @param array<string, mixed> $query merchant_id / type / order_id / order_no / created_from / created_to
      * @return array{data: list<array<string, mixed>>, total: int, page: int, per_page: int}
      */
     public function list(array $query): array
@@ -52,6 +56,9 @@ class BalanceLogAdminService extends AbstractService
         $perPage = min(self::MAX_PER_PAGE, max(1, (int) ($query['per_page'] ?? 20)));
 
         $builder = $this->balanceLogDao->newQuery();
+        if (is_string($query['order_no'] ?? null) && $query['order_no'] !== '') {
+            $builder->where('order_id', $this->orderDao->findByOrderNo($query['order_no'])?->id ?? 0);
+        }
         foreach (['merchant_id', 'order_id'] as $field) {
             if (isset($query[$field]) && is_numeric($query[$field])) {
                 $builder->where($field, (int) $query[$field]);
@@ -70,6 +77,7 @@ class BalanceLogAdminService extends AbstractService
         $logs = $builder->orderByDesc('id')->forPage($page, $perPage)->get();
         $merchants = $this->merchantDao->newQuery()->whereIn('id', $logs->pluck('merchant_id')->unique()->all())->pluck('name', 'id');
         $admins = $this->adminUserDao->newQuery()->whereIn('id', $logs->pluck('admin_user_id')->filter()->unique()->all())->pluck('real_name', 'id');
+        $orders = $this->orderDao->newQuery()->whereIn('id', $logs->pluck('order_id')->filter()->unique()->all())->pluck('order_no', 'id');
 
         return [
             'data' => $logs->map(static fn (MerchantBalanceLog $log) => [
@@ -80,6 +88,7 @@ class BalanceLogAdminService extends AbstractService
                 'amount' => $log->amount,
                 'balance_after' => $log->balance_after,
                 'order_id' => $log->order_id,
+                'order_no' => $log->order_id ? ($orders[$log->order_id] ?? null) : null,
                 'remark' => $log->remark,
                 'admin_user_id' => $log->admin_user_id,
                 'admin_name' => $log->admin_user_id ? ($admins[$log->admin_user_id] ?? null) : null,
