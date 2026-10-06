@@ -25,10 +25,12 @@ use App\Supplier\RechargeResult;
 use App\Supplier\RechargeStatus;
 use App\Support\RedisLock;
 use Hyperf\Contract\ConfigInterface;
+use Hyperf\Coroutine\Parallel;
 use Hyperf\DbConnection\Db;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\Logger\LoggerFactory;
 use Psr\Log\LoggerInterface;
+use Throwable;
 
 /**
  * 订单处理（docs/project.md 3.2、3.3）：提交供应商 → 收结果 → 成功 / 换下一个供应商 / 全部失败退款。
@@ -285,11 +287,11 @@ class OrderProcessService extends AbstractService
     }
 
     /**
-     * 定时任务：提交后一段时间还没结果的，主动向供应商查单。
+     * 定时任务：提交后一段时间还没结果的，主动向供应商查单。并发查，单笔出错不影响其他的。
      *
      * @return int 查了多少笔
      */
-    public function queryDue(int $limit = 100): int
+    public function queryDue(int $limit = 500, int $concurrency = 20): int
     {
         $afterMinutes = (int) $this->config->get('order.query_after_minutes', 5);
         $intervalMinutes = (int) $this->config->get('order.query_interval_minutes', 5);
@@ -298,9 +300,17 @@ class OrderProcessService extends AbstractService
             date('Y-m-d H:i:s', time() - $intervalMinutes * 60),
             $limit
         );
+        $parallel = new Parallel($concurrency);
         foreach ($attempts as $attempt) {
-            $this->queryAttempt($attempt);
+            $parallel->add(function () use ($attempt) {
+                try {
+                    $this->queryAttempt($attempt);
+                } catch (Throwable $e) {
+                    $this->logger()->error('查单出错', ['attempt_no' => $attempt->attempt_no, 'error' => $e->getMessage()]);
+                }
+            });
         }
+        $parallel->wait(false);
 
         return $attempts->count();
     }

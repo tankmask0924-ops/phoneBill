@@ -24,7 +24,7 @@ return [
         'read_timeout' => (float) env('REDIS_READ_TIMEOUT', 5.0),
         'pool' => [
             'min_connections' => 1,
-            'max_connections' => 10,
+            'max_connections' => (int) env('REDIS_MAX_CONNECTIONS', 32),
             'connect_timeout' => 10.0,
             'wait_timeout' => 3.0,
             'heartbeat' => -1,

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { recentDays } from '@/utils/date'
 import { usePagedList } from '@/utils/paged'
 import { onMounted, ref } from 'vue'
 import { type BalanceLog, balanceLogApi, merchantApi, type MerchantOption } from '@/api/merchant'
@@ -10,7 +11,7 @@ const list = usePagedList<BalanceLog, { merchant_id: number | ''; type: string; 
     const { dates, ...rest } = params as Record<string, unknown> & { dates?: [string, string] }
     return balanceLogApi.list(dates ? { ...rest, created_from: dates[0], created_to: dates[1] } : rest)
   },
-  { merchant_id: '', type: '', dates: null },
+  { merchant_id: '', type: '', dates: recentDays() },
   20,
 )
 const { rows, total, page, perPage, loading, filters } = list
@@ -41,7 +42,7 @@ onMounted(async () => {
           v-model="filters.dates"
           type="daterange"
           value-format="YYYY-MM-DD"
-          start-placeholder="开始日期"
+          start-placeholder="默认最近 7 天"
           end-placeholder="结束日期"
           style="width: 240px"
         />

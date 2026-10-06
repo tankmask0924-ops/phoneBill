@@ -135,4 +135,33 @@ npm run build        # 产物在 merchant-web/dist，部署在 /merchant/ 路径
 
 - `.env` 必须配置 `ADMIN_JWT_SECRET`、`MERCHANT_JWT_SECRET`（两个不要相同）、`APP_ENCRYPTION_KEY`（上线后不能更换），`DB_CHARSET=utf8mb4`
 - 部署在反向代理后面时配置 `TRUSTED_PROXIES`，操作日志才能记到真实 IP
-- 确认容器里有 `crontab-dispatcher` 和 `async-queue` 两个进程，否则定时任务和异步队列不执行
+- 确认容器里有 `crontab-dispatcher`、`async-queue`（默认 2 个）、`async-queue-notify` 这几个进程，否则定时任务和异步队列不执行
+- 部署后执行 `admin:sync-permissions`；这次加了登录态的 aud 校验，已登录的管理员需要重新登录一次
+
+## 容量与调优
+
+按每天几十万单（高峰每秒 30～50 单）设计，相关配置都在 `.env`：
+
+| 配置 | 默认 | 说明 |
+|---|---|---|
+| `QUEUE_PROCESSES` × `QUEUE_CONCURRENCY` | 2 × 50 | 同时在提交供应商的订单数。处理吞吐 ≈ 这个数 ÷ 供应商平均耗时（秒） |
+| `NOTIFY_QUEUE_CONCURRENCY` | 30 | 通知商户单独一个队列，商户接口慢不影响充值 |
+| `DB_MAX_CONNECTIONS` | 64 | 每个进程的连接池上限，必须 ≥ `QUEUE_CONCURRENCY`（提交任务等供应商时一直占着连接）；MySQL 的 `max_connections` 要大于各进程实际用到的总和 |
+| `REDIS_MAX_CONNECTIONS` | 32 | 每个进程的 Redis 连接池上限 |
+
+缓存（Redis，`c:` 前缀）：
+
+- 号段：按号段缓存 1 天，号段保存 / 删除时自动清；批量导入号段后调 `MobileSegmentService::flushAll()`
+- 商户（按 AppKey，不含余额）：5 分钟，商户保存时自动清
+- 商户的商品价格：5 分钟，平台商品增改 / 上下架、商户开通或改价后整体清掉
+
+订单、资金流水列表在没指定日期、也不是按单号 / 手机号精确查找时，默认只查最近 7 天；未完成的订单（含异常订单）不受这个限制。
+
+本地压测（MySQL 在局域网另一台机器，单次往返约 8 ms；模拟供应商每单耗时 1 秒）：
+
+| 场景 | 下单接口 | 订单处理 |
+|---|---|---|
+| 10 个商户，5000 单，100 并发 | 224 单/秒，p50 389 ms，p99 1.2 s，全部成功 | 50 单/秒，余额全部对得上 |
+| 1 个商户，3000 单，100 并发 | 36 单/秒（同一商户扣款要锁余额行，受数据库往返耗时限制） | 跟得上下单速度 |
+
+生产环境数据库在同机房时单次往返通常 0.2～0.5 ms，单个商户的扣款上限会高一个数量级。

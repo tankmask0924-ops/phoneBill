@@ -27,9 +27,11 @@ return [
             // 模拟预处理只走一个包，PHP 8.1+ 的 mysqlnd 在模拟模式下 int/float 仍返回原生类型，参数照样转义。
             PDO::ATTR_EMULATE_PREPARES => true,
         ],
+        // 每个进程一个连接池（HTTP worker、队列消费、定时任务各自独立）。
+        // 部署时 MySQL 的 max_connections 要大于「进程数 × DB_MAX_CONNECTIONS」的实际峰值，见 README。
         'pool' => [
             'min_connections' => 1,
-            'max_connections' => 10,
+            'max_connections' => (int) env('DB_MAX_CONNECTIONS', 64),
             'connect_timeout' => 10.0,
             'wait_timeout' => 3.0,
             'heartbeat' => -1,

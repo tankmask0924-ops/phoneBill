@@ -12,7 +12,10 @@ declare(strict_types=1);
 
 namespace App\Model;
 
+use App\Service\Merchant\MerchantLookupService;
 use Carbon\Carbon;
+use Hyperf\Context\ApplicationContext;
+use Hyperf\Database\Model\Events\Saved;
 
 /**
  * 商户。app_secret 是加密后的签名密钥；balance 只能通过 MerchantBalanceService 改。
@@ -54,5 +57,13 @@ class Merchant extends Model
     public function ipWhitelist(): array
     {
         return array_values(array_filter(array_map('trim', explode(',', (string) $this->ip_whitelist)), static fn ($ip) => $ip !== ''));
+    }
+
+    /**
+     * 资料、状态、密钥变了，清掉按 AppKey 的缓存（见 MerchantLookupService）。余额不在缓存里，用查询构造器改不会走到这里。
+     */
+    public function saved(Saved $event): void
+    {
+        ApplicationContext::getContainer()->get(MerchantLookupService::class)->forget($this->app_key);
     }
 }

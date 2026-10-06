@@ -12,12 +12,12 @@ declare(strict_types=1);
 
 namespace App\Middleware;
 
-use App\Dao\MerchantDao;
 use App\Exception\OpenApiException;
 use App\Network\ClientIpResolver;
 use App\Network\IpAddress;
 use App\Security\Encrypter;
 use App\Security\OpenApiSigner;
+use App\Service\Merchant\MerchantLookupService;
 use App\Support\RedisLock;
 use Hyperf\Contract\ConfigInterface;
 use Hyperf\Di\Annotation\Inject;
@@ -28,7 +28,7 @@ use Psr\Http\Server\RequestHandlerInterface;
 
 /**
  * 开放接口鉴权（商户系统调用）：app_key 找商户 → 商户启用 → IP 白名单 → timestamp 在有效期内
- * → 签名正确 → nonce 没用过（防重放）。通过后把 Merchant 放进 request attribute `merchant`，
+ * → 签名正确 → nonce 没用过（防重放）。通过后把 Merchant（来自缓存，没有余额）放进 request attribute `merchant`，
  * 参与验签的参数放进 `open_api_params`（控制器只用这份，保证用的参数就是验过签的）。
  *
  * 签名规则见 OpenApiSigner；参数来自 query 和 body（JSON 或表单）合并，值只能是标量。
@@ -36,7 +36,7 @@ use Psr\Http\Server\RequestHandlerInterface;
 class OpenApiAuthMiddleware implements MiddlewareInterface
 {
     #[Inject]
-    protected MerchantDao $merchantDao;
+    protected MerchantLookupService $merchantLookup;
 
     #[Inject]
     protected OpenApiSigner $signer;
@@ -73,7 +73,7 @@ class OpenApiAuthMiddleware implements MiddlewareInterface
             }
         }
 
-        $merchant = $this->merchantDao->findByAppKey((string) $params['app_key']);
+        $merchant = $this->merchantLookup->findByAppKey((string) $params['app_key']);
         if ($merchant === null) {
             throw new OpenApiException(OpenApiException::INVALID_APP_KEY, 'app_key 不存在');
         }

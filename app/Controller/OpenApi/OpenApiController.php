@@ -13,6 +13,7 @@ declare(strict_types=1);
 namespace App\Controller\OpenApi;
 
 use App\Controller\AbstractController;
+use App\Dao\MerchantDao;
 use App\Dao\OrderDao;
 use App\Exception\OpenApiException;
 use App\Middleware\OpenApiAuthMiddleware;
@@ -37,6 +38,9 @@ class OpenApiController extends AbstractController
 
     #[Inject]
     protected OrderDao $orderDao;
+
+    #[Inject]
+    protected MerchantDao $merchantDao;
 
     #[Inject]
     protected MerchantCatalogService $catalogService;
@@ -74,7 +78,8 @@ class OpenApiController extends AbstractController
     #[GetMapping(path: 'balance')]
     public function balance(): array
     {
-        return $this->ok(['balance' => $this->merchant()->balance]);
+        // 中间件里的商户来自缓存、不带余额，这里查最新的
+        return $this->ok(['balance' => $this->merchantDao->find($this->merchant()->id)?->balance]);
     }
 
     /**

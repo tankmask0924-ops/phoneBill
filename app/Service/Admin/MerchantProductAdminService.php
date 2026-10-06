@@ -20,6 +20,7 @@ use App\Enum\Operator;
 use App\Model\AdminUser;
 use App\Model\MerchantProduct;
 use App\Service\AbstractService;
+use App\Service\Merchant\MerchantPriceService;
 use Hyperf\DbConnection\Db;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpMessage\Exception\HttpException;
@@ -54,6 +55,9 @@ class MerchantProductAdminService extends AbstractService
 
     #[Inject]
     protected AdminOperationLogDao $operationLogDao;
+
+    #[Inject]
+    protected MerchantPriceService $priceService;
 
     /**
      * 商户已开通（含已关闭）的商品。
@@ -112,7 +116,7 @@ class MerchantProductAdminService extends AbstractService
         $status = array_key_exists('status', $data) ? $this->status($data['status']) : ($existing?->status ?? 'active');
         $prices = $this->validatePrices($data['prices'] ?? [], $product['operators']);
 
-        return Db::transaction(function () use ($operator, $merchantId, $productId, $existing, $status, $prices, $ip) {
+        $result = Db::transaction(function () use ($operator, $merchantId, $productId, $existing, $status, $prices, $ip) {
             $before = $existing ? $this->formatMany([$existing])[0] : null;
             if ($existing) {
                 $this->merchantProductDao->update($existing->id, ['status' => $status]);
@@ -135,6 +139,10 @@ class MerchantProductAdminService extends AbstractService
 
             return $after;
         });
+        // 事务提交后再清，避免并发下单把旧价格又写回缓存
+        $this->priceService->flush();
+
+        return $result;
     }
 
     /**

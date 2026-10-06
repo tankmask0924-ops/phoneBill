@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import StatusTag from '@/components/StatusTag.vue'
+import { recentDays } from '@/utils/date'
 import { usePagedList } from '@/utils/paged'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Download } from '@element-plus/icons-vue'
@@ -46,7 +47,8 @@ function toParams(params: Record<string, unknown>): Record<string, unknown> {
 
 const list = usePagedList<Order, Filters>(
   (params) => orderApi.list(toParams(params)),
-  { keyword: '', mobile: '', merchant_id: '', supplier_id: '', status: '', operator: '', province: '', dates: null },
+  // 异常订单页不限时间：异常订单不管多久都要处理
+  { keyword: '', mobile: '', merchant_id: '', supplier_id: '', status: '', operator: '', province: '', dates: props.abnormal ? null : recentDays() },
   20,
 )
 const { rows, total, page, perPage, loading, filters } = list
@@ -190,7 +192,7 @@ onMounted(async () => {
           v-model="filters.dates"
           type="daterange"
           value-format="YYYY-MM-DD"
-          start-placeholder="下单开始"
+          :start-placeholder="props.abnormal ? '下单开始' : '默认最近 7 天'"
           end-placeholder="下单结束"
           style="width: 240px"
         />

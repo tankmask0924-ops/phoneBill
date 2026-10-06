@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { recentDays } from '@/utils/date'
 import { usePagedList } from '@/utils/paged'
 import { onMounted } from 'vue'
 import { type BalanceLog, portalApi } from '@/api/portal'
@@ -9,7 +10,7 @@ const list = usePagedList<BalanceLog, { type: string; dates: [string, string] | 
     const { dates, ...rest } = params as Record<string, unknown> & { dates?: [string, string] }
     return portalApi.balanceLogs(dates ? { ...rest, created_from: dates[0], created_to: dates[1] } : rest)
   },
-  { type: '', dates: null },
+  { type: '', dates: recentDays() },
   20,
 )
 const { rows, total, page, perPage, loading, filters } = list
@@ -30,7 +31,7 @@ onMounted(list.load)
           v-model="filters.dates"
           type="daterange"
           value-format="YYYY-MM-DD"
-          start-placeholder="开始日期"
+          start-placeholder="默认最近 7 天"
           end-placeholder="结束日期"
           style="width: 240px"
         />

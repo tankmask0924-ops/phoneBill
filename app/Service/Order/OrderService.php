@@ -12,11 +12,8 @@ declare(strict_types=1);
 
 namespace App\Service\Order;
 
-use App\Dao\MerchantProductDao;
-use App\Dao\MerchantProductPriceDao;
 use App\Dao\MobileBlacklistDao;
 use App\Dao\OrderDao;
-use App\Dao\ProductDao;
 use App\Exception\InsufficientBalanceException;
 use App\Exception\OpenApiException;
 use App\Model\Merchant;
@@ -24,6 +21,7 @@ use App\Model\MerchantBalanceLog;
 use App\Model\Order;
 use App\Service\AbstractService;
 use App\Service\Merchant\MerchantBalanceService;
+use App\Service\Merchant\MerchantPriceService;
 use App\Service\Mobile\MobileSegmentService;
 use App\Service\Product\ProductRouteService;
 use App\Support\RedisLock;
@@ -46,13 +44,7 @@ class OrderService extends AbstractService
     protected OrderDao $orderDao;
 
     #[Inject]
-    protected ProductDao $productDao;
-
-    #[Inject]
-    protected MerchantProductDao $merchantProductDao;
-
-    #[Inject]
-    protected MerchantProductPriceDao $merchantPriceDao;
+    protected MerchantPriceService $priceService;
 
     #[Inject]
     protected MobileBlacklistDao $blacklistDao;
@@ -71,6 +63,9 @@ class OrderService extends AbstractService
 
     #[Inject]
     protected RedisLock $lock;
+
+    #[Inject]
+    protected OrderNoGenerator $orderNoGenerator;
 
     #[Inject]
     protected ConfigInterface $config;
@@ -98,9 +93,9 @@ class OrderService extends AbstractService
             throw new OpenApiException(OpenApiException::INVALID_PARAMS, 'notify_url 必须是 http:// 或 https:// 开头的网址');
         }
 
-        $product = $this->productDao->newQuery()->where('code', $this->string($params, 'product_code'))->first();
-        $opened = $product === null ? null : $this->merchantProductDao->findFor($merchant->id, $product->id);
-        if ($product === null || $product->status !== 'active' || $opened === null || $opened->status !== 'active') {
+        $productCode = $this->string($params, 'product_code');
+        $quote = preg_match('/^[A-Za-z0-9_-]{1,32}$/', $productCode) === 1 ? $this->priceService->quote($merchant->id, $productCode) : null;
+        if ($quote === null || ! $quote['product_active'] || ! $quote['opened_active']) {
             throw new OpenApiException(OpenApiException::PRODUCT_NOT_AVAILABLE, '商品不存在、已下架或没有为你开通');
         }
         if ($this->blacklistDao->contains($mobile)) {
@@ -110,17 +105,18 @@ class OrderService extends AbstractService
         if ($segment === null || $segment->is_virtual) {
             throw new OpenApiException(OpenApiException::UNSUPPORTED_MOBILE, $segment === null ? '无法识别该号码的运营商' : '暂不支持虚拟运营商号码');
         }
-        $price = $this->merchantPriceDao->priceFor($opened->id, $segment->operator);
+        $price = $quote['prices'][$segment->operator] ?? null;
         if ($price === null) {
             throw new OpenApiException(OpenApiException::PRICE_NOT_SET, '该商品暂不支持这个号码的运营商');
         }
-        $candidates = $this->productRouteService->candidates([$product->id], $segment->operator, $segment->province)[$product->id] ?? [];
+        $productId = $quote['product_id'];
+        $candidates = $this->productRouteService->candidates([$productId], $segment->operator, $segment->province)[$productId] ?? [];
         if ($candidates === []) {
             throw new OpenApiException(OpenApiException::NO_CHANNEL, '该号码所在地区暂时无法充值');
         }
 
         // 同一号码同一面值串行处理，防止并发请求同时通过「重复充值」检查
-        $lockKey = "order:mobile:{$mobile}:{$product->face_value}";
+        $lockKey = "order:mobile:{$mobile}:{$quote['face_value']}";
         $token = $this->lock->acquire($lockKey, 10);
         if ($token === null) {
             throw new OpenApiException(OpenApiException::DUPLICATE_RECHARGE, '该号码有正在处理的同面值订单');
@@ -128,31 +124,22 @@ class OrderService extends AbstractService
         try {
             $windowMinutes = (int) $this->config->get('order.duplicate_window_minutes', 10);
             $since = date('Y-m-d H:i:s', time() - $windowMinutes * 60);
-            if ($this->orderDao->hasRecent($mobile, $product->face_value, $since, self::IN_PROGRESS)) {
+            if ($this->orderDao->hasRecent($mobile, $quote['face_value'], $since, self::IN_PROGRESS)) {
                 throw new OpenApiException(OpenApiException::DUPLICATE_RECHARGE, "该号码 {$windowMinutes} 分钟内有正在处理的同面值订单");
             }
 
-            $order = Db::transaction(function () use ($merchant, $merchantOrderNo, $product, $mobile, $segment, $price, $notifyUrl) {
-                $order = $this->orderDao->create([
-                    'order_no' => $this->newOrderNo(),
-                    'merchant_id' => $merchant->id,
-                    'merchant_order_no' => $merchantOrderNo,
-                    'product_id' => $product->id,
-                    'product_code' => $product->code,
-                    'product_name' => $product->name,
-                    'mobile' => $mobile,
-                    'operator' => $segment->operator,
-                    'province' => $segment->province,
-                    'face_value' => $product->face_value,
-                    'sale_price' => $price,
-                    'status' => Order::STATUS_PENDING,
-                    'notify_url' => $notifyUrl === '' ? null : $notifyUrl,
-                    'notify_status' => Order::NOTIFY_NONE,
-                ]);
-                $this->balanceService->change($merchant->id, MerchantBalanceLog::TYPE_ORDER_PAY, bcmul($price, '-1', 2), $order->id, '下单扣款');
-
-                return $order;
-            });
+            $order = null;
+            for ($try = 1; $order === null; ++$try) {
+                try {
+                    $order = $this->createAndCharge($merchant, $merchantOrderNo, $quote, $mobile, $segment->operator, $segment->province, $price, $notifyUrl);
+                } catch (QueryException $e) {
+                    // 平台订单号撞了（同一秒随机数相同）：换一个号重试
+                    if ($try < 3 && str_contains($e->getMessage(), 'orders_order_no_unique')) {
+                        continue;
+                    }
+                    throw $e;
+                }
+            }
         } catch (InsufficientBalanceException $e) {
             throw new OpenApiException(OpenApiException::INSUFFICIENT_BALANCE, "余额不足：当前 {$e->balance} 元，需要 {$e->required} 元");
         } catch (QueryException $e) {
@@ -195,11 +182,33 @@ class OrderService extends AbstractService
     }
 
     /**
-     * 20 位：14 位时间 + 6 位随机数。
+     * 建单和扣款在同一个事务里：余额不够整单回滚。
+     *
+     * @param array<string, mixed> $quote MerchantPriceService::quote()
      */
-    private function newOrderNo(): string
+    private function createAndCharge(Merchant $merchant, string $merchantOrderNo, array $quote, string $mobile, string $operator, string $province, string $price, string $notifyUrl): Order
     {
-        return date('YmdHis') . str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+        return Db::transaction(function () use ($merchant, $merchantOrderNo, $quote, $mobile, $operator, $province, $price, $notifyUrl) {
+            $order = $this->orderDao->create([
+                'order_no' => $this->orderNoGenerator->next(),
+                'merchant_id' => $merchant->id,
+                'merchant_order_no' => $merchantOrderNo,
+                'product_id' => $quote['product_id'],
+                'product_code' => $quote['product_code'],
+                'product_name' => $quote['product_name'],
+                'mobile' => $mobile,
+                'operator' => $operator,
+                'province' => $province,
+                'face_value' => $quote['face_value'],
+                'sale_price' => $price,
+                'status' => Order::STATUS_PENDING,
+                'notify_url' => $notifyUrl === '' ? null : $notifyUrl,
+                'notify_status' => Order::NOTIFY_NONE,
+            ]);
+            $this->balanceService->change($merchant->id, MerchantBalanceLog::TYPE_ORDER_PAY, bcmul($price, '-1', 2), $order->id, '下单扣款');
+
+            return $order;
+        });
     }
 
     /**

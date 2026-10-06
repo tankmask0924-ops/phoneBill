@@ -19,6 +19,7 @@ use App\Supplier\RechargeStatus;
 use App\Supplier\SupplierDriverInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use RuntimeException;
+use Swoole\Coroutine;
 
 /**
  * 模拟供应商，开发和测试用，不发任何外部请求。
@@ -51,6 +52,7 @@ class MockDriver implements SupplierDriverInterface
                     ['value' => 'failed', 'label' => '失败'],
                     ['value' => 'processing', 'label' => '一直处理中（等回调）'],
                     ['value' => 'timeout', 'label' => '超时'],
+                    ['value' => 'slow', 'label' => '1 秒后成功（压测用，模拟真实供应商耗时）'],
                 ],
             ],
             ['key' => 'api_url', 'label' => '接口地址', 'type' => 'text', 'required' => false],
@@ -66,6 +68,7 @@ class MockDriver implements SupplierDriverInterface
             'failed' => RechargeResult::failed('模拟失败', null, $raw, '{"code":"FAIL"}'),
             'processing' => RechargeResult::processing('MOCK' . $request->attemptNo, '已受理', $raw, '{"code":"ACCEPTED"}'),
             'timeout' => throw new RuntimeException('模拟超时'),
+            'slow' => $this->slowSuccess($request, $raw),
             default => RechargeResult::success('MOCK' . $request->attemptNo, null, $raw, '{"code":"SUCCESS"}'),
         };
     }
@@ -74,7 +77,7 @@ class MockDriver implements SupplierDriverInterface
     {
         return match ($request->config['result'] ?? 'success') {
             'failed' => RechargeResult::failed('模拟失败', $request->supplierOrderNo),
-            'success' => RechargeResult::success($request->supplierOrderNo),
+            'success', 'slow' => RechargeResult::success($request->supplierOrderNo),
             default => RechargeResult::processing($request->supplierOrderNo),
         };
     }
@@ -94,5 +97,15 @@ class MockDriver implements SupplierDriverInterface
     public function balance(array $config): ?string
     {
         return '99999.00';
+    }
+
+    /**
+     * 协程里 sleep 不占 CPU，正好模拟等供应商接口返回。
+     */
+    private function slowSuccess(RechargeRequest $request, string $raw): RechargeResult
+    {
+        Coroutine::sleep(1.0);
+
+        return RechargeResult::success('MOCK' . $request->attemptNo, null, $raw, '{"code":"SUCCESS"}');
     }
 }

@@ -21,6 +21,7 @@ use App\Model\AdminUser;
 use App\Model\Product;
 use App\Model\ProductRoute;
 use App\Service\AbstractService;
+use App\Service\Merchant\MerchantPriceService;
 use Hyperf\DbConnection\Db;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpMessage\Exception\HttpException;
@@ -57,6 +58,9 @@ class ProductAdminService extends AbstractService
 
     #[Inject]
     protected AdminOperationLogDao $operationLogDao;
+
+    #[Inject]
+    protected MerchantPriceService $priceService;
 
     /**
      * @param array<string, mixed> $query keyword / face_value / status
@@ -116,7 +120,7 @@ class ProductAdminService extends AbstractService
         [$routes, $covered] = $this->validateRoutes($data['routes'] ?? [], $faceValue);
         $prices = $this->validatePrices($data['prices'] ?? [], $covered);
 
-        return Db::transaction(function () use ($operator, $code, $name, $faceValue, $routes, $prices, $data, $ip) {
+        $result = Db::transaction(function () use ($operator, $code, $name, $faceValue, $routes, $prices, $data, $ip) {
             $product = $this->productDao->create([
                 'code' => $code,
                 'name' => $name,
@@ -131,6 +135,10 @@ class ProductAdminService extends AbstractService
 
             return $after;
         });
+        // 有商户可能在建好之前就用这个编码下过单，缓存了「不存在」
+        $this->priceService->flush();
+
+        return $result;
     }
 
     /**
@@ -149,7 +157,7 @@ class ProductAdminService extends AbstractService
             throw new HttpException(422, '面值建好后不能修改，需要的话新建一个商品');
         }
 
-        return Db::transaction(function () use ($operator, $product, $data, $ip) {
+        $result = Db::transaction(function () use ($operator, $product, $data, $ip) {
             $before = $this->formatMany([$product])[0];
             $attrs = [];
             if (array_key_exists('name', $data)) {
@@ -179,6 +187,9 @@ class ProductAdminService extends AbstractService
 
             return $after;
         });
+        $this->priceService->flush();
+
+        return $result;
     }
 
     /**
@@ -202,6 +213,7 @@ class ProductAdminService extends AbstractService
                 ['status' => $status],
                 $ip
             );
+            $this->priceService->flush();
             $product = $this->findOrFail($product->id);
         }
 

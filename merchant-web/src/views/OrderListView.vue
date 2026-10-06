@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import StatusTag from '@/components/StatusTag.vue'
+import { recentDays } from '@/utils/date'
 import { usePagedList } from '@/utils/paged'
 import { onMounted, ref } from 'vue'
 import { type Order, type OrderDetail, portalApi } from '@/api/portal'
@@ -11,7 +12,7 @@ const list = usePagedList<Order, { keyword: string; mobile: string; status: stri
     const { dates, ...rest } = params as Record<string, unknown> & { dates?: [string, string] }
     return portalApi.orders(dates ? { ...rest, created_from: dates[0], created_to: dates[1] } : rest)
   },
-  { keyword: '', mobile: '', status: '', dates: null },
+  { keyword: '', mobile: '', status: '', dates: recentDays() },
   20,
 )
 const { rows, total, page, perPage, loading, filters } = list
@@ -47,7 +48,7 @@ onMounted(list.load)
           v-model="filters.dates"
           type="daterange"
           value-format="YYYY-MM-DD"
-          start-placeholder="下单开始"
+          start-placeholder="默认最近 7 天"
           end-placeholder="下单结束"
           style="width: 240px"
         />

@@ -18,9 +18,9 @@ use App\Model\Merchant;
 use App\Model\MerchantBalanceLog;
 use App\Model\Order;
 use App\Service\AbstractService;
+use App\Service\FiltersByDateRange;
 use App\Service\Merchant\MerchantCatalogService;
 use App\Service\Order\OrderService;
-use Hyperf\Database\Model\Builder;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpMessage\Exception\HttpException;
 
@@ -32,6 +32,8 @@ use Hyperf\HttpMessage\Exception\HttpException;
  */
 class MerchantPortalService extends AbstractService
 {
+    use FiltersByDateRange;
+
     private const MAX_PER_PAGE = 100;
 
     /** 商户看到的状态 → 实际的订单状态 */
@@ -103,7 +105,7 @@ class MerchantPortalService extends AbstractService
         if (is_string($query['status'] ?? null) && isset(self::STATUS_FILTER[$query['status']])) {
             $builder->whereIn('status', self::STATUS_FILTER[$query['status']]);
         }
-        $this->dateRange($builder, $query);
+        $this->applyDateRange($builder, $query, $keyword !== '' || $mobile !== '');
 
         $total = (clone $builder)->count();
         $orders = $builder->orderByDesc('id')->forPage($page, $perPage)->get();
@@ -150,7 +152,7 @@ class MerchantPortalService extends AbstractService
         if (in_array($query['type'] ?? null, self::BALANCE_TYPES, true)) {
             $builder->where('type', $query['type']);
         }
-        $this->dateRange($builder, $query);
+        $this->applyDateRange($builder, $query);
 
         $total = (clone $builder)->count();
         $logs = $builder->orderByDesc('id')->forPage($page, $perPage)->get();
@@ -201,17 +203,5 @@ class MerchantPortalService extends AbstractService
     private function presentOrder(Order $order): array
     {
         return ['id' => $order->id, 'product_name' => $order->product_name, 'province' => $order->province] + $this->orderService->present($order);
-    }
-
-    /**
-     * @param array<string, mixed> $query
-     */
-    private function dateRange(Builder $builder, array $query): void
-    {
-        foreach (['created_from' => ['>=', ' 00:00:00'], 'created_to' => ['<=', ' 23:59:59']] as $field => [$op, $time]) {
-            if (is_string($query[$field] ?? null) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $query[$field])) {
-                $builder->where('created_at', $op, $query[$field] . $time);
-            }
-        }
     }
 }

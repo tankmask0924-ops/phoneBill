@@ -28,6 +28,7 @@ use App\Model\Order;
 use App\Model\OrderAttempt;
 use App\Model\OrderNotifyLog;
 use App\Service\AbstractService;
+use App\Service\FiltersByDateRange;
 use App\Service\Order\OrderDispatcher;
 use App\Service\Order\OrderProcessService;
 use Hyperf\Database\Model\Builder;
@@ -42,6 +43,7 @@ use Hyperf\HttpMessage\Exception\HttpException;
  */
 class OrderAdminService extends AbstractService
 {
+    use FiltersByDateRange;
     use ValidatesAdminInput;
 
     private const MODULE = 'order';
@@ -297,6 +299,8 @@ class OrderAdminService extends AbstractService
     }
 
     /**
+     * 没传日期、也不是按单号 / 手机号 / 未完成状态查时，默认最近 7 天（见 FiltersByDateRange）。
+     *
      * @param array<string, mixed> $query merchant_id / supplier_id / status / operator / province / keyword（平台或商户订单号）/ mobile / created_from / created_to
      */
     private function filtered(array $query): Builder
@@ -324,11 +328,9 @@ class OrderAdminService extends AbstractService
         if ($mobile !== '') {
             $builder->where('mobile', $mobile);
         }
-        foreach (['created_from' => ['>=', ' 00:00:00'], 'created_to' => ['<=', ' 23:59:59']] as $field => [$op, $time]) {
-            if (is_string($query[$field] ?? null) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $query[$field])) {
-                $builder->where('created_at', $op, $query[$field] . $time);
-            }
-        }
+        // 未完成的订单（尤其是异常订单）不管多久都要能看到，数量也少，不加默认时间范围
+        $unfinished = in_array($query['status'] ?? null, [Order::STATUS_PENDING, Order::STATUS_PROCESSING, Order::STATUS_ABNORMAL], true);
+        $this->applyDateRange($builder, $query, $keyword !== '' || $mobile !== '' || $unfinished);
 
         return $builder;
     }

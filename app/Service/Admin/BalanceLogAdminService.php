@@ -18,6 +18,7 @@ use App\Dao\MerchantDao;
 use App\Dao\OrderDao;
 use App\Model\MerchantBalanceLog;
 use App\Service\AbstractService;
+use App\Service\FiltersByDateRange;
 use Hyperf\Di\Annotation\Inject;
 
 /**
@@ -25,6 +26,8 @@ use Hyperf\Di\Annotation\Inject;
  */
 class BalanceLogAdminService extends AbstractService
 {
+    use FiltersByDateRange;
+
     private const MAX_PER_PAGE = 100;
 
     private const TYPES = [
@@ -56,6 +59,7 @@ class BalanceLogAdminService extends AbstractService
         $perPage = min(self::MAX_PER_PAGE, max(1, (int) ($query['per_page'] ?? 20)));
 
         $builder = $this->balanceLogDao->newQuery();
+        $exactSearch = (isset($query['order_id']) && is_numeric($query['order_id'])) || (is_string($query['order_no'] ?? null) && $query['order_no'] !== '');
         if (is_string($query['order_no'] ?? null) && $query['order_no'] !== '') {
             $builder->where('order_id', $this->orderDao->findByOrderNo($query['order_no'])?->id ?? 0);
         }
@@ -67,11 +71,7 @@ class BalanceLogAdminService extends AbstractService
         if (in_array($query['type'] ?? null, self::TYPES, true)) {
             $builder->where('type', $query['type']);
         }
-        foreach (['created_from' => ['>=', ' 00:00:00'], 'created_to' => ['<=', ' 23:59:59']] as $field => [$op, $time]) {
-            if (is_string($query[$field] ?? null) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $query[$field])) {
-                $builder->where('created_at', $op, $query[$field] . $time);
-            }
-        }
+        $this->applyDateRange($builder, $query, $exactSearch);
 
         $total = (clone $builder)->count();
         $logs = $builder->orderByDesc('id')->forPage($page, $perPage)->get();

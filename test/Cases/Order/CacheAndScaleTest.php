@@ -1,0 +1,164 @@
+<?php
+
+declare(strict_types=1);
+/**
+ * This file is part of Hyperf.
+ *
+ * @link     https://www.hyperf.io
+ * @document https://hyperf.wiki
+ * @contact  group@hyperf.io
+ * @license  https://github.com/hyperf/hyperf/blob/master/LICENSE
+ */
+
+namespace HyperfTest\Cases\Order;
+
+use App\Model\MerchantBalanceLog;
+use App\Model\MobileSegment;
+use App\Model\Order;
+use App\Network\HttpClient;
+use App\Service\Admin\MerchantProductAdminService;
+use App\Service\Mobile\MobileSegmentService;
+use App\Service\Order\OrderDispatcher;
+use App\Service\Order\OrderNoGenerator;
+use App\Service\Order\OrderService;
+use Hyperf\Context\ApplicationContext;
+use Hyperf\Contract\ApplicationInterface;
+use Hyperf\Di\Container;
+use Hyperf\Di\Definition\DefinitionSourceFactory;
+use Hyperf\Testing\Client;
+use HyperfTest\Cases\Admin\CreatesAdmins;
+use HyperfTest\Cases\Admin\CreatesCatalog;
+use HyperfTest\HttpTestCase;
+use HyperfTest\Support\FakeHttpClient;
+use HyperfTest\Support\FakeOrderDispatcher;
+
+use function Hyperf\Support\make;
+
+/**
+ * 缓存一改就失效（号段、商户、商户价格）、订单号撞号重试，以及大表列表默认只查最近 7 天。
+ *
+ * @internal
+ * @coversNothing
+ */
+class CacheAndScaleTest extends HttpTestCase
+{
+    use CreatesAdmins;
+    use CreatesCatalog;
+
+    private const PASSWORD = 'correct-password';
+
+    protected function setUp(): void
+    {
+        ApplicationContext::setContainer(new Container((new DefinitionSourceFactory())()));
+        ApplicationContext::getContainer()->get(ApplicationInterface::class);
+        ApplicationContext::getContainer()->set(OrderDispatcher::class, new FakeOrderDispatcher());
+        ApplicationContext::getContainer()->set(HttpClient::class, new FakeHttpClient());
+        $this->client = make(Client::class);
+    }
+
+    protected function tearDown(): void
+    {
+        $this->cleanUpCatalog();
+        $this->cleanUpAdmins();
+        parent::tearDown();
+    }
+
+    public function testSegmentCacheIsClearedWhenSegmentChanges()
+    {
+        $service = make(MobileSegmentService::class);
+        do {
+            $segment = '100' . str_pad((string) random_int(0, 9999), 4, '0', STR_PAD_LEFT);
+        } while (MobileSegment::where('segment', $segment)->exists());
+
+        $this->assertNull($service->identify($segment . '0000'), '查不到也会缓存');
+        $row = MobileSegment::create(['segment' => $segment, 'operator' => 'cmcc', 'province' => '广东', 'is_virtual' => false]);
+        $this->segmentIds[] = $row->id;
+        $this->assertSame('广东', $service->identify($segment . '0000')?->province, '新增号段后立即能查到');
+
+        $row->update(['province' => '湖南']);
+        $this->assertSame('湖南', $service->identify($segment . '0000')->province);
+        $this->assertFalse($service->identify($segment . '0000')->is_virtual);
+    }
+
+    public function testPriceChangeAppliesToTheNextOrder()
+    {
+        $sp = $this->createSupplierProduct($this->createSupplier(), ['cmcc'], 100, '98.00');
+        $product = $this->createProduct([$sp->id => 1]);
+        $merchant = $this->createMerchant('500.00');
+        $this->openProduct($merchant, $product, ['cmcc' => '99.50']);
+        $orders = make(OrderService::class);
+
+        $first = $orders->create($merchant, ['product_code' => $product->code, 'mobile' => $this->createSegment('cmcc', '广东'), 'merchant_order_no' => 'P1']);
+        $this->assertSame('99.50', $first->sale_price);
+
+        // 后台改价：事务提交后清缓存，下一单立即按新价格
+        make(MerchantProductAdminService::class)->save($this->createSuperAdmin(), $merchant->id, $product->id, ['prices' => ['cmcc' => '99.80']], null);
+        $second = $orders->create($merchant, ['product_code' => $product->code, 'mobile' => $this->createSegment('cmcc', '广东'), 'merchant_order_no' => 'P2']);
+        $this->assertSame('99.80', $second->sale_price);
+    }
+
+    public function testOrderNoCollisionIsRetriedWithANewNumber()
+    {
+        $sp = $this->createSupplierProduct($this->createSupplier(), ['cmcc'], 100, '98.00');
+        $product = $this->createProduct([$sp->id => 1]);
+        $merchant = $this->createMerchant('500.00');
+        $this->openProduct($merchant, $product, ['cmcc' => '99.50']);
+        $taken = $this->order($merchant->id, $product->id, Order::STATUS_SUCCESS, 0)->order_no;
+        $fresh = date('YmdHis') . '99999999';
+
+        // 第一次给出已经被占用的单号，第二次给新号
+        ApplicationContext::getContainer()->set(OrderNoGenerator::class, new class([$taken, $fresh]) extends OrderNoGenerator {
+            public function __construct(private array $numbers)
+            {
+            }
+
+            public function next(): string
+            {
+                return array_shift($this->numbers);
+            }
+        });
+        $order = make(OrderService::class)->create($merchant, ['product_code' => $product->code, 'mobile' => $this->createSegment('cmcc', '广东'), 'merchant_order_no' => 'C1']);
+
+        $this->assertSame($fresh, $order->order_no);
+        $this->assertSame(1, MerchantBalanceLog::where('order_id', $order->id)->count(), '只扣了一次款');
+    }
+
+    public function testListsDefaultToRecentSevenDays()
+    {
+        $token = $this->loginAs($this->createAdminWithPermissions(['order.view', 'merchant.view']));
+        $sp = $this->createSupplierProduct($this->createSupplier(), ['cmcc'], 100, '98.00');
+        $product = $this->createProduct([$sp->id => 1]);
+        $merchant = $this->createMerchant('500.00');
+        $recent = $this->order($merchant->id, $product->id, Order::STATUS_SUCCESS, 0);
+        $old = $this->order($merchant->id, $product->id, Order::STATUS_SUCCESS, 10);
+        $oldAbnormal = $this->order($merchant->id, $product->id, Order::STATUS_ABNORMAL, 10);
+
+        $ids = fn (string $query) => array_column($this->body($this->jsonRequest('GET', "/admin/orders?merchant_id={$merchant->id}{$query}", $token))['data'], 'id');
+        $this->assertSame([$recent->id], $ids(''), '默认只看最近 7 天');
+        $this->assertContains($old->id, $ids('&created_from=' . date('Y-m-d', strtotime('-30 days'))), '指定日期能看到更早的');
+        $this->assertSame([$old->id], $ids('&keyword=' . $old->order_no), '按单号精确查不限时间');
+        $this->assertSame([$oldAbnormal->id], $ids('&status=abnormal'), '异常订单不限时间');
+    }
+
+    private function order(int $merchantId, int $productId, string $status, int $daysAgo): Order
+    {
+        $order = Order::create([
+            'order_no' => date('YmdHis') . random_int(100000, 999999),
+            'merchant_id' => $merchantId,
+            'merchant_order_no' => $this->uniq('M'),
+            'product_id' => $productId,
+            'product_code' => 'P',
+            'product_name' => '话费100',
+            'mobile' => '1009' . random_int(1000000, 9999999),
+            'operator' => 'cmcc',
+            'province' => '广东',
+            'face_value' => 100,
+            'sale_price' => '99.50',
+            'status' => $status,
+            'notify_status' => 'none',
+        ]);
+        Order::where('id', $order->id)->update(['created_at' => date('Y-m-d H:i:s', strtotime("-{$daysAgo} days"))]);
+
+        return $order;
+    }
+}
