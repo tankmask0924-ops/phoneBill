@@ -1,0 +1,20 @@
+services:
+  phone-bill:
+    container_name: pb
+    image: phone-bill
+    build:
+      dockerfile: dev.Dockerfile
+      args:
+        UID: 1000
+        GID: 1000
+    volumes:
+      - ./:/opt/www
+    ports:
+      - 9502:9501
+    environment:
+      - APP_ENV=dev
+      - SCAN_CACHEABLE=false
+
+networks:
+  default:
+    name: phone-bill
