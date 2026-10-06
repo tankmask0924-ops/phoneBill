@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import StatusTag from '@/components/StatusTag.vue'
+import { formatDuration } from '@/utils/date'
 import { usePagedList } from '@/utils/paged'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { Plus, WarningFilled } from '@element-plus/icons-vue'
@@ -238,6 +239,14 @@ onMounted(async () => {
       </el-table-column>
       <el-table-column label="绑定" width="70" align="center">
         <template #default="{ row }">{{ row.routes.length }}</template>
+      </el-table-column>
+      <el-table-column label="昨日成功率" width="100" align="right">
+        <template #default="{ row }">
+          {{ row.yesterday_stats?.success_rate != null ? `${row.yesterday_stats.success_rate}%` : '-' }}
+        </template>
+      </el-table-column>
+      <el-table-column label="昨日平均耗时" width="110" align="right">
+        <template #default="{ row }">{{ formatDuration(row.yesterday_stats?.avg_duration) }}</template>
       </el-table-column>
       <el-table-column label="状态" width="80">
         <template #default="{ row }"><StatusTag :map="shelfStatusLabels" :value="row.status" /></template>

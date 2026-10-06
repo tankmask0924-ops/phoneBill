@@ -13,6 +13,7 @@ declare(strict_types=1);
 namespace App\Service\Admin;
 
 use App\Dao\AdminOperationLogDao;
+use App\Dao\ProductDailyStatDao;
 use App\Dao\ProductDao;
 use App\Dao\ProductPriceDao;
 use App\Dao\ProductRouteDao;
@@ -44,6 +45,9 @@ class ProductAdminService extends AbstractService
     private const MAX_PER_PAGE = 100;
 
     private const DEFAULT_PRIORITY = 10;
+
+    #[Inject]
+    protected ProductDailyStatDao $statDao;
 
     #[Inject]
     protected ProductDao $productDao;
@@ -327,8 +331,9 @@ class ProductAdminService extends AbstractService
             }
         }
         $described = $this->supplierProductAdminService->describe(array_values(array_unique($supplierProductIds)));
+        $yesterday = $this->statDao->dayTotals($ids, date('Y-m-d', strtotime('-1 day')));
 
-        return array_map(function (Product $p) use ($routesByProduct, $pricesByProduct, $described) {
+        return array_map(function (Product $p) use ($routesByProduct, $pricesByProduct, $described, $yesterday) {
             $routes = array_map(static fn (ProductRoute $r) => [
                 'supplier_product_id' => $r->supplier_product_id,
                 'priority' => $r->priority,
@@ -351,6 +356,10 @@ class ProductAdminService extends AbstractService
                 'prices' => $prices,
                 'routes' => $routes,
                 'warnings' => $this->warnings($routes, $prices),
+                // 昨天各运营商合起来的成功率、平均耗时，没有订单时为 null，明细看商品统计
+                'yesterday_stats' => isset($yesterday[$p->id])
+                    ? ProductStatsAdminService::summarize($yesterday[$p->id]['order_count'], $yesterday[$p->id]['success_count'], $yesterday[$p->id]['failed_count'], $yesterday[$p->id]['total_duration'])
+                    : null,
                 'created_at' => $p->created_at?->toDateTimeString(),
                 'updated_at' => $p->updated_at?->toDateTimeString(),
             ];

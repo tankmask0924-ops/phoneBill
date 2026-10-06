@@ -64,6 +64,12 @@ docker exec pb php bin/hyperf.php segment:import docs/recharge_phone_prefix_info
 docker exec pb php bin/hyperf.php segment:import docs/recharge_phone_prefix_info.sql             # 按号段覆盖写入，可重复执行
 ```
 
+商品每日统计（成功率、耗时）每天 3 点自动算前一天；人工处理完异常订单、或补历史数据时重算：
+
+```bash
+docker exec pb php bin/hyperf.php stats:product-daily 2026-10-05 --days=7   # 2026-09-29 到 2026-10-05，覆盖原结果
+```
+
 新增 `#[RequiresPermission('xxx.yyy')]` 后，把编码加进 `App\Service\Admin\AdminBootstrapService::KNOWN_PERMISSIONS`，
 部署后执行 `docker exec pb php bin/hyperf.php admin:sync-permissions`，超级管理员才能拿到新权限。
 
@@ -119,7 +125,7 @@ npm run build        # 产物在 merchant-web/dist，部署在 /merchant/ 路径
 | POST/PUT | `/admin/suppliers`、`/{id}`、`/{id}/status` | `supplier.manage` |
 | GET | `/admin/supplier-products`、`/admin/supplier-products/supplier-options` | `supplier_product.view` |
 | POST/PUT | `/admin/supplier-products`、`/{id}`、`/{id}/status` | `supplier_product.manage` |
-| GET | `/admin/products`、`/admin/products/supplier-product-options` | `product.view` |
+| GET | `/admin/products`、`/admin/products/supplier-product-options`、`/admin/product-stats` | `product.view` |
 | POST/PUT | `/admin/products`、`/{id}`、`/{id}/status` | `product.manage` |
 | GET | `/admin/segments/lookup` | `risk.view` |
 | GET | `/admin/risk/blacklist`、`/admin/risk/maintenances`、`/admin/risk/maintenances/options` | `risk.view` |

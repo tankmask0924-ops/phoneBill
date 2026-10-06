@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import StatusTag from '@/components/StatusTag.vue'
-import { recentDays } from '@/utils/date'
+import { formatDuration, recentDays } from '@/utils/date'
 import { usePagedList } from '@/utils/paged'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Download } from '@element-plus/icons-vue'
@@ -223,6 +223,9 @@ onMounted(async () => {
         <template #default="{ row }"><StatusTag :map="orderStatusLabels" :value="row.status" /></template>
       </el-table-column>
       <el-table-column prop="created_at" label="下单时间" width="170" />
+      <el-table-column label="耗时" width="100" align="right">
+        <template #default="{ row }">{{ formatDuration(row.duration) }}</template>
+      </el-table-column>
       <el-table-column label="操作" width="80" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" @click="openDetail(row as Order)">详情</el-button>
@@ -268,6 +271,7 @@ onMounted(async () => {
           <el-descriptions-item label="成本">{{ detail.cost_price ?? '-' }}</el-descriptions-item>
           <el-descriptions-item label="下单时间">{{ detail.created_at }}</el-descriptions-item>
           <el-descriptions-item label="完成时间">{{ detail.finished_at ?? '-' }}</el-descriptions-item>
+          <el-descriptions-item label="耗时">{{ formatDuration(detail.duration) }}</el-descriptions-item>
           <el-descriptions-item label="通知">
             <StatusTag :map="notifyStatusLabels" :value="detail.notify_status" />
           </el-descriptions-item>
@@ -297,6 +301,9 @@ onMounted(async () => {
             <template #default="{ row }">{{ row.message ?? '-' }}</template>
           </el-table-column>
           <el-table-column prop="submitted_at" label="提交时间" width="160" />
+          <el-table-column label="供应商耗时" width="100" align="right">
+            <template #default="{ row }">{{ formatDuration(row.duration) }}</template>
+          </el-table-column>
         </el-table>
 
         <h4>资金变动</h4>

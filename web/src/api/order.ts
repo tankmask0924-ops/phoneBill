@@ -31,6 +31,8 @@ export interface Order {
   notified_at: string | null
   created_at: string | null
   finished_at: string | null
+  /** 下单受理到出结果的秒数，还没结果时为 null */
+  duration: number | null
 }
 
 export interface OrderAttempt {
@@ -48,6 +50,8 @@ export interface OrderAttempt {
   submitted_at: string | null
   last_queried_at: string | null
   finished_at: string | null
+  /** 提交给供应商到出结果（回调或查单）的秒数 */
+  duration: number | null
 }
 
 export interface OrderDetail extends Order {

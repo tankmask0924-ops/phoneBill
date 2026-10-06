@@ -12,3 +12,19 @@ export function recentDays(days = 7): [string, string] {
   const start = new Date(today.getFullYear(), today.getMonth(), today.getDate() - (days - 1))
   return [ymd(start), ymd(today)]
 }
+
+/** 秒数显示成「45 秒」「3 分 5 秒」「1 小时 2 分」，null 显示 - */
+export function formatDuration(seconds: number | null | undefined): string {
+  if (seconds === null || seconds === undefined) {
+    return '-'
+  }
+  if (seconds < 60) {
+    return `${seconds} 秒`
+  }
+  if (seconds < 3600) {
+    const s = seconds % 60
+    return s === 0 ? `${Math.floor(seconds / 60)} 分` : `${Math.floor(seconds / 60)} 分 ${s} 秒`
+  }
+  const m = Math.floor((seconds % 3600) / 60)
+  return m === 0 ? `${Math.floor(seconds / 3600)} 小时` : `${Math.floor(seconds / 3600)} 小时 ${m} 分`
+}

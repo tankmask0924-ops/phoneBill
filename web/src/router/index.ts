@@ -63,6 +63,12 @@ const router = createRouter({
           meta: { title: '平台商品' },
         },
         {
+          path: 'product/stats',
+          name: 'product-stats',
+          component: () => import('@/views/product/ProductStatsView.vue'),
+          meta: { title: '商品统计' },
+        },
+        {
           path: 'merchant/merchants',
           name: 'merchants',
           component: () => import('@/views/merchant/MerchantListView.vue'),

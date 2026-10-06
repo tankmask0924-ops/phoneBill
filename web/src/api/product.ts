@@ -121,6 +121,8 @@ export interface Product {
   routes: ProductRoute[]
   /** 配置提醒，不影响保存 */
   warnings: string[]
+  /** 昨天各运营商合起来的统计，没有订单时为 null */
+  yesterday_stats: StatSummary | null
   created_at: string | null
   updated_at: string | null
 }
@@ -141,6 +143,35 @@ export const productApi = {
   create: (data: ProductForm) => http.post<Product>('/admin/products', data),
   update: (id: number, data: Partial<ProductForm>) => http.put<Product>(`/admin/products/${id}`, data),
   changeStatus: (id: number, status: string) => http.post<Product>(`/admin/products/${id}/status`, { status }),
+}
+
+/** 商品统计：App\Controller\Admin\ProductStatsController，每天凌晨汇总前一天 */
+export interface StatSummary {
+  order_count: number
+  success_count: number
+  failed_count: number
+  /** 成功 / (成功 + 失败) 的百分比，两位小数；没有出结果的单时为 null */
+  success_rate: string | null
+  /** 成功订单平均耗时（秒） */
+  avg_duration: number | null
+}
+
+export interface ProductStat extends StatSummary {
+  stat_date: string
+  product_id: number
+  product_code: string | null
+  product_name: string | null
+  face_value: number | null
+  operator: OperatorCode
+  unfinished_count: number
+  p50_duration: number | null
+  p90_duration: number | null
+  computed_at: string
+}
+
+export const productStatsApi = {
+  list: (params: Query) =>
+    http.get<Paged<ProductStat> & { summary: StatSummary & { unfinished_count: number } }>('/admin/product-stats', params),
 }
 
 /** 号段查询：App\Controller\Admin\SegmentController */

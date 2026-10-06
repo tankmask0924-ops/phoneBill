@@ -31,6 +31,7 @@ use App\Service\AbstractService;
 use App\Service\FiltersByDateRange;
 use App\Service\Order\OrderDispatcher;
 use App\Service\Order\OrderProcessService;
+use Carbon\CarbonInterface;
 use Hyperf\Database\Model\Builder;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpMessage\Exception\HttpException;
@@ -128,13 +129,13 @@ class OrderAdminService extends AbstractService
         $rows = $this->formatMany($builder->orderByDesc('id')->get()->all());
 
         $statusLabels = ['pending' => '充值中', 'processing' => '充值中', 'abnormal' => '异常', 'success' => '成功', 'failed' => '失败'];
-        $lines = [['平台订单号', '商户订单号', '商户', '商品', '手机号', '运营商', '省份', '面值', '扣款金额', '成本', '供应商', '状态', '失败原因', '下单时间', '完成时间']];
+        $lines = [['平台订单号', '商户订单号', '商户', '商品', '手机号', '运营商', '省份', '面值', '扣款金额', '成本', '供应商', '状态', '失败原因', '下单时间', '完成时间', '耗时（秒）']];
         foreach ($rows as $r) {
             $lines[] = [
                 $r['order_no'] . "\t", $r['merchant_order_no'] . "\t", $r['merchant_name'], $r['product_name'], $r['mobile'] . "\t",
                 Operator::tryFrom($r['operator'])?->label() ?? $r['operator'], $r['province'], $r['face_value'], $r['sale_price'],
                 $r['cost_price'] ?? '', $r['supplier_name'] ?? '', $statusLabels[$r['status']] ?? $r['status'], $r['fail_reason'] ?? '',
-                $r['created_at'], $r['finished_at'] ?? '',
+                $r['created_at'], $r['finished_at'] ?? '', $r['duration'] ?? '',
             ];
         }
         $out = fopen('php://temp', 'r+');
@@ -175,6 +176,8 @@ class OrderAdminService extends AbstractService
                 'submitted_at' => $a->submitted_at?->toDateTimeString(),
                 'last_queried_at' => $a->last_queried_at?->toDateTimeString(),
                 'finished_at' => $a->finished_at?->toDateTimeString(),
+                // 提交给供应商到出结果（回调或查单）的秒数
+                'duration' => self::seconds($a->submitted_at, $a->finished_at),
             ])->values()->all(),
             'notify_logs' => $this->notifyLogDao->newQuery()->where('order_id', $order->id)->orderBy('id')->get()
                 ->map(static fn (OrderNotifyLog $l) => [
@@ -368,6 +371,13 @@ class OrderAdminService extends AbstractService
             'notified_at' => $o->notified_at?->toDateTimeString(),
             'created_at' => $o->created_at?->toDateTimeString(),
             'finished_at' => $o->finished_at?->toDateTimeString(),
+            // 下单受理到出结果（成功或失败）的秒数，还没结果时为 null
+            'duration' => self::seconds($o->created_at, $o->finished_at),
         ], $orders);
+    }
+
+    private static function seconds(?CarbonInterface $from, ?CarbonInterface $to): ?int
+    {
+        return $from === null || $to === null ? null : max(0, $to->getTimestamp() - $from->getTimestamp());
     }
 }
