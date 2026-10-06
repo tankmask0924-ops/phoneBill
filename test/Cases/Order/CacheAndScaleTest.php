@@ -13,9 +13,11 @@ declare(strict_types=1);
 namespace HyperfTest\Cases\Order;
 
 use App\Model\MerchantBalanceLog;
+use App\Model\MobileBlacklist;
 use App\Model\MobileSegment;
 use App\Model\Order;
 use App\Network\HttpClient;
+use App\Service\Admin\BlacklistAdminService;
 use App\Service\Admin\MaintenanceAdminService;
 use App\Service\Admin\MerchantProductAdminService;
 use App\Service\Admin\ProductAdminService;
@@ -26,6 +28,7 @@ use App\Service\Order\OrderDispatcher;
 use App\Service\Order\OrderNoGenerator;
 use App\Service\Order\OrderService;
 use App\Service\Product\ProductRouteService;
+use App\Service\Risk\BlacklistService;
 use Hyperf\Context\ApplicationContext;
 use Hyperf\Contract\ApplicationInterface;
 use Hyperf\Di\Container;
@@ -40,7 +43,7 @@ use HyperfTest\Support\FakeOrderDispatcher;
 use function Hyperf\Support\make;
 
 /**
- * 缓存一改就失效（号段、商户、商户价格、选路）、维护按时间生效、订单号撞号重试，以及大表列表默认只查最近 7 天。
+ * 缓存一改就失效（号段、商户、商户价格、选路、黑名单）、维护按时间生效、订单号撞号重试，以及大表列表默认只查最近 7 天。
  *
  * @internal
  * @coversNothing
@@ -172,6 +175,22 @@ class CacheAndScaleTest extends HttpTestCase
         $this->assertSame([$spA->id], $ids(), '还没到维护时间');
         sleep(3);
         $this->assertSame([], $ids(), '到点自动生效，中间没有任何清缓存');
+    }
+
+    public function testBlacklistCacheFollowsAdminChanges()
+    {
+        $admin = $this->createSuperAdmin();
+        $mobile = '100' . random_int(10000000, 99999999);
+        $this->blacklistMobiles[] = $mobile;
+        $service = make(BlacklistService::class);
+
+        $this->assertFalse($service->isBlocked($mobile), '不在黑名单的结果也进了缓存');
+        make(BlacklistAdminService::class)->create($admin, ['mobiles' => $mobile, 'reason' => '投诉'], null);
+        $this->assertTrue($service->isBlocked($mobile), '加入后立即生效');
+
+        $id = MobileBlacklist::where('mobile', $mobile)->value('id');
+        make(BlacklistAdminService::class)->delete($admin, $id, null);
+        $this->assertFalse($service->isBlocked($mobile), '移出后立即生效');
     }
 
     public function testListsDefaultToRecentSevenDays()

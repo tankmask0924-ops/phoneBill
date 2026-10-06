@@ -12,7 +12,6 @@ declare(strict_types=1);
 
 namespace App\Service\Order;
 
-use App\Dao\MobileBlacklistDao;
 use App\Dao\OrderDao;
 use App\Exception\InsufficientBalanceException;
 use App\Exception\OpenApiException;
@@ -24,6 +23,7 @@ use App\Service\Merchant\MerchantBalanceService;
 use App\Service\Merchant\MerchantPriceService;
 use App\Service\Mobile\MobileSegmentService;
 use App\Service\Product\ProductRouteService;
+use App\Service\Risk\BlacklistService;
 use App\Support\RedisLock;
 use Hyperf\Contract\ConfigInterface;
 use Hyperf\Database\Exception\QueryException;
@@ -47,7 +47,7 @@ class OrderService extends AbstractService
     protected MerchantPriceService $priceService;
 
     #[Inject]
-    protected MobileBlacklistDao $blacklistDao;
+    protected BlacklistService $blacklistService;
 
     #[Inject]
     protected MobileSegmentService $mobileSegmentService;
@@ -98,7 +98,7 @@ class OrderService extends AbstractService
         if ($quote === null || ! $quote['product_active'] || ! $quote['opened_active']) {
             throw new OpenApiException(OpenApiException::PRODUCT_NOT_AVAILABLE, '商品不存在、已下架或没有为你开通');
         }
-        if ($this->blacklistDao->contains($mobile)) {
+        if ($this->blacklistService->isBlocked($mobile)) {
             throw new OpenApiException(OpenApiException::BLACKLISTED, '该号码暂不支持充值');
         }
         $segment = $this->mobileSegmentService->identify($mobile);

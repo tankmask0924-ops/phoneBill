@@ -12,10 +12,14 @@ declare(strict_types=1);
 
 namespace App\Model;
 
+use App\Service\Risk\BlacklistService;
 use Carbon\Carbon;
+use Hyperf\Context\ApplicationContext;
+use Hyperf\Database\Model\Events\Deleted;
+use Hyperf\Database\Model\Events\Saved;
 
 /**
- * 号码黑名单，命中就拒绝下单。
+ * 号码黑名单，命中就拒绝下单。新增、删除时清掉这个号码的缓存（见 BlacklistService）。
  *
  * @property int $id
  * @property string $mobile
@@ -33,4 +37,14 @@ class MobileBlacklist extends Model
         'reason',
         'admin_user_id',
     ];
+
+    public function saved(Saved $event): void
+    {
+        ApplicationContext::getContainer()->get(BlacklistService::class)->forget($this->mobile);
+    }
+
+    public function deleted(Deleted $event): void
+    {
+        ApplicationContext::getContainer()->get(BlacklistService::class)->forget($this->mobile);
+    }
 }
