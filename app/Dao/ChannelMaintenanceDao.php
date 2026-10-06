@@ -22,4 +22,21 @@ class ChannelMaintenanceDao extends AbstractDao
     {
         return ChannelMaintenance::find($id);
     }
+
+    /**
+     * 还没结束的维护（含还没开始的）。
+     *
+     * @return list<array{supplier_id: int, operator: null|string, province: null|string, start_at: string, end_at: string}>
+     */
+    public function notEndedAt(string $now): array
+    {
+        return $this->newQuery()->where('end_at', '>', $now)->get()
+            ->map(static fn (ChannelMaintenance $m) => [
+                'supplier_id' => $m->supplier_id,
+                'operator' => $m->operator,
+                'province' => $m->province,
+                'start_at' => $m->start_at->toDateTimeString(),
+                'end_at' => $m->end_at->toDateTimeString(),
+            ])->values()->all();
+    }
 }

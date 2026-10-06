@@ -21,6 +21,7 @@ use App\Enum\Operator;
 use App\Model\AdminUser;
 use App\Model\SupplierProduct;
 use App\Service\AbstractService;
+use App\Service\Product\ProductRouteService;
 use Hyperf\DbConnection\Db;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpMessage\Exception\HttpException;
@@ -54,6 +55,9 @@ class SupplierProductAdminService extends AbstractService
 
     #[Inject]
     protected AdminOperationLogDao $operationLogDao;
+
+    #[Inject]
+    protected ProductRouteService $routeService;
 
     /**
      * @param array<string, mixed> $query keyword / supplier_id / operator / face_value / status
@@ -134,7 +138,7 @@ class SupplierProductAdminService extends AbstractService
             throw new HttpException(422, '所属供应商不能修改');
         }
 
-        return Db::transaction(function () use ($operator, $product, $data, $ip) {
+        $result = Db::transaction(function () use ($operator, $product, $data, $ip) {
             $before = $this->formatMany([$product])[0];
             $attrs = [];
             if (array_key_exists('name', $data)) {
@@ -168,6 +172,10 @@ class SupplierProductAdminService extends AbstractService
 
             return $after;
         });
+        // 运营商、成本（影响排序）可能变了，事务提交后清选路缓存
+        $this->routeService->flushConfig();
+
+        return $result;
     }
 
     /**
@@ -191,6 +199,7 @@ class SupplierProductAdminService extends AbstractService
                 ['status' => $status],
                 $ip
             );
+            $this->routeService->flushConfig();
             $product = $this->findOrFail($product->id);
         }
 

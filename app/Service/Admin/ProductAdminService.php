@@ -22,6 +22,7 @@ use App\Model\Product;
 use App\Model\ProductRoute;
 use App\Service\AbstractService;
 use App\Service\Merchant\MerchantPriceService;
+use App\Service\Product\ProductRouteService;
 use Hyperf\DbConnection\Db;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpMessage\Exception\HttpException;
@@ -58,6 +59,9 @@ class ProductAdminService extends AbstractService
 
     #[Inject]
     protected AdminOperationLogDao $operationLogDao;
+
+    #[Inject]
+    protected ProductRouteService $routeService;
 
     #[Inject]
     protected MerchantPriceService $priceService;
@@ -137,6 +141,7 @@ class ProductAdminService extends AbstractService
         });
         // 有商户可能在建好之前就用这个编码下过单，缓存了「不存在」
         $this->priceService->flush();
+        $this->routeService->flushConfig();
 
         return $result;
     }
@@ -188,6 +193,7 @@ class ProductAdminService extends AbstractService
             return $after;
         });
         $this->priceService->flush();
+        $this->routeService->flushConfig();
 
         return $result;
     }

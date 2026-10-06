@@ -21,6 +21,7 @@ use App\Model\AdminUser;
 use App\Model\Supplier;
 use App\Security\Encrypter;
 use App\Service\AbstractService;
+use App\Service\Product\ProductRouteService;
 use App\Service\Supplier\SupplierGateway;
 use App\Supplier\SupplierDriverInterface;
 use App\Supplier\SupplierDriverRegistry;
@@ -54,6 +55,9 @@ class SupplierAdminService extends AbstractService
 
     #[Inject]
     protected AdminOperationLogDao $operationLogDao;
+
+    #[Inject]
+    protected ProductRouteService $routeService;
 
     #[Inject]
     protected SupplierDriverRegistry $driverRegistry;
@@ -182,7 +186,7 @@ class SupplierAdminService extends AbstractService
             throw new HttpException(422, '供应商编码建好后不能修改');
         }
 
-        return Db::transaction(function () use ($operator, $supplier, $data, $ip) {
+        $result = Db::transaction(function () use ($operator, $supplier, $data, $ip) {
             $before = $this->format($supplier, $this->supplierProvinceDao->provincesFor([$supplier->id])[$supplier->id] ?? []);
             $attrs = [];
 
@@ -213,6 +217,10 @@ class SupplierAdminService extends AbstractService
 
             return $after;
         });
+        // 覆盖省份可能变了，事务提交后清选路缓存
+        $this->routeService->flushConfig();
+
+        return $result;
     }
 
     /**
@@ -236,6 +244,7 @@ class SupplierAdminService extends AbstractService
                 ['status' => $status],
                 $ip
             );
+            $this->routeService->flushConfig();
             $supplier = $this->findOrFail($supplier->id);
         }
 

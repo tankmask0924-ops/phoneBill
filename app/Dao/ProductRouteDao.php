@@ -53,22 +53,19 @@ class ProductRouteDao extends AbstractDao
     }
 
     /**
-     * 某个号码（运营商 + 省份）在这些平台商品下能走的供应商商品，规则见 docs/project.md 2.1：
-     * 支持该运营商、供应商覆盖该省份、供应商和供应商商品都启用、对应通道不在维护中。
-     * 按商品分组，组内按优先级、成本、绑定先后排序。
+     * 某个号码（运营商 + 省份）在这个平台商品下能走的供应商商品（只看配置，不看通道维护），规则见 docs/project.md 2.1：
+     * 支持该运营商、供应商覆盖该省份、供应商和供应商商品都启用。按优先级、成本、绑定先后排序。
+     * 通道维护按时间生效，由 ProductRouteService 在内存里过滤。
      *
-     * @param list<int> $productIds
-     * @return Collection<int, object> 每行：product_id、priority、supplier_product_id、supplier_product_name、
+     * @return Collection<int, object> 每行：priority、supplier_product_id、supplier_product_name、
      *                                 external_code、cost_price、supplier_id、supplier_name、supplier_code、supplier_driver
      */
-    public function candidates(array $productIds, string $operator, string $province): Collection
+    public function candidates(int $productId, string $operator, string $province): Collection
     {
-        $now = date('Y-m-d H:i:s');
-
         return Db::table('product_routes as pr')
             ->join('supplier_products as sp', 'sp.id', '=', 'pr.supplier_product_id')
             ->join('suppliers as s', 's.id', '=', 'sp.supplier_id')
-            ->whereIn('pr.product_id', $productIds)
+            ->where('pr.product_id', $productId)
             ->where('sp.status', 'active')
             ->where('s.status', 'active')
             ->whereExists(fn (Builder $q) => $q->select(Db::raw(1))
@@ -79,19 +76,10 @@ class ProductRouteDao extends AbstractDao
                 ->from('supplier_provinces as p')
                 ->whereColumn('p.supplier_id', 's.id')
                 ->whereIn('p.province', [$province, '*']))
-            ->whereNotExists(fn (Builder $q) => $q->select(Db::raw(1))
-                ->from('channel_maintenances as m')
-                ->whereColumn('m.supplier_id', 's.id')
-                ->where('m.start_at', '<=', $now)
-                ->where('m.end_at', '>', $now)
-                ->where(fn (Builder $w) => $w->whereNull('m.operator')->orWhere('m.operator', $operator))
-                ->where(fn (Builder $w) => $w->whereNull('m.province')->orWhere('m.province', $province)))
-            ->orderBy('pr.product_id')
             ->orderBy('pr.priority')
             ->orderBy('sp.cost_price')
             ->orderBy('pr.id')
             ->get([
-                'pr.product_id',
                 'pr.priority',
                 'sp.id as supplier_product_id',
                 'sp.name as supplier_product_name',

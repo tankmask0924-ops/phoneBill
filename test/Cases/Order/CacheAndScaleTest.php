@@ -16,11 +16,16 @@ use App\Model\MerchantBalanceLog;
 use App\Model\MobileSegment;
 use App\Model\Order;
 use App\Network\HttpClient;
+use App\Service\Admin\MaintenanceAdminService;
 use App\Service\Admin\MerchantProductAdminService;
+use App\Service\Admin\ProductAdminService;
+use App\Service\Admin\SupplierAdminService;
+use App\Service\Admin\SupplierProductAdminService;
 use App\Service\Mobile\MobileSegmentService;
 use App\Service\Order\OrderDispatcher;
 use App\Service\Order\OrderNoGenerator;
 use App\Service\Order\OrderService;
+use App\Service\Product\ProductRouteService;
 use Hyperf\Context\ApplicationContext;
 use Hyperf\Contract\ApplicationInterface;
 use Hyperf\Di\Container;
@@ -35,7 +40,7 @@ use HyperfTest\Support\FakeOrderDispatcher;
 use function Hyperf\Support\make;
 
 /**
- * 缓存一改就失效（号段、商户、商户价格）、订单号撞号重试，以及大表列表默认只查最近 7 天。
+ * 缓存一改就失效（号段、商户、商户价格、选路）、维护按时间生效、订单号撞号重试，以及大表列表默认只查最近 7 天。
  *
  * @internal
  * @coversNothing
@@ -121,6 +126,52 @@ class CacheAndScaleTest extends HttpTestCase
 
         $this->assertSame($fresh, $order->order_no);
         $this->assertSame(1, MerchantBalanceLog::where('order_id', $order->id)->count(), '只扣了一次款');
+    }
+
+    public function testRouteCacheFollowsAdminChanges()
+    {
+        $admin = $this->createSuperAdmin();
+        $a = $this->createSupplier();
+        $b = $this->createSupplier();
+        $spA = $this->createSupplierProduct($a, ['cmcc'], 100, '98.00');
+        $spB = $this->createSupplierProduct($b, ['cmcc'], 100, '99.00');
+        $product = $this->createProduct([$spA->id => 1, $spB->id => 2]);
+        $routes = make(ProductRouteService::class);
+        $ids = fn () => array_column($routes->candidates([$product->id], 'cmcc', '广东')[$product->id], 'supplier_product_id');
+
+        $this->assertSame([$spA->id, $spB->id], $ids(), '第一次查完已经进了缓存');
+
+        make(SupplierAdminService::class)->changeStatus($admin, $a->id, 'disabled', null);
+        $this->assertSame([$spB->id], $ids(), '停用供应商立即生效');
+
+        make(SupplierAdminService::class)->changeStatus($admin, $a->id, 'active', null);
+        make(SupplierProductAdminService::class)->update($admin, $spB->id, ['cost_price' => '97.00'], null);
+        make(ProductAdminService::class)->update($admin, $product->id, ['routes' => [
+            ['supplier_product_id' => $spA->id, 'priority' => 1],
+            ['supplier_product_id' => $spB->id, 'priority' => 1],
+        ]], null);
+        $this->assertSame([$spB->id, $spA->id], $ids(), '改绑定和成本后按新的优先级、成本排序');
+
+        make(SupplierAdminService::class)->update($admin, $b->id, ['provinces' => ['湖南']], null);
+        $this->assertSame([$spA->id], $ids(), '改覆盖省份立即生效');
+    }
+
+    public function testMaintenanceStartsOnTimeWithoutClearingCache()
+    {
+        $a = $this->createSupplier();
+        $spA = $this->createSupplierProduct($a, ['cmcc'], 100, '98.00');
+        $product = $this->createProduct([$spA->id => 1]);
+        $routes = make(ProductRouteService::class);
+        $ids = fn () => array_column($routes->candidates([$product->id], 'cmcc', '广东')[$product->id], 'supplier_product_id');
+
+        make(MaintenanceAdminService::class)->create($this->createSuperAdmin(), [
+            'supplier_id' => $a->id,
+            'start_at' => date('Y-m-d H:i:s', time() + 2),
+            'end_at' => date('Y-m-d H:i:s', time() + 3600),
+        ], null);
+        $this->assertSame([$spA->id], $ids(), '还没到维护时间');
+        sleep(3);
+        $this->assertSame([], $ids(), '到点自动生效，中间没有任何清缓存');
     }
 
     public function testListsDefaultToRecentSevenDays()

@@ -21,13 +21,15 @@ use App\Enum\Province;
 use App\Model\AdminUser;
 use App\Model\ChannelMaintenance;
 use App\Service\AbstractService;
+use App\Service\Product\ProductRouteService;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpMessage\Exception\HttpException;
 
 /**
  * 风控 - 通道维护：按「供应商」或「供应商 + 运营商 + 省份」临时关闭，到结束时间自动恢复。
  *
- * 维护中的通道不参与选路（见 ProductRouteDao::candidates()），已经提交出去的订单不受影响。
+ * 维护中的通道不参与选路（见 ProductRouteService::candidates()），已经提交出去的订单不受影响。
+ * 新增、提前结束后清掉维护窗口缓存；到点生效 / 恢复不需要清，选路时按当前时间判断。
  */
 class MaintenanceAdminService extends AbstractService
 {
@@ -46,6 +48,9 @@ class MaintenanceAdminService extends AbstractService
 
     #[Inject]
     protected AdminOperationLogDao $operationLogDao;
+
+    #[Inject]
+    protected ProductRouteService $routeService;
 
     /**
      * @param array<string, mixed> $query supplier_id / state（active 维护中 / upcoming 未开始 / ended 已结束）
@@ -120,6 +125,7 @@ class MaintenanceAdminService extends AbstractService
             'reason' => $reason === '' ? null : mb_substr($reason, 0, 255),
             'admin_user_id' => $operator->id,
         ]);
+        $this->routeService->flushMaintenances();
         $after = $this->format($row, $supplier->name);
         $this->operationLogDao->record($operator->id, self::MODULE, 'create_maintenance', 'channel_maintenance', $row->id, null, $after, $ip);
 
@@ -145,6 +151,7 @@ class MaintenanceAdminService extends AbstractService
             $attrs['start_at'] = $now;
         }
         $this->maintenanceDao->update($row->id, $attrs);
+        $this->routeService->flushMaintenances();
         $this->operationLogDao->record($operator->id, self::MODULE, 'finish_maintenance', 'channel_maintenance', $row->id, $before, ['end_at' => $now], $ip);
 
         return $this->format($this->findOrFail($row->id), $this->supplierDao->find($row->supplier_id)?->name);
