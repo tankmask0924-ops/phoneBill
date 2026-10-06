@@ -12,10 +12,12 @@ declare(strict_types=1);
 
 namespace HyperfTest\Cases\Admin;
 
+use App\Model\ChannelMaintenance;
 use App\Model\Merchant;
 use App\Model\MerchantBalanceLog;
 use App\Model\MerchantProduct;
 use App\Model\MerchantProductPrice;
+use App\Model\MobileBlacklist;
 use App\Model\MobileSegment;
 use App\Model\Product;
 use App\Model\ProductPrice;
@@ -47,6 +49,9 @@ trait CreatesCatalog
 
     private array $merchantIds = [];
 
+    /** 测试里加进黑名单的号码 */
+    private array $blacklistMobiles = [];
+
     private function cleanUpCatalog(): void
     {
         $merchantProductIds = MerchantProduct::whereIn('merchant_id', $this->merchantIds)
@@ -62,10 +67,12 @@ trait CreatesCatalog
         Product::destroy($this->productIds);
         SupplierProductOperator::whereIn('supplier_product_id', $this->supplierProductIds)->delete();
         SupplierProduct::destroy($this->supplierProductIds);
+        ChannelMaintenance::whereIn('supplier_id', $this->supplierIds)->delete();
+        MobileBlacklist::whereIn('mobile', $this->blacklistMobiles)->delete();
         SupplierProvince::whereIn('supplier_id', $this->supplierIds)->delete();
         Supplier::destroy($this->supplierIds);
         MobileSegment::destroy($this->segmentIds);
-        $this->supplierIds = $this->supplierProductIds = $this->productIds = $this->segmentIds = $this->merchantIds = [];
+        $this->supplierIds = $this->supplierProductIds = $this->productIds = $this->segmentIds = $this->merchantIds = $this->blacklistMobiles = [];
     }
 
     private function uniq(string $prefix): string

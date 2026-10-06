@@ -1,4 +1,4 @@
-import { Box, Document, Goods, HomeFilled, Key, Lock, Money, OfficeBuilding, Search, Setting, Shop, ShoppingBag, Tickets, UserFilled } from '@element-plus/icons-vue'
+import { Box, CircleClose, Document, Goods, HomeFilled, Key, Lock, Money, OfficeBuilding, Search, Setting, Shop, ShoppingBag, Tickets, Tools, UserFilled } from '@element-plus/icons-vue'
 import type { MenuItem } from '@/types'
 
 /** permission 对应后端 #[RequiresPermission] 的查看权限，没有权限的菜单不显示 */
@@ -27,7 +27,11 @@ export const menus: MenuItem[] = [
     path: '/risk',
     title: '风控',
     icon: Lock,
-    children: [{ path: '/risk/segments', title: '号段查询', icon: Search, permission: 'risk.view' }],
+    children: [
+      { path: '/risk/segments', title: '号段查询', icon: Search, permission: 'risk.view' },
+      { path: '/risk/blacklist', title: '号码黑名单', icon: CircleClose, permission: 'risk.view' },
+      { path: '/risk/maintenances', title: '通道维护', icon: Tools, permission: 'risk.view' },
+    ],
   },
   {
     path: '/system',

@@ -54,7 +54,7 @@ class ProductRouteDao extends AbstractDao
 
     /**
      * 某个号码（运营商 + 省份）在这些平台商品下能走的供应商商品，规则见 docs/project.md 2.1：
-     * 支持该运营商、供应商覆盖该省份、供应商和供应商商品都启用。
+     * 支持该运营商、供应商覆盖该省份、供应商和供应商商品都启用、对应通道不在维护中。
      * 按商品分组，组内按优先级、成本、绑定先后排序。
      *
      * @param list<int> $productIds
@@ -63,6 +63,8 @@ class ProductRouteDao extends AbstractDao
      */
     public function candidates(array $productIds, string $operator, string $province): Collection
     {
+        $now = date('Y-m-d H:i:s');
+
         return Db::table('product_routes as pr')
             ->join('supplier_products as sp', 'sp.id', '=', 'pr.supplier_product_id')
             ->join('suppliers as s', 's.id', '=', 'sp.supplier_id')
@@ -77,6 +79,13 @@ class ProductRouteDao extends AbstractDao
                 ->from('supplier_provinces as p')
                 ->whereColumn('p.supplier_id', 's.id')
                 ->whereIn('p.province', [$province, '*']))
+            ->whereNotExists(fn (Builder $q) => $q->select(Db::raw(1))
+                ->from('channel_maintenances as m')
+                ->whereColumn('m.supplier_id', 's.id')
+                ->where('m.start_at', '<=', $now)
+                ->where('m.end_at', '>', $now)
+                ->where(fn (Builder $w) => $w->whereNull('m.operator')->orWhere('m.operator', $operator))
+                ->where(fn (Builder $w) => $w->whereNull('m.province')->orWhere('m.province', $province)))
             ->orderBy('pr.product_id')
             ->orderBy('pr.priority')
             ->orderBy('sp.cost_price')

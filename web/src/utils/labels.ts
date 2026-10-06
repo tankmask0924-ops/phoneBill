@@ -62,6 +62,13 @@ export const balanceTypeLabels: LabelMap = {
   order_refund: { label: '失败退款', type: 'success' },
 }
 
+/** 通道维护状态 */
+export const maintenanceStateLabels: LabelMap = {
+  active: { label: '维护中', type: 'danger' },
+  upcoming: { label: '未开始', type: 'warning' },
+  ended: { label: '已结束', type: 'info' },
+}
+
 /** 供应商覆盖省份：* 表示全国 */
 export function provincesLabel(provinces: string[]): string {
   return provinces.includes('*') ? '全国' : provinces.join('、')
@@ -108,4 +115,8 @@ export const operationActionLabels: LabelMap = {
   deduct_merchant: { label: '商户扣款' },
   open_merchant_product: { label: '给商户开通商品' },
   update_merchant_product: { label: '修改商户商品价格' },
+  add_blacklist: { label: '加入黑名单' },
+  remove_blacklist: { label: '移出黑名单' },
+  create_maintenance: { label: '添加通道维护' },
+  finish_maintenance: { label: '结束通道维护' },
 }

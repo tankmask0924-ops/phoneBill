@@ -68,6 +68,18 @@ const router = createRouter({
           meta: { title: '号段查询' },
         },
         {
+          path: 'risk/blacklist',
+          name: 'blacklist',
+          component: () => import('@/views/risk/BlacklistView.vue'),
+          meta: { title: '号码黑名单' },
+        },
+        {
+          path: 'risk/maintenances',
+          name: 'maintenances',
+          component: () => import('@/views/risk/MaintenanceView.vue'),
+          meta: { title: '通道维护' },
+        },
+        {
           path: 'system/admin-users',
           name: 'admin-users',
           component: () => import('@/views/system/AdminUserListView.vue'),

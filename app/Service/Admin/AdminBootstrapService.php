@@ -55,7 +55,8 @@ class AdminBootstrapService extends AbstractService
         ['code' => 'supplier_product.manage', 'module' => 'product', 'name' => '供应商商品管理', 'type' => 'action'],
         ['code' => 'product.view', 'module' => 'product', 'name' => '平台商品查看', 'type' => 'action'],
         ['code' => 'product.manage', 'module' => 'product', 'name' => '平台商品管理', 'type' => 'action'],
-        ['code' => 'risk.view', 'module' => 'risk', 'name' => '风控查看（号段查询）', 'type' => 'action'],
+        ['code' => 'risk.view', 'module' => 'risk', 'name' => '风控查看（号段、黑名单、通道维护）', 'type' => 'action'],
+        ['code' => 'risk.manage', 'module' => 'risk', 'name' => '风控管理（黑名单、通道维护）', 'type' => 'action'],
         ['code' => 'merchant.view', 'module' => 'merchant', 'name' => '商户查看（含资金流水）', 'type' => 'action'],
         ['code' => 'merchant.manage', 'module' => 'merchant', 'name' => '商户管理（资料、密钥、启停）', 'type' => 'action'],
         ['code' => 'merchant.price', 'module' => 'merchant', 'name' => '商户商品与价格', 'type' => 'action'],
@@ -73,7 +74,7 @@ class AdminBootstrapService extends AbstractService
             'remark' => '日常业务运营',
             'permissions' => [
                 'supplier.view', 'supplier.manage', 'supplier_product.view', 'supplier_product.manage',
-                'product.view', 'product.manage', 'risk.view',
+                'product.view', 'product.manage', 'risk.view', 'risk.manage',
                 'merchant.view', 'merchant.manage', 'merchant.price',
             ],
         ],
