@@ -50,6 +50,18 @@ const router = createRouter({
           meta: { title: '平台商品' },
         },
         {
+          path: 'merchant/merchants',
+          name: 'merchants',
+          component: () => import('@/views/merchant/MerchantListView.vue'),
+          meta: { title: '商户' },
+        },
+        {
+          path: 'merchant/balance-logs',
+          name: 'balance-logs',
+          component: () => import('@/views/merchant/BalanceLogView.vue'),
+          meta: { title: '资金流水' },
+        },
+        {
           path: 'risk/segments',
           name: 'segments',
           component: () => import('@/views/risk/SegmentLookupView.vue'),

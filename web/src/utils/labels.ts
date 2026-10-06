@@ -54,6 +54,14 @@ export const operatorLabels: LabelMap = {
   cbn: { label: '广电' },
 }
 
+/** 资金流水类型，见 App\Model\MerchantBalanceLog */
+export const balanceTypeLabels: LabelMap = {
+  recharge: { label: '加款', type: 'success' },
+  deduct: { label: '扣款', type: 'warning' },
+  order_pay: { label: '下单扣款' },
+  order_refund: { label: '失败退款', type: 'success' },
+}
+
 /** 供应商覆盖省份：* 表示全国 */
 export function provincesLabel(provinces: string[]): string {
   return provinces.includes('*') ? '全国' : provinces.join('、')
@@ -64,6 +72,7 @@ export const moduleLabels: LabelMap = {
   system: { label: '系统设置' },
   product: { label: '商品中心' },
   risk: { label: '风控' },
+  merchant: { label: '商户中心' },
   admin_user: { label: '管理员账号' },
   role: { label: '角色权限' },
 }
@@ -90,4 +99,13 @@ export const operationActionLabels: LabelMap = {
   update_product: { label: '修改平台商品' },
   enable_product: { label: '上架平台商品' },
   disable_product: { label: '下架平台商品' },
+  create_merchant: { label: '新建商户' },
+  update_merchant: { label: '修改商户' },
+  enable_merchant: { label: '启用商户' },
+  disable_merchant: { label: '停用商户' },
+  reset_merchant_secret: { label: '重置商户密钥' },
+  recharge_merchant: { label: '商户加款' },
+  deduct_merchant: { label: '商户扣款' },
+  open_merchant_product: { label: '给商户开通商品' },
+  update_merchant_product: { label: '修改商户商品价格' },
 }

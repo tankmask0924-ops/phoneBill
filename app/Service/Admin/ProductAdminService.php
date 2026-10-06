@@ -208,6 +208,19 @@ class ProductAdminService extends AbstractService
         return $this->formatMany([$product])[0];
     }
 
+    /**
+     * @param list<int> $ids
+     * @return array<int, array<string, mixed>> id => 和列表一样的结构
+     */
+    public function describe(array $ids): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+
+        return array_column($this->formatMany($this->productDao->newQuery()->whereIn('id', $ids)->get()->all()), null, 'id');
+    }
+
     private function findOrFail(int $id): Product
     {
         $product = $this->productDao->find($id);

@@ -56,6 +56,10 @@ class AdminBootstrapService extends AbstractService
         ['code' => 'product.view', 'module' => 'product', 'name' => '平台商品查看', 'type' => 'action'],
         ['code' => 'product.manage', 'module' => 'product', 'name' => '平台商品管理', 'type' => 'action'],
         ['code' => 'risk.view', 'module' => 'risk', 'name' => '风控查看（号段查询）', 'type' => 'action'],
+        ['code' => 'merchant.view', 'module' => 'merchant', 'name' => '商户查看（含资金流水）', 'type' => 'action'],
+        ['code' => 'merchant.manage', 'module' => 'merchant', 'name' => '商户管理（资料、密钥、启停）', 'type' => 'action'],
+        ['code' => 'merchant.price', 'module' => 'merchant', 'name' => '商户商品与价格', 'type' => 'action'],
+        ['code' => 'merchant.balance', 'module' => 'merchant', 'name' => '商户加款扣款', 'type' => 'action'],
     ];
 
     /**
@@ -70,11 +74,12 @@ class AdminBootstrapService extends AbstractService
             'permissions' => [
                 'supplier.view', 'supplier.manage', 'supplier_product.view', 'supplier_product.manage',
                 'product.view', 'product.manage', 'risk.view',
+                'merchant.view', 'merchant.manage', 'merchant.price',
             ],
         ],
         '财务' => [
             'remark' => '资金与对账',
-            'permissions' => ['operation_log.view'],
+            'permissions' => ['operation_log.view', 'merchant.view', 'merchant.balance'],
         ],
     ];
 
