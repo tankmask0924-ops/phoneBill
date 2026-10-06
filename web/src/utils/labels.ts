@@ -150,4 +150,8 @@ export const operationActionLabels: LabelMap = {
   confirm_order_failed: { label: '异常订单置失败' },
   reverse_order: { label: '订单冲正' },
   resend_order_notify: { label: '重发商户通知' },
+  create_merchant_user: { label: '开通商户后台账号' },
+  enable_merchant_user: { label: '启用商户后台账号' },
+  disable_merchant_user: { label: '禁用商户后台账号' },
+  reset_merchant_user_password: { label: '重置商户后台账号密码' },
 }

@@ -4,7 +4,7 @@ import { usePagedList } from '@/utils/paged'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { Plus, WarningFilled } from '@element-plus/icons-vue'
 import { computed, onMounted, reactive, ref } from 'vue'
-import { type AvailableProduct, type Merchant, merchantApi, type MerchantProduct } from '@/api/merchant'
+import { type AvailableProduct, type Merchant, merchantApi, type MerchantProduct, type MerchantUser } from '@/api/merchant'
 import type { OperatorCode } from '@/api/product'
 import { labelOf, operatorLabels, supplierStatusLabels, toOptions } from '@/utils/labels'
 import { usePermissionStore } from '@/stores/permission'
@@ -201,6 +201,67 @@ async function saveProduct(row: DraftRow, status?: string) {
   await list.load()
 }
 
+// ---- 商户后台账号 ----
+const usersVisible = ref(false)
+const usersTarget = ref<Merchant | null>(null)
+const users = ref<MerchantUser[]>([])
+const usersLoading = ref(false)
+const userForm = reactive({ username: '', password: '', real_name: '' })
+
+async function loadUsers() {
+  usersLoading.value = true
+  try {
+    users.value = await merchantApi.users(usersTarget.value!.id)
+  } finally {
+    usersLoading.value = false
+  }
+}
+
+function openUsers(row: Merchant) {
+  usersTarget.value = row
+  users.value = []
+  Object.assign(userForm, { username: '', password: '', real_name: '' })
+  usersVisible.value = true
+  loadUsers()
+}
+
+async function createUser() {
+  if (!/^[A-Za-z0-9_.@-]{3,64}$/.test(userForm.username)) {
+    ElMessage.error('账号为 3~64 位字母、数字或 _ . @ -')
+    return
+  }
+  if (userForm.password === '') {
+    ElMessage.error('请设置初始密码')
+    return
+  }
+  await merchantApi.createUser(usersTarget.value!.id, { ...userForm })
+  ElMessage.success('已开通，请把账号和初始密码告诉商户，并提醒对方登录后修改密码')
+  Object.assign(userForm, { username: '', password: '', real_name: '' })
+  await loadUsers()
+}
+
+async function toggleUser(user: MerchantUser) {
+  const next = user.status === 'active' ? 'disabled' : 'active'
+  await merchantApi.changeUserStatus(user.merchant_id, user.id, next)
+  ElMessage.success(next === 'disabled' ? '已禁用，对方会立即退出登录' : '已启用')
+  await loadUsers()
+}
+
+async function resetUserPassword(user: MerchantUser) {
+  let password: string
+  try {
+    const result = await ElMessageBox.prompt(`给「${user.username}」设置新密码，对方之前的登录会失效`, '重置密码', {
+      inputType: 'password',
+      inputValidator: (v) => !!v || '请输入新密码',
+    })
+    password = result.value
+  } catch {
+    return
+  }
+  await merchantApi.resetUserPassword(user.merchant_id, user.id, password)
+  ElMessage.success('密码已重置，请把新密码告诉对方')
+}
+
 onMounted(async () => {
   await permission.load()
   list.load()
@@ -248,9 +309,10 @@ onMounted(async () => {
       <el-table-column label="状态" width="80">
         <template #default="{ row }"><StatusTag :map="supplierStatusLabels" :value="row.status" /></template>
       </el-table-column>
-      <el-table-column label="操作" width="280" fixed="right">
+      <el-table-column label="操作" width="300" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" @click="openProducts(row as Merchant)">商品与价格</el-button>
+          <el-button link type="primary" @click="openUsers(row as Merchant)">后台账号</el-button>
           <el-button v-if="canBalance" link type="primary" @click="openBalance(row as Merchant)">加/扣款</el-button>
           <template v-if="canManage">
             <el-button link type="primary" @click="openEdit(row as Merchant)">编辑</el-button>
@@ -394,9 +456,53 @@ onMounted(async () => {
       </el-table-column>
     </el-table>
   </el-drawer>
+
+  <!-- 商户后台账号 -->
+  <el-drawer v-model="usersVisible" :title="`商户后台账号 - ${usersTarget?.name ?? ''}`" size="720px">
+    <div class="muted users-tip">商户用这些账号登录商户后台，只能查看自己的订单、资金流水和接入信息。</div>
+    <el-form v-if="canManage" inline class="user-form" @submit.prevent="createUser">
+      <el-form-item>
+        <el-input v-model="userForm.username" placeholder="登录账号" style="width: 160px" />
+      </el-form-item>
+      <el-form-item>
+        <el-input v-model="userForm.password" type="password" show-password placeholder="初始密码" autocomplete="new-password" style="width: 160px" />
+      </el-form-item>
+      <el-form-item>
+        <el-input v-model="userForm.real_name" placeholder="使用人（选填）" style="width: 130px" />
+      </el-form-item>
+      <el-form-item>
+        <el-button type="primary" native-type="submit">开通账号</el-button>
+      </el-form-item>
+    </el-form>
+    <el-table v-loading="usersLoading" :data="users" border empty-text="还没有账号">
+      <el-table-column prop="username" label="账号" min-width="140" />
+      <el-table-column label="使用人" width="110">
+        <template #default="{ row }">{{ row.real_name ?? '-' }}</template>
+      </el-table-column>
+      <el-table-column label="状态" width="80">
+        <template #default="{ row }"><StatusTag :map="supplierStatusLabels" :value="row.status" /></template>
+      </el-table-column>
+      <el-table-column label="最近登录" width="170">
+        <template #default="{ row }">{{ row.last_login_at ?? '-' }}</template>
+      </el-table-column>
+      <el-table-column v-if="canManage" label="操作" width="140">
+        <template #default="{ row }">
+          <el-button link type="primary" @click="resetUserPassword(row as MerchantUser)">重置密码</el-button>
+          <el-button link :type="row.status === 'active' ? 'danger' : 'success'" @click="toggleUser(row as MerchantUser)">
+            {{ row.status === 'active' ? '禁用' : '启用' }}
+          </el-button>
+        </template>
+      </el-table-column>
+    </el-table>
+  </el-drawer>
 </template>
 
 <style scoped>
+.users-tip,
+.user-form {
+  margin-bottom: 12px;
+}
+
 .toolbar {
   display: flex;
   justify-content: space-between;

@@ -17,6 +17,7 @@ use App\Model\Merchant;
 use App\Model\MerchantBalanceLog;
 use App\Model\MerchantProduct;
 use App\Model\MerchantProductPrice;
+use App\Model\MerchantUser;
 use App\Model\MobileBlacklist;
 use App\Model\MobileSegment;
 use App\Model\Order;
@@ -67,6 +68,7 @@ trait CreatesCatalog
         MerchantProductPrice::whereIn('merchant_product_id', $merchantProductIds)->delete();
         MerchantProduct::destroy($merchantProductIds);
         MerchantBalanceLog::whereIn('merchant_id', $this->merchantIds)->delete();
+        MerchantUser::whereIn('merchant_id', $this->merchantIds)->delete();
         Merchant::destroy($this->merchantIds);
         ProductRoute::whereIn('product_id', $this->productIds)->delete();
         ProductRoute::whereIn('supplier_product_id', $this->supplierProductIds)->delete();

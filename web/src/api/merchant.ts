@@ -65,6 +65,17 @@ export interface AvailableProduct {
   prices: Partial<Record<OperatorCode, string>>
 }
 
+/** 商户后台登录账号 */
+export interface MerchantUser {
+  id: number
+  merchant_id: number
+  username: string
+  real_name: string | null
+  status: string
+  last_login_at: string | null
+  created_at: string | null
+}
+
 export const merchantApi = {
   list: (params: Query) => http.get<Paged<Merchant>>('/admin/merchants', params),
   options: () => http.get<MerchantOption[]>('/admin/merchants/options'),
@@ -79,6 +90,13 @@ export const merchantApi = {
   availableProducts: (id: number) => http.get<AvailableProduct[]>(`/admin/merchants/${id}/available-products`),
   saveProduct: (id: number, productId: number, data: { status?: string; prices: Partial<Record<OperatorCode, string>> }) =>
     http.put<MerchantProduct>(`/admin/merchants/${id}/products/${productId}`, data),
+  users: (id: number) => http.get<MerchantUser[]>(`/admin/merchants/${id}/users`),
+  createUser: (id: number, data: { username: string; password: string; real_name: string }) =>
+    http.post<MerchantUser>(`/admin/merchants/${id}/users`, data),
+  changeUserStatus: (id: number, userId: number, status: string) =>
+    http.post<MerchantUser>(`/admin/merchants/${id}/users/${userId}/status`, { status }),
+  resetUserPassword: (id: number, userId: number, password: string) =>
+    http.post<{ success: boolean }>(`/admin/merchants/${id}/users/${userId}/password`, { password }),
 }
 
 /** 资金流水：App\Controller\Admin\BalanceLogController */

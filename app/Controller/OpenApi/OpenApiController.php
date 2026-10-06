@@ -13,13 +13,11 @@ declare(strict_types=1);
 namespace App\Controller\OpenApi;
 
 use App\Controller\AbstractController;
-use App\Dao\MerchantProductDao;
-use App\Dao\MerchantProductPriceDao;
 use App\Dao\OrderDao;
-use App\Dao\ProductDao;
 use App\Exception\OpenApiException;
 use App\Middleware\OpenApiAuthMiddleware;
 use App\Model\Merchant;
+use App\Service\Merchant\MerchantCatalogService;
 use App\Service\Order\OrderService;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpServer\Annotation\Controller;
@@ -41,13 +39,7 @@ class OpenApiController extends AbstractController
     protected OrderDao $orderDao;
 
     #[Inject]
-    protected ProductDao $productDao;
-
-    #[Inject]
-    protected MerchantProductDao $merchantProductDao;
-
-    #[Inject]
-    protected MerchantProductPriceDao $merchantPriceDao;
+    protected MerchantCatalogService $catalogService;
 
     /**
      * 下单。
@@ -91,30 +83,7 @@ class OpenApiController extends AbstractController
     #[GetMapping(path: 'products')]
     public function products(): array
     {
-        $merchant = $this->merchant();
-        $opened = $this->merchantProductDao->newQuery()->where('merchant_id', $merchant->id)->where('status', 'active')->get();
-        $products = $this->productDao->newQuery()
-            ->whereIn('id', $opened->pluck('product_id')->all())
-            ->where('status', 'active')
-            ->orderBy('face_value')
-            ->get()
-            ->keyBy('id');
-        $prices = $this->merchantPriceDao->pricesFor($opened->pluck('id')->all());
-
-        $data = [];
-        foreach ($opened as $row) {
-            $product = $products->get($row->product_id);
-            if ($product !== null) {
-                $data[] = [
-                    'product_code' => $product->code,
-                    'name' => $product->name,
-                    'face_value' => $product->face_value,
-                    'prices' => $prices[$row->id] ?? [],
-                ];
-            }
-        }
-
-        return $this->ok($data);
+        return $this->ok($this->catalogService->openedProducts($this->merchant()));
     }
 
     private function merchant(): Merchant

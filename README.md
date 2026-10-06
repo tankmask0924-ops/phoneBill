@@ -26,6 +26,11 @@ Hyperf 3.1 + PHP 8.4 + Swoole 后端，附带 Web 管理后台（Vue 3 + TypeScr
 - 订单中心：订单列表与详情、异常订单、人工查单 / 置成功 / 置失败 / 冲正 / 重发通知、导出 CSV
 - 定时任务 `OrderCrontab` 每分钟查单、转异常、补推丢了的提交；日志渠道 `supplier`、`order`
 
+第三阶段：
+
+- 商户后台 `merchant-web/`：登录、首页（余额和今日数据）、订单记录、资金流水、账户（接入信息和可下单商品）
+- 管理端「商户」页面可以给商户开后台账号、重置密码、启用禁用
+
 ## 目录
 
 | 目录 | 说明 |
@@ -33,7 +38,9 @@ Hyperf 3.1 + PHP 8.4 + Swoole 后端，附带 Web 管理后台（Vue 3 + TypeScr
 | `app/` | 后端代码，分层 `Controller → Service → Dao → Model` |
 | `migrations/` | 数据库迁移 |
 | `test/` | 测试（`test/Cases/`） |
-| `web/` | 管理后台前端 |
+| `web/` | 管理后台前端（平台内部用） |
+| `merchant-web/` | 商户后台前端（商户用，只读） |
+| `docs/` | 项目文档 [project.md](docs/project.md)、商户接入文档 [api.md](docs/api.md) |
 
 ## 后端本地开发
 
@@ -73,6 +80,20 @@ npm run build        # 产物在 web/dist，部署在 /admin/ 路径下
 3. `src/router/index.ts` 加路由（`meta.title` 显示在顶栏和浏览器标题）
 4. `src/layout/menus.ts` 加菜单项，`permission` 填后端对应的查看权限编码
 
+## 商户后台（merchant-web/）
+
+独立的前端项目，技术栈和 `web/` 一样，和管理端分开构建、分开部署（管理端可以只放内网）。
+
+```bash
+cd merchant-web
+npm install
+npm run dev          # http://localhost:5176/merchant/ ，/api/* 同样代理到后端
+npm run build        # 产物在 merchant-web/dist，部署在 /merchant/ 路径下（或单独的子域名）
+```
+
+商户账号由平台在管理后台「商户 → 后台账号」里开通，登录体系和管理端完全分开（`MERCHANT_JWT_SECRET`），
+同一账号 15 分钟内登录失败 10 次会暂时锁住。
+
 ## 接口一览
 
 | 方法 | 路径 | 权限 |
@@ -104,9 +125,14 @@ npm run build        # 产物在 web/dist，部署在 /admin/ 路径下
 | POST | `/admin/orders/{id}/reverse` | `order.reverse` |
 | GET/POST | `/open/v1/recharge`、`/order`、`/balance`、`/products` | 商户签名，见 [docs/api.md](docs/api.md) |
 | GET/POST | `/notify/supplier/{供应商编码}` | 供应商回调，由驱动验签 |
+| GET | `/admin/merchants/{id}/users` | `merchant.view` |
+| POST | `/admin/merchants/{id}/users`、`/{id}/users/{userId}/status`、`/{id}/users/{userId}/password` | `merchant.manage` |
+| POST | `/merchant/auth/login` | 公开（商户后台） |
+| GET/PUT | `/merchant/auth/me`、`/merchant/auth/password` | 商户登录 |
+| GET | `/merchant/dashboard`、`/orders`、`/orders/{id}`、`/balance-logs`、`/account` | 商户登录，只能看自己的数据 |
 
 ## 部署要点
 
-- `.env` 必须配置 `ADMIN_JWT_SECRET`、`APP_ENCRYPTION_KEY`（上线后不能更换），`DB_CHARSET=utf8mb4`
+- `.env` 必须配置 `ADMIN_JWT_SECRET`、`MERCHANT_JWT_SECRET`（两个不要相同）、`APP_ENCRYPTION_KEY`（上线后不能更换），`DB_CHARSET=utf8mb4`
 - 部署在反向代理后面时配置 `TRUSTED_PROXIES`，操作日志才能记到真实 IP
 - 确认容器里有 `crontab-dispatcher` 和 `async-queue` 两个进程，否则定时任务和异步队列不执行

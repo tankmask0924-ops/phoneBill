@@ -20,6 +20,7 @@ use App\Model\AdminUser;
 use App\Network\ClientIpResolver;
 use App\Service\Admin\MerchantAdminService;
 use App\Service\Admin\MerchantProductAdminService;
+use App\Service\Admin\MerchantUserAdminService;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpServer\Annotation\Controller;
 use Hyperf\HttpServer\Annotation\GetMapping;
@@ -38,6 +39,9 @@ class MerchantController extends AbstractController
 
     #[Inject]
     protected MerchantProductAdminService $merchantProductAdminService;
+
+    #[Inject]
+    protected MerchantUserAdminService $merchantUserAdminService;
 
     #[Inject]
     protected ClientIpResolver $clientIpResolver;
@@ -130,6 +134,44 @@ class MerchantController extends AbstractController
     public function saveProduct(int $id, int $productId): array
     {
         return $this->merchantProductAdminService->save($this->admin(), $id, $productId, $this->request->all(), $this->clientIp());
+    }
+
+    #[Middleware(AdminAuthMiddleware::class)]
+    #[Middleware(AdminPermissionMiddleware::class)]
+    #[RequiresPermission('merchant.view')]
+    #[GetMapping(path: '{id:\d+}/users')]
+    public function users(int $id): array
+    {
+        return $this->merchantUserAdminService->list($id);
+    }
+
+    #[Middleware(AdminAuthMiddleware::class)]
+    #[Middleware(AdminPermissionMiddleware::class)]
+    #[RequiresPermission('merchant.manage')]
+    #[PostMapping(path: '{id:\d+}/users')]
+    public function createUser(int $id): array
+    {
+        return $this->merchantUserAdminService->create($this->admin(), $id, $this->request->all(), $this->clientIp());
+    }
+
+    #[Middleware(AdminAuthMiddleware::class)]
+    #[Middleware(AdminPermissionMiddleware::class)]
+    #[RequiresPermission('merchant.manage')]
+    #[PostMapping(path: '{id:\d+}/users/{userId:\d+}/status')]
+    public function changeUserStatus(int $id, int $userId): array
+    {
+        return $this->merchantUserAdminService->changeStatus($this->admin(), $id, $userId, $this->request->input('status'), $this->clientIp());
+    }
+
+    #[Middleware(AdminAuthMiddleware::class)]
+    #[Middleware(AdminPermissionMiddleware::class)]
+    #[RequiresPermission('merchant.manage')]
+    #[PostMapping(path: '{id:\d+}/users/{userId:\d+}/password')]
+    public function resetUserPassword(int $id, int $userId): array
+    {
+        $this->merchantUserAdminService->resetPassword($this->admin(), $id, $userId, $this->request->input('password'), $this->clientIp());
+
+        return ['success' => true];
     }
 
     private function admin(): AdminUser

@@ -13,17 +13,17 @@ declare(strict_types=1);
 namespace App\Auth;
 
 /**
- * 管理后台（web/）登录态，签名密钥读 `.env` 的 `ADMIN_JWT_SECRET`，规则见 JwtGuard。
+ * 商户后台（merchant-web/）登录态，签名密钥读 `.env` 的 `MERCHANT_JWT_SECRET`，规则见 JwtGuard。
  */
-class AdminJwtGuard extends JwtGuard
+class MerchantJwtGuard extends JwtGuard
 {
     protected function audience(): string
     {
-        return 'admin';
+        return 'merchant';
     }
 
     protected function secretEnv(): string
     {
-        return 'ADMIN_JWT_SECRET';
+        return 'MERCHANT_JWT_SECRET';
     }
 }
