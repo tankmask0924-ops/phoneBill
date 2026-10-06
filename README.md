@@ -12,11 +12,19 @@ Hyperf 3.1 + PHP 8.4 + Swoole 后端，附带 Web 管理后台（Vue 3 + TypeScr
 - 操作日志：所有带权限的写操作自动记录，敏感字段打码
 - 定时任务（`hyperf/crontab`）、异步队列（`hyperf/async-queue`）进程已注册
 
-已完成的业务模块（第一阶段）：
+已完成的业务模块。第一阶段：
 
 - 商品中心：供应商（接口参数加密存储）、供应商商品、平台商品（绑定供应商商品、按运营商的默认售价）
 - 风控：号段查询（识别运营商和省份，并列出每个商品的选路结果）
 - 新接一家供应商：在 `app/Supplier/Driver/` 写驱动类，登记到 `App\Supplier\SupplierDriverRegistry::DRIVERS`
+
+第二阶段：
+
+- 商户中心：商户（AppKey/AppSecret、IP 白名单、通知地址）、按运营商定价、加减款、资金流水
+- 风控：号码黑名单、通道维护
+- 订单：开放接口下单（商户接入文档 [docs/api.md](docs/api.md)）、扣款、提交供应商、失败换供应商、回调、查单、超时转异常、失败退款、通知商户
+- 订单中心：订单列表与详情、异常订单、人工查单 / 置成功 / 置失败 / 冲正 / 重发通知、导出 CSV
+- 定时任务 `OrderCrontab` 每分钟查单、转异常、补推丢了的提交；日志渠道 `supplier`、`order`
 
 ## 目录
 
@@ -85,6 +93,17 @@ npm run build        # 产物在 web/dist，部署在 /admin/ 路径下
 | GET | `/admin/products`、`/admin/products/supplier-product-options` | `product.view` |
 | POST/PUT | `/admin/products`、`/{id}`、`/{id}/status` | `product.manage` |
 | GET | `/admin/segments/lookup` | `risk.view` |
+| GET | `/admin/risk/blacklist`、`/admin/risk/maintenances`、`/admin/risk/maintenances/options` | `risk.view` |
+| POST/DELETE | `/admin/risk/blacklist`、`/admin/risk/blacklist/{id}`、`/admin/risk/maintenances`、`/{id}/finish` | `risk.manage` |
+| GET | `/admin/merchants`、`/options`、`/{id}/products`、`/{id}/available-products`、`/admin/balance-logs` | `merchant.view` |
+| POST/PUT | `/admin/merchants`、`/{id}`、`/{id}/status`、`/{id}/secret` | `merchant.manage` |
+| PUT | `/admin/merchants/{id}/products/{productId}` | `merchant.price` |
+| POST | `/admin/merchants/{id}/balance` | `merchant.balance` |
+| GET | `/admin/orders`、`/filter-options`、`/export`、`/{id}` | `order.view` |
+| POST | `/admin/orders/{id}/query`、`/{id}/success`、`/{id}/fail`、`/{id}/notify` | `order.manage` |
+| POST | `/admin/orders/{id}/reverse` | `order.reverse` |
+| GET/POST | `/open/v1/recharge`、`/order`、`/balance`、`/products` | 商户签名，见 [docs/api.md](docs/api.md) |
+| GET/POST | `/notify/supplier/{供应商编码}` | 供应商回调，由驱动验签 |
 
 ## 部署要点
 

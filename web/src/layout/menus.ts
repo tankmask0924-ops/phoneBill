@@ -1,9 +1,18 @@
-import { Box, CircleClose, Document, Goods, HomeFilled, Key, Lock, Money, OfficeBuilding, Search, Setting, Shop, ShoppingBag, Tickets, Tools, UserFilled } from '@element-plus/icons-vue'
+import { Box, CircleClose, Document, Goods, HomeFilled, Key, List, Lock, Money, OfficeBuilding, Search, Setting, Shop, ShoppingBag, Tickets, Tools, UserFilled, Warning } from '@element-plus/icons-vue'
 import type { MenuItem } from '@/types'
 
 /** permission 对应后端 #[RequiresPermission] 的查看权限，没有权限的菜单不显示 */
 export const menus: MenuItem[] = [
   { path: '/dashboard', title: '首页', icon: HomeFilled },
+  {
+    path: '/order',
+    title: '订单中心',
+    icon: List,
+    children: [
+      { path: '/order/orders', title: '订单', icon: Tickets, permission: 'order.view' },
+      { path: '/order/abnormal', title: '异常订单', icon: Warning, permission: 'order.view' },
+    ],
+  },
   {
     path: '/product',
     title: '商品中心',

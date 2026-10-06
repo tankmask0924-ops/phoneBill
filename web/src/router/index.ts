@@ -32,6 +32,19 @@ const router = createRouter({
           meta: { title: '首页' },
         },
         {
+          path: 'order/orders',
+          name: 'orders',
+          component: () => import('@/views/order/OrderListView.vue'),
+          meta: { title: '订单' },
+        },
+        {
+          path: 'order/abnormal',
+          name: 'abnormal-orders',
+          component: () => import('@/views/order/OrderListView.vue'),
+          props: { abnormal: true },
+          meta: { title: '异常订单' },
+        },
+        {
           path: 'product/suppliers',
           name: 'suppliers',
           component: () => import('@/views/product/SupplierListView.vue'),

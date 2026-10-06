@@ -63,7 +63,7 @@ onMounted(async () => {
         </template>
       </el-table-column>
       <el-table-column prop="balance_after" label="变动后余额" width="120" align="right" />
-      <el-table-column label="关联订单" width="190">
+      <el-table-column label="关联订单" width="210">
         <template #default="{ row }">{{ row.order_no ?? '-' }}</template>
       </el-table-column>
       <el-table-column label="备注" min-width="160">

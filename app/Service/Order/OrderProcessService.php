@@ -226,6 +226,65 @@ class OrderProcessService extends AbstractService
     }
 
     /**
+     * 人工确认成功（只用于异常订单）：以最后一次提交的供应商和成本记账。
+     *
+     * @return bool 是否由这次调用改成了成功
+     */
+    public function confirmSuccess(Order $order, string $note): bool
+    {
+        $attempt = $this->attemptDao->forOrder($order->id)->last();
+        if ($attempt === null) {
+            return false;
+        }
+        $now = date('Y-m-d H:i:s');
+        $done = Db::transaction(function () use ($order, $attempt, $note, $now) {
+            $changed = $this->orderDao->transition($order->id, [Order::STATUS_ABNORMAL], Order::STATUS_SUCCESS, [
+                'supplier_id' => $attempt->supplier_id,
+                'supplier_product_id' => $attempt->supplier_product_id,
+                'cost_price' => $attempt->cost_price,
+                'finished_at' => $now,
+                'notify_status' => Order::NOTIFY_PENDING,
+            ]);
+            if ($changed) {
+                $this->attemptDao->transition($attempt->id, OrderAttempt::STATUS_PROCESSING, OrderAttempt::STATUS_SUCCESS, [
+                    'message' => mb_substr("人工确认成功：{$note}", 0, 255),
+                    'finished_at' => $now,
+                ]);
+            }
+
+            return $changed;
+        });
+        if ($done) {
+            $this->dispatcher->notify($order->id);
+        }
+
+        return $done;
+    }
+
+    /**
+     * 人工确认失败（只用于异常订单）：还在处理中的提交一并置为失败，订单失败并退款。
+     */
+    public function confirmFailed(Order $order, string $note): bool
+    {
+        foreach ($this->attemptDao->forOrder($order->id) as $attempt) {
+            $this->attemptDao->transition($attempt->id, OrderAttempt::STATUS_PROCESSING, OrderAttempt::STATUS_FAILED, [
+                'message' => mb_substr("人工确认失败：{$note}", 0, 255),
+                'finished_at' => date('Y-m-d H:i:s'),
+            ]);
+        }
+
+        return $this->fail($order, [Order::STATUS_ABNORMAL], "人工确认失败：{$note}");
+    }
+
+    /**
+     * 冲正：成功的订单被供应商事后撤销，改为失败并退款。
+     */
+    public function reverse(Order $order, string $note): bool
+    {
+        return $this->fail($order, [Order::STATUS_SUCCESS], "冲正：{$note}");
+    }
+
+    /**
      * 定时任务：提交后一段时间还没结果的，主动向供应商查单。
      *
      * @return int 查了多少笔

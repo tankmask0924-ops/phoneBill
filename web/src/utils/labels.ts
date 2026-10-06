@@ -62,6 +62,31 @@ export const balanceTypeLabels: LabelMap = {
   order_refund: { label: '失败退款', type: 'success' },
 }
 
+/** 订单状态，见 App\Model\Order */
+export const orderStatusLabels: LabelMap = {
+  pending: { label: '待提交', type: 'info' },
+  processing: { label: '充值中', type: 'primary' },
+  abnormal: { label: '异常', type: 'danger' },
+  success: { label: '成功', type: 'success' },
+  failed: { label: '失败（已退款）', type: 'warning' },
+}
+
+/** 供应商提交状态 */
+export const attemptStatusLabels: LabelMap = {
+  processing: { label: '处理中', type: 'primary' },
+  success: { label: '成功', type: 'success' },
+  failed: { label: '失败', type: 'warning' },
+}
+
+/** 通知商户的状态 */
+export const notifyStatusLabels: LabelMap = {
+  none: { label: '无需通知', type: 'info' },
+  pending: { label: '待通知', type: 'info' },
+  retrying: { label: '重试中', type: 'warning' },
+  success: { label: '已送达', type: 'success' },
+  failed: { label: '已放弃', type: 'danger' },
+}
+
 /** 通道维护状态 */
 export const maintenanceStateLabels: LabelMap = {
   active: { label: '维护中', type: 'danger' },
@@ -80,6 +105,7 @@ export const moduleLabels: LabelMap = {
   product: { label: '商品中心' },
   risk: { label: '风控' },
   merchant: { label: '商户中心' },
+  order: { label: '订单中心' },
   admin_user: { label: '管理员账号' },
   role: { label: '角色权限' },
 }
@@ -119,4 +145,9 @@ export const operationActionLabels: LabelMap = {
   remove_blacklist: { label: '移出黑名单' },
   create_maintenance: { label: '添加通道维护' },
   finish_maintenance: { label: '结束通道维护' },
+  query_order: { label: '人工查单' },
+  confirm_order_success: { label: '异常订单置成功' },
+  confirm_order_failed: { label: '异常订单置失败' },
+  reverse_order: { label: '订单冲正' },
+  resend_order_notify: { label: '重发商户通知' },
 }
