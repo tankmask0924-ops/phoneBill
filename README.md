@@ -155,6 +155,8 @@ npm run build        # 产物在 merchant-web/dist，部署在 /merchant/ 路径
 | `QUEUE_PROCESSES` × `QUEUE_CONCURRENCY` | 2 × 50 | 同时在提交供应商的订单数。处理吞吐 ≈ 这个数 ÷ 供应商平均耗时（秒） |
 | `NOTIFY_QUEUE_CONCURRENCY` | 30 | 通知商户单独一个队列，商户接口慢不影响充值 |
 | `DB_MAX_CONNECTIONS` | 64 | 每个进程的连接池上限，必须 ≥ `QUEUE_CONCURRENCY`（提交任务等供应商时一直占着连接）；MySQL 的 `max_connections` 要大于各进程实际用到的总和 |
+| `DB_SQL_LOG` | false | 全量 SQL 日志（`runtime/logs`，渠道 sql），量很大，只在排查问题时临时打开 |
+| `DB_SLOW_QUERY_MS` | 500 | 超过这个毫秒数的慢查询始终记一条 warning，不受 `DB_SQL_LOG` 影响；0 表示不记 |
 | `REDIS_MAX_CONNECTIONS` | 32 | 每个进程的 Redis 连接池上限 |
 
 缓存（Redis，`c:` 前缀）：

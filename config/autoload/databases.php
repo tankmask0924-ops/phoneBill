@@ -37,6 +37,9 @@ return [
             'heartbeat' => -1,
             'max_idle_time' => (float) env('DB_MAX_IDLE_TIME', 60),
         ],
+        // SQL 日志（渠道 sql）：全量记录默认关，排查问题时临时打开；超过阈值的慢查询始终记一条 warning
+        'sql_log' => (bool) env('DB_SQL_LOG', false),
+        'slow_query_ms' => (int) env('DB_SLOW_QUERY_MS', 500),
         'commands' => [
             'gen:model' => [
                 'path' => 'app/Model',
