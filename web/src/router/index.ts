@@ -32,6 +32,30 @@ const router = createRouter({
           meta: { title: '首页' },
         },
         {
+          path: 'product/suppliers',
+          name: 'suppliers',
+          component: () => import('@/views/product/SupplierListView.vue'),
+          meta: { title: '供应商' },
+        },
+        {
+          path: 'product/supplier-products',
+          name: 'supplier-products',
+          component: () => import('@/views/product/SupplierProductListView.vue'),
+          meta: { title: '供应商商品' },
+        },
+        {
+          path: 'product/products',
+          name: 'products',
+          component: () => import('@/views/product/ProductListView.vue'),
+          meta: { title: '平台商品' },
+        },
+        {
+          path: 'risk/segments',
+          name: 'segments',
+          component: () => import('@/views/risk/SegmentLookupView.vue'),
+          meta: { title: '号段查询' },
+        },
+        {
           path: 'system/admin-users',
           name: 'admin-users',
           component: () => import('@/views/system/AdminUserListView.vue'),

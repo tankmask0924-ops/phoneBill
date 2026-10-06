@@ -34,9 +34,36 @@ export function roleLabel(name: string | null | undefined): string {
   return name === 'super_admin' ? '超级管理员' : (name ?? '-')
 }
 
+/** 供应商：启用 / 停用 */
+export const supplierStatusLabels: LabelMap = {
+  active: { label: '启用', type: 'success' },
+  disabled: { label: '停用', type: 'info' },
+}
+
+/** 供应商商品、平台商品：上架 / 下架 */
+export const shelfStatusLabels: LabelMap = {
+  active: { label: '上架', type: 'success' },
+  disabled: { label: '下架', type: 'info' },
+}
+
+/** 运营商，见 App\Enum\Operator */
+export const operatorLabels: LabelMap = {
+  cmcc: { label: '移动' },
+  cucc: { label: '联通' },
+  ctcc: { label: '电信' },
+  cbn: { label: '广电' },
+}
+
+/** 供应商覆盖省份：* 表示全国 */
+export function provincesLabel(provinces: string[]): string {
+  return provinces.includes('*') ? '全国' : provinces.join('、')
+}
+
 /** 权限 / 操作日志的模块，见 AdminBootstrapService::KNOWN_PERMISSIONS 的 module 和权限编码前缀 */
 export const moduleLabels: LabelMap = {
   system: { label: '系统设置' },
+  product: { label: '商品中心' },
+  risk: { label: '风控' },
   admin_user: { label: '管理员账号' },
   role: { label: '角色权限' },
 }
@@ -51,4 +78,16 @@ export const operationActionLabels: LabelMap = {
   create_role: { label: '新建角色' },
   update_role: { label: '修改角色' },
   delete_role: { label: '删除角色' },
+  create_supplier: { label: '新建供应商' },
+  update_supplier: { label: '修改供应商' },
+  enable_supplier: { label: '启用供应商' },
+  disable_supplier: { label: '停用供应商' },
+  create_supplier_product: { label: '新建供应商商品' },
+  update_supplier_product: { label: '修改供应商商品' },
+  enable_supplier_product: { label: '上架供应商商品' },
+  disable_supplier_product: { label: '下架供应商商品' },
+  create_product: { label: '新建平台商品' },
+  update_product: { label: '修改平台商品' },
+  enable_product: { label: '上架平台商品' },
+  disable_product: { label: '下架平台商品' },
 }

@@ -49,6 +49,13 @@ class AdminBootstrapService extends AbstractService
         ['code' => 'role.view', 'module' => 'system', 'name' => '角色权限查看', 'type' => 'action'],
         ['code' => 'role.manage', 'module' => 'system', 'name' => '角色权限管理', 'type' => 'action'],
         ['code' => 'operation_log.view', 'module' => 'system', 'name' => '操作日志查看', 'type' => 'action'],
+        ['code' => 'supplier.view', 'module' => 'product', 'name' => '供应商查看', 'type' => 'action'],
+        ['code' => 'supplier.manage', 'module' => 'product', 'name' => '供应商管理', 'type' => 'action'],
+        ['code' => 'supplier_product.view', 'module' => 'product', 'name' => '供应商商品查看', 'type' => 'action'],
+        ['code' => 'supplier_product.manage', 'module' => 'product', 'name' => '供应商商品管理', 'type' => 'action'],
+        ['code' => 'product.view', 'module' => 'product', 'name' => '平台商品查看', 'type' => 'action'],
+        ['code' => 'product.manage', 'module' => 'product', 'name' => '平台商品管理', 'type' => 'action'],
+        ['code' => 'risk.view', 'module' => 'risk', 'name' => '风控查看（号段查询）', 'type' => 'action'],
     ];
 
     /**
@@ -60,7 +67,10 @@ class AdminBootstrapService extends AbstractService
     public const PRESET_ROLES = [
         '运营' => [
             'remark' => '日常业务运营',
-            'permissions' => [],
+            'permissions' => [
+                'supplier.view', 'supplier.manage', 'supplier_product.view', 'supplier_product.manage',
+                'product.view', 'product.manage', 'risk.view',
+            ],
         ],
         '财务' => [
             'remark' => '资金与对账',

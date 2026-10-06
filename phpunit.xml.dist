@@ -7,6 +7,7 @@
   </testsuites>
   <php>
     <env name="APP_ENV" value="testing" force="true"/>
+    <env name="APP_ENCRYPTION_KEY" value="0000000000000000000000000000000000000000000000000000000000000001" force="true"/>
   </php>
   <source>
     <include>

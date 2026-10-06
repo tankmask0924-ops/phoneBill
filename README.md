@@ -2,13 +2,21 @@
 
 Hyperf 3.1 + PHP 8.4 + Swoole 后端，附带 Web 管理后台（Vue 3 + TypeScript + Vite + Element Plus）。
 
-目前已有的是管理后台的基础能力，业务模块在此基础上添加：
+话费充值平台，需求与设计见 [docs/project.md](docs/project.md)。
+
+管理后台的基础能力：
 
 - 管理员登录（JWT，8 小时有效，改密码后旧登录全部失效）
 - 管理员账号：新建、编辑、启用/禁用、重置密码
 - 角色权限（RBAC）：自定义角色、勾选权限，防提权（不能授予自己没有的权限、不能改自己所在角色）
 - 操作日志：所有带权限的写操作自动记录，敏感字段打码
 - 定时任务（`hyperf/crontab`）、异步队列（`hyperf/async-queue`）进程已注册
+
+已完成的业务模块（第一阶段）：
+
+- 商品中心：供应商（接口参数加密存储）、供应商商品、平台商品（绑定供应商商品、按运营商的默认售价）
+- 风控：号段查询（识别运营商和省份，并列出每个商品的选路结果）
+- 新接一家供应商：在 `app/Supplier/Driver/` 写驱动类，登记到 `App\Supplier\SupplierDriverRegistry::DRIVERS`
 
 ## 目录
 
@@ -70,9 +78,16 @@ npm run build        # 产物在 web/dist，部署在 /admin/ 路径下
 | GET | `/admin/roles`、`/admin/roles/permissions` | `role.view` |
 | POST/PUT/DELETE | `/admin/roles`、`/admin/roles/{id}` | `role.manage` |
 | GET | `/admin/operation-logs` | `operation_log.view` |
+| GET | `/admin/suppliers`、`/admin/suppliers/meta` | `supplier.view` |
+| POST/PUT | `/admin/suppliers`、`/{id}`、`/{id}/status` | `supplier.manage` |
+| GET | `/admin/supplier-products`、`/admin/supplier-products/supplier-options` | `supplier_product.view` |
+| POST/PUT | `/admin/supplier-products`、`/{id}`、`/{id}/status` | `supplier_product.manage` |
+| GET | `/admin/products`、`/admin/products/supplier-product-options` | `product.view` |
+| POST/PUT | `/admin/products`、`/{id}`、`/{id}/status` | `product.manage` |
+| GET | `/admin/segments/lookup` | `risk.view` |
 
 ## 部署要点
 
-- `.env` 必须配置 `ADMIN_JWT_SECRET`，`DB_CHARSET=utf8mb4`
+- `.env` 必须配置 `ADMIN_JWT_SECRET`、`APP_ENCRYPTION_KEY`（上线后不能更换），`DB_CHARSET=utf8mb4`
 - 部署在反向代理后面时配置 `TRUSTED_PROXIES`，操作日志才能记到真实 IP
 - 确认容器里有 `crontab-dispatcher` 和 `async-queue` 两个进程，否则定时任务和异步队列不执行
