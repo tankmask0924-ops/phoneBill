@@ -32,4 +32,14 @@ final class Province
     {
         return in_array($name, self::NAMES, true);
     }
+
+    /**
+     * 全称转简称：广东省 → 广东、北京市 → 北京、广西壮族自治区 → 广西。认不出返回 null。
+     */
+    public static function fromFullName(string $fullName): ?string
+    {
+        $short = preg_replace('/(壮族|回族|维吾尔)?自治区$|省$|市$/u', '', trim($fullName));
+
+        return is_string($short) && self::isValid($short) ? $short : null;
+    }
 }

@@ -56,6 +56,13 @@ docker exec pb composer test                           # 全部测试
 docker exec pb composer analyse                        # 静态分析
 ```
 
+导入号段库（Navicat 导出的 `recharge_phone_prefix_info` 表，文件较大不进仓库，放在 `docs/` 下即可）：
+
+```bash
+docker exec pb php bin/hyperf.php segment:import docs/recharge_phone_prefix_info.sql --dry-run   # 先看统计
+docker exec pb php bin/hyperf.php segment:import docs/recharge_phone_prefix_info.sql             # 按号段覆盖写入，可重复执行
+```
+
 新增 `#[RequiresPermission('xxx.yyy')]` 后，把编码加进 `App\Service\Admin\AdminBootstrapService::KNOWN_PERMISSIONS`，
 部署后执行 `docker exec pb php bin/hyperf.php admin:sync-permissions`，超级管理员才能拿到新权限。
 
@@ -151,7 +158,7 @@ npm run build        # 产物在 merchant-web/dist，部署在 /merchant/ 路径
 
 缓存（Redis，`c:` 前缀）：
 
-- 号段：按号段缓存 1 天，号段保存 / 删除时自动清；批量导入号段后调 `MobileSegmentService::flushAll()`
+- 号段：按号段缓存 1 天，号段保存 / 删除时自动清；`segment:import` 导入完会整体清掉
 - 商户（按 AppKey，不含余额）：5 分钟，商户保存时自动清
 - 商户的商品价格：5 分钟，平台商品增改 / 上下架、商户开通或改价后整体清掉
 - 选路（候选供应商）：配置部分按「商品 + 运营商 + 省份」缓存 1 小时，平台商品 / 供应商商品 / 供应商改动后整体清掉；
