@@ -27,4 +27,16 @@ class MobileBlacklistDao extends AbstractDao
     {
         return $this->newQuery()->where('mobile', $mobile)->exists();
     }
+
+    /**
+     * 分批取出全部号码。
+     *
+     * @param callable(list<string>): void $callback
+     */
+    public function eachMobileChunk(int $size, callable $callback): void
+    {
+        $this->newQuery()->select(['id', 'mobile'])->chunkById($size, static function ($rows) use ($callback) {
+            $callback($rows->pluck('mobile')->all());
+        });
+    }
 }

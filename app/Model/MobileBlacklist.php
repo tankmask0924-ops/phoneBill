@@ -19,7 +19,7 @@ use Hyperf\Database\Model\Events\Deleted;
 use Hyperf\Database\Model\Events\Saved;
 
 /**
- * 号码黑名单，命中就拒绝下单。新增、删除时清掉这个号码的缓存（见 BlacklistService）。
+ * 号码黑名单，命中就拒绝下单。新增、删除时让 Redis 里的黑名单集合失效（见 BlacklistService）。
  *
  * @property int $id
  * @property string $mobile
@@ -40,11 +40,11 @@ class MobileBlacklist extends Model
 
     public function saved(Saved $event): void
     {
-        ApplicationContext::getContainer()->get(BlacklistService::class)->forget($this->mobile);
+        ApplicationContext::getContainer()->get(BlacklistService::class)->markChanged();
     }
 
     public function deleted(Deleted $event): void
     {
-        ApplicationContext::getContainer()->get(BlacklistService::class)->forget($this->mobile);
+        ApplicationContext::getContainer()->get(BlacklistService::class)->markChanged();
     }
 }

@@ -33,6 +33,7 @@ use Hyperf\Context\ApplicationContext;
 use Hyperf\Contract\ApplicationInterface;
 use Hyperf\Di\Container;
 use Hyperf\Di\Definition\DefinitionSourceFactory;
+use Hyperf\Redis\Redis;
 use Hyperf\Testing\Client;
 use HyperfTest\Cases\Admin\CreatesAdmins;
 use HyperfTest\Cases\Admin\CreatesCatalog;
@@ -184,9 +185,19 @@ class CacheAndScaleTest extends HttpTestCase
         $this->blacklistMobiles[] = $mobile;
         $service = make(BlacklistService::class);
 
-        $this->assertFalse($service->isBlocked($mobile), '不在黑名单的结果也进了缓存');
+        $this->assertFalse($service->isBlocked($mobile));
         make(BlacklistAdminService::class)->create($admin, ['mobiles' => $mobile, 'reason' => '投诉'], null);
         $this->assertTrue($service->isBlocked($mobile), '加入后立即生效');
+
+        // 查询走的是 Redis 集合：绕过模型直接删库（不触发失效）也还是命中
+        MobileBlacklist::query()->getQuery()->where('mobile', $mobile)->delete();
+        $this->assertTrue($service->isBlocked($mobile), '没有查库');
+        MobileBlacklist::create(['mobile' => $mobile, 'reason' => '投诉']);
+
+        // Redis 被清空：重建后照样拦住，不会放过
+        $redis = ApplicationContext::getContainer()->get(Redis::class);
+        $redis->del('blacklist:mobiles', 'blacklist:built_version');
+        $this->assertTrue($service->isBlocked($mobile), 'Redis 清空后从数据库重建');
 
         $id = MobileBlacklist::where('mobile', $mobile)->value('id');
         make(BlacklistAdminService::class)->delete($admin, $id, null);
