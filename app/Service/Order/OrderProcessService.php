@@ -185,6 +185,11 @@ class OrderProcessService extends AbstractService
                 break;
             case RechargeStatus::Failed:
                 if (! $this->attemptDao->transition($attempt->id, OrderAttempt::STATUS_PROCESSING, OrderAttempt::STATUS_FAILED, $extra + ['finished_at' => $now])) {
+                    if ($this->attemptDao->find($attempt->id)?->status === OrderAttempt::STATUS_SUCCESS) {
+                        // 供应商事后撤销了已成功的充值（比如核实未到账退款）：不自动改订单，人工核对后在后台冲正
+                        $this->logger()->error('供应商撤销了已成功的充值，请人工核对是否冲正', ['attempt_no' => $attempt->attempt_no, 'order_id' => $attempt->order_id, 'message' => $result->message]);
+                    }
+
                     return;
                 }
                 // 异常订单交给人工，不再自动换供应商

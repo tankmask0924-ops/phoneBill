@@ -38,8 +38,9 @@ interface SupplierDriverInterface
      * 这家供应商需要填的接口参数，后台按它渲染表单、校验和打码。
      *
      * type：text 普通文本 / secret 密钥（加密存储，接口返回时不回显）/ select 下拉（options 为可选值）
+     * placeholder：可选，输入框里的填写提示
      *
-     * @return list<array{key: string, label: string, type: string, required: bool, options?: list<array{value: string, label: string}>}>
+     * @return list<array{key: string, label: string, type: string, required: bool, placeholder?: string, options?: list<array{value: string, label: string}>}>
      */
     public function configSchema(): array;
 

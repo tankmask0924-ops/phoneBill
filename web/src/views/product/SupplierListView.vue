@@ -242,9 +242,9 @@ onMounted(async () => {
           type="password"
           show-password
           autocomplete="new-password"
-          :placeholder="secretKept(field.key) ? '已设置，留空表示不修改' : ''"
+          :placeholder="secretKept(field.key) ? '已设置，留空表示不修改' : (field.placeholder ?? '')"
         />
-        <el-input v-else v-model="form.config[field.key]" />
+        <el-input v-else v-model="form.config[field.key]" :placeholder="field.placeholder ?? ''" />
       </el-form-item>
       <el-form-item label="备注">
         <el-input v-model="form.remark" maxlength="255" />

@@ -19,7 +19,7 @@ use App\Network\HttpClient;
  */
 class FakeHttpClient extends HttpClient
 {
-    /** @var list<array{url: string, payload: array<string, mixed>}> */
+    /** @var list<array{method: string, url: string, payload: array<string, mixed>}> */
     public array $requests = [];
 
     /** @var list<array{status: int, body: string}> */
@@ -27,7 +27,26 @@ class FakeHttpClient extends HttpClient
 
     public function postJson(string $url, array $payload, float $timeoutSeconds = 5.0): array
     {
-        $this->requests[] = ['url' => $url, 'payload' => $payload];
+        return $this->record('POST_JSON', $url, $payload);
+    }
+
+    public function get(string $url, array $query, float $timeoutSeconds = 5.0): array
+    {
+        return $this->record('GET', $url, $query);
+    }
+
+    public function postForm(string $url, array $form, float $timeoutSeconds = 5.0): array
+    {
+        return $this->record('POST_FORM', $url, $form);
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     * @return array{status: int, body: string}
+     */
+    private function record(string $method, string $url, array $payload): array
+    {
+        $this->requests[] = ['method' => $method, 'url' => $url, 'payload' => $payload];
 
         return count($this->responses) > 1 ? array_shift($this->responses) : $this->responses[0];
     }

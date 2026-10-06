@@ -12,6 +12,7 @@ export interface ConfigField {
   label: string
   type: 'text' | 'secret' | 'select'
   required: boolean
+  placeholder?: string
   options?: { value: string; label: string }[]
 }
 

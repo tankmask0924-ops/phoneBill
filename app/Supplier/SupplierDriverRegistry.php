@@ -13,6 +13,7 @@ declare(strict_types=1);
 namespace App\Supplier;
 
 use App\Supplier\Driver\MockDriver;
+use App\Supplier\Driver\OpenPlatformDriver;
 use Psr\Container\ContainerInterface;
 
 /**
@@ -27,6 +28,7 @@ class SupplierDriverRegistry
      */
     public const DRIVERS = [
         MockDriver::class,
+        OpenPlatformDriver::class,
     ];
 
     public function __construct(private ContainerInterface $container)
