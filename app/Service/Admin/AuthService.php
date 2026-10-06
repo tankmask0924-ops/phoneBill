@@ -102,8 +102,8 @@ class AuthService extends AbstractService
         if (! password_verify($oldPassword, $admin->password)) {
             throw new HttpException(422, '原密码不正确');
         }
-        if (mb_strlen($newPassword) < AdminUserAdminService::MIN_PASSWORD_LENGTH) {
-            throw new HttpException(422, '新密码长度至少 ' . AdminUserAdminService::MIN_PASSWORD_LENGTH . ' 位');
+        if ($newPassword === '') {
+            throw new HttpException(422, '新密码不能为空');
         }
         if ($oldPassword === $newPassword) {
             throw new HttpException(422, '新密码不能和原密码相同');

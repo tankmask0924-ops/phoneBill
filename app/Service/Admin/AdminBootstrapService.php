@@ -68,11 +68,6 @@ class AdminBootstrapService extends AbstractService
         ],
     ];
 
-    /**
-     * 密码最低长度，跟 AdminUserAdminService::MIN_PASSWORD_LENGTH 保持一致。
-     */
-    private const MIN_PASSWORD_LENGTH = 8;
-
     #[Inject]
     protected AdminUserDao $adminUserDao;
 
@@ -154,8 +149,8 @@ class AdminBootstrapService extends AbstractService
             throw new InvalidArgumentException('username 不能为空');
         }
 
-        if (mb_strlen($password) < self::MIN_PASSWORD_LENGTH) {
-            throw new InvalidArgumentException('密码长度至少 ' . self::MIN_PASSWORD_LENGTH . ' 位');
+        if ($password === '') {
+            throw new InvalidArgumentException('密码不能为空');
         }
 
         if ($this->adminUserDao->findByUsername($username)) {

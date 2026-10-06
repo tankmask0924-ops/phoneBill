@@ -34,8 +34,6 @@ use Hyperf\HttpMessage\Exception\HttpException;
  */
 class AdminUserAdminService extends AbstractService
 {
-    public const MIN_PASSWORD_LENGTH = 8;
-
     private const MODULE = 'system';
 
     private const MAX_PER_PAGE = 100;
@@ -225,8 +223,8 @@ class AdminUserAdminService extends AbstractService
 
     private function validatePassword(string $password): void
     {
-        if (mb_strlen($password) < self::MIN_PASSWORD_LENGTH) {
-            throw new HttpException(422, '密码长度至少 ' . self::MIN_PASSWORD_LENGTH . ' 位');
+        if ($password === '') {
+            throw new HttpException(422, '密码不能为空');
         }
     }
 

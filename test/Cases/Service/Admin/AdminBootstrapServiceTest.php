@@ -160,7 +160,7 @@ class AdminBootstrapServiceTest extends TestCase
         $this->assertTrue(password_verify('a-strong-password', $original->password));
     }
 
-    public function testPasswordTooShortIsRejectedBeforeTouchingTheDatabase()
+    public function testEmptyPasswordIsRejectedBeforeTouchingTheDatabase()
     {
         $roleExistedBefore = AdminRole::where('name', self::ROLE_NAME)->exists();
         $username = $this->uniqueUsername();
@@ -168,10 +168,10 @@ class AdminBootstrapServiceTest extends TestCase
         $service = $this->getContainer()->get(AdminBootstrapService::class);
 
         try {
-            $service->createSuperAdmin($username, 'short');
+            $service->createSuperAdmin($username, '');
             $this->fail('Expected InvalidArgumentException was not thrown.');
         } catch (InvalidArgumentException $e) {
-            $this->assertStringContainsString('8', $e->getMessage());
+            $this->assertStringContainsString('密码', $e->getMessage());
         }
 
         $this->assertSame(0, AdminUser::where('username', $username)->count());

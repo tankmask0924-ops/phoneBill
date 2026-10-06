@@ -19,7 +19,6 @@ const rules: FormRules = {
   old_password: [{ required: true, message: '请输入原密码', trigger: 'blur' }],
   new_password: [
     { required: true, message: '请输入新密码', trigger: 'blur' },
-    { min: 8, message: '新密码至少 8 位', trigger: 'blur' },
   ],
   confirm: [
     {

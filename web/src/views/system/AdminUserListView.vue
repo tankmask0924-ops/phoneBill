@@ -44,7 +44,6 @@ const rules = computed<FormRules>(() => ({
     ? []
     : [
         { required: true, message: '请输入初始密码', trigger: 'blur' },
-        { min: 8, message: '至少 8 位', trigger: 'blur' },
       ],
 }))
 
@@ -104,7 +103,7 @@ async function resetPassword(row: AdminUser) {
   try {
     const result = await ElMessageBox.prompt(`给「${row.real_name}」设置新密码，对方之前的登录会失效`, '重置密码', {
       inputType: 'password',
-      inputValidator: (v) => (v && v.length >= 8) || '至少 8 位',
+      inputValidator: (v) => !!v || '请输入新密码',
     })
     password = result.value
   } catch {

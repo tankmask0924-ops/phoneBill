@@ -37,7 +37,7 @@ class CreateAdminCommand extends HyperfCommand
     {
         $this->setDescription('创建管理后台的超级管理员账号（幂等，可重复执行以创建更多账号）')
             ->addOption('username', null, InputOption::VALUE_REQUIRED, '登录用户名')
-            ->addOption('password', null, InputOption::VALUE_REQUIRED, '登录密码，至少 8 位')
+            ->addOption('password', null, InputOption::VALUE_REQUIRED, '登录密码')
             ->addOption('real-name', null, InputOption::VALUE_OPTIONAL, '显示名称，缺省时等于 username');
 
         parent::configure();

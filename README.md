@@ -27,7 +27,7 @@ Hyperf 3.1 + PHP 8.4 + Swoole 后端，附带 Web 管理后台（Vue 3 + TypeScr
 cp .env.example .env                                   # 填数据库、Redis、ADMIN_JWT_SECRET
 docker compose up -d                                   # 启动，宿主机端口 9502
 docker exec pb php bin/hyperf.php migrate              # 执行数据库迁移
-docker exec pb php bin/hyperf.php admin:create --username=admin --password=至少8位
+docker exec pb php bin/hyperf.php admin:create --username=admin --password=你的密码
 docker compose restart                                 # 改完代码后重启生效（Swoole 常驻内存）
 docker exec pb composer test                           # 全部测试
 docker exec pb composer analyse                        # 静态分析

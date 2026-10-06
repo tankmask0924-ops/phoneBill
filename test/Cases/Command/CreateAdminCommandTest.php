@@ -23,7 +23,7 @@ use Symfony\Component\Console\Tester\CommandTester;
 /**
  * admin:create 的胶水层冒烟测试：用 Symfony Console 的 CommandTester 真的跑一遍 execute()，
  * 确认命令能从容器解析、选项透传给 Service、校验异常转成非 0 退出码、成功时不打印密码。
- * 业务分支（幂等、重复用户名、密码长度等）见 test/Cases/Service/Admin/AdminBootstrapServiceTest.php。
+ * 业务分支（幂等、重复用户名、空密码等）见 test/Cases/Service/Admin/AdminBootstrapServiceTest.php。
  *
  * @internal
  * @coversNothing
@@ -101,14 +101,14 @@ class CreateAdminCommandTest extends TestCase
         $this->assertStringNotContainsString($password, $display);
     }
 
-    public function testExecuteWithTooShortPasswordFailsWithNonZeroExitCodeAndNoRowCreated()
+    public function testExecuteWithEmptyPasswordFailsWithNonZeroExitCodeAndNoRowCreated()
     {
         $username = $this->uniqueUsername();
 
         $tester = new CommandTester($this->getContainer()->get(CreateAdminCommand::class));
         $exitCode = $tester->execute([
             '--username' => $username,
-            '--password' => 'short',
+            '--password' => '',
         ]);
 
         $this->assertNotSame(0, $exitCode);
