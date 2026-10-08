@@ -17,3 +17,4 @@ vendor/
 
 # 号段库等大体积数据文件不进仓库，用 segment:import 导入
 docs/*.sql
+/release/
