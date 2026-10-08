@@ -17,7 +17,7 @@ Hyperf 3.1 + PHP 8.4 + Swoole 后端，附带 Web 管理后台（Vue 3 + TypeScr
 - 商品中心：供应商（接口参数加密存储）、供应商商品、平台商品（绑定供应商商品、按运营商的默认售价）
 - 风控：号段查询（识别运营商和省份，并列出每个商品的选路结果）
 - 新接一家供应商：在 `app/Supplier/Driver/` 写驱动类，登记到 `App\Supplier\SupplierDriverRegistry::DRIVERS`
-- 已有驱动：`mock` 模拟供应商；`open_platform` 开放平台话费（上游文档 [docs/open-api-integration.md](docs/open-api-integration.md)，对接规则见 [docs/project.md](docs/project.md) 7.1）
+- 已有驱动：`mock` 模拟供应商；`open_platform` 开放平台话费（上游文档 [docs/open-api-integration.md](docs/open-api-integration.md)，对接规则见 [docs/project.md](docs/project.md) 7.1）；`shangteng` 商腾科技话费（上游文档 [docs/API接口.md](docs/API接口.md)，对接规则见 [docs/project.md](docs/project.md) 7.2）
 
 第二阶段：
 

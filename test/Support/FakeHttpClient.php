@@ -40,6 +40,11 @@ class FakeHttpClient extends HttpClient
         return $this->record('POST_FORM', $url, $form);
     }
 
+    public function postRaw(string $url, string $body, array $headers, float $timeoutSeconds = 5.0): array
+    {
+        return $this->record('POST_RAW', $url, ['body' => $body, 'headers' => $headers]);
+    }
+
     /**
      * @param array<string, mixed> $payload
      * @return array{status: int, body: string}

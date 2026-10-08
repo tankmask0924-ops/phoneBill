@@ -64,4 +64,18 @@ class HttpClient
 
         return ['status' => $response->getStatusCode(), 'body' => (string) $response->getBody()];
     }
+
+    /**
+     * 原样发送请求体的 POST，用于签名算在请求体字符串上的接口，异常约定同 postJson。
+     *
+     * @param array<string, string> $headers
+     * @return array{status: int, body: string}
+     */
+    public function postRaw(string $url, string $body, array $headers, float $timeoutSeconds = 5.0): array
+    {
+        $response = $this->clientFactory->create(['timeout' => $timeoutSeconds, 'connect_timeout' => 3.0, 'http_errors' => false])
+            ->post($url, ['body' => $body, 'headers' => $headers]);
+
+        return ['status' => $response->getStatusCode(), 'body' => (string) $response->getBody()];
+    }
 }
