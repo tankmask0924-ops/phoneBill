@@ -368,7 +368,7 @@ onMounted(async () => {
   </el-dialog>
 
   <!-- 密钥只显示一次 -->
-  <el-dialog v-model="secretVisible" title="接口密钥" width="560px" :close-on-click-modal="false">
+  <el-dialog v-model="secretVisible" title="接口密钥" width="min(760px, 92vw)" :close-on-click-modal="false">
     <el-alert type="warning" :closable="false" show-icon title="密钥只显示这一次，关闭后无法再查看，请立即复制并安全地交给商户" />
     <el-descriptions :column="1" border class="secret">
       <el-descriptions-item label="商户">{{ secret.name }}</el-descriptions-item>
@@ -529,6 +529,11 @@ onMounted(async () => {
 
 .secret {
   margin-top: 12px;
+}
+
+/* AppSecret 有 64 位，窄屏时换行，不撑出弹窗 */
+.secret code {
+  word-break: break-all;
 }
 
 .open-product {
