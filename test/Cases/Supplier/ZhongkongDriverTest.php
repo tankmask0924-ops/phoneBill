@@ -47,9 +47,7 @@ class ZhongkongDriverTest extends HttpTestCase
     use CreatesCatalog;
 
     private const CONFIG = [
-        'recharge_url' => 'https://zk.test/api/recharge',
-        'query_url' => 'https://zk.test/api/query',
-        'balance_url' => 'https://zk.test/api/balance',
+        'api_url' => 'https://zk.test/',
         'appid' => 'zk_app',
         'secret' => 'zk_secret',
         'timestamp_format' => 'datetime',
@@ -87,7 +85,7 @@ class ZhongkongDriverTest extends HttpTestCase
         $this->assertSame(RechargeStatus::Processing, $result->status);
         $sent = $this->http->requests[0];
         $this->assertSame('POST_JSON', $sent['method']);
-        $this->assertSame(self::CONFIG['recharge_url'], $sent['url']);
+        $this->assertSame('https://zk.test/app/agent/order', $sent['url']);
         $payload = $sent['payload'];
         $this->assertSame('A0001', $payload['inOrderNumber']);
         $this->assertSame('zk_app', $payload['appid']);
@@ -128,7 +126,7 @@ class ZhongkongDriverTest extends HttpTestCase
             $this->assertSame($mapped, $this->driver()->query($this->request())->status, "status {$status}");
         }
         $sent = $this->http->requests[0];
-        $this->assertSame(self::CONFIG['query_url'], $sent['url']);
+        $this->assertSame('https://zk.test/app/agent/checkOrder', $sent['url']);
         $this->assertSame('A0001', $sent['payload']['inOrderNumber']);
         $this->assertSame(ZhongkongDriver::sign($sent['payload'], 'zk_secret'), $sent['payload']['sign']);
 
@@ -143,11 +141,8 @@ class ZhongkongDriverTest extends HttpTestCase
     {
         $this->respond(['code' => '0', 'message' => '操作成功', 'debtAmount' => '1000.50', 'amount' => '20', 'freezeAmount' => '0', 'qualification' => '0']);
         $this->assertSame('1000.50', $this->driver()->balance(self::CONFIG));
-        $this->assertSame(self::CONFIG['balance_url'], $this->http->requests[0]['url']);
+        $this->assertSame('https://zk.test/app/agent/checkAgent', $this->http->requests[0]['url']);
         $this->assertSame(['appid', 'timestamp', 'sign'], array_keys($this->http->requests[0]['payload']));
-
-        // 没填余额接口地址：不支持
-        $this->assertNull($this->driver()->balance(['balance_url' => ''] + self::CONFIG));
 
         // 返回里没有 debtAmount：报错，不瞎猜
         $this->respond(['code' => '0', 'message' => '操作成功', 'amount' => '0', 'freezeAmount' => '0', 'qualification' => '0']);

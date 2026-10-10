@@ -26,12 +26,19 @@ use RuntimeException;
  *
  * - inOrderNumber 传提交单号 attempt_no，agentProductId 传供应商商品编码，num 固定 1；
  * - 签名：除 sign 外参数按名升序拼 k=v&...，末尾拼 &key=秘钥，整串 md5；
- * - 文档没给各接口路径、时间戳格式前后矛盾，所以接口地址分开填、时间戳格式做成可选项；
+ * - 接口路径文档里没写，中控另行提供：下单 /app/agent/order、查单 /app/agent/checkOrder、余额 /app/agent/checkAgent；
+ * - 文档里时间戳格式前后矛盾，做成可选项；
  * - 文档没说清下单 code=500 时是否建了单、查不到订单时返回什么，所以下单只有 code 为 0 / 1 才算受理，
  *   其余一律处理中，结果只认查单和验签通过的回调。
  */
 class ZhongkongDriver implements SupplierDriverInterface
 {
+    private const PATH_RECHARGE = '/app/agent/order';
+
+    private const PATH_QUERY = '/app/agent/checkOrder';
+
+    private const PATH_BALANCE = '/app/agent/checkAgent';
+
     private const CODE_OK = '0';
 
     /** 商家订单号已经存在：之前已经提交过，绝不能当失败 */
@@ -60,9 +67,7 @@ class ZhongkongDriver implements SupplierDriverInterface
     public function configSchema(): array
     {
         return [
-            ['key' => 'recharge_url', 'label' => '下单接口地址', 'type' => 'text', 'required' => true, 'placeholder' => 'https://上游域名/下单路径'],
-            ['key' => 'query_url', 'label' => '查单接口地址', 'type' => 'text', 'required' => true, 'placeholder' => 'https://上游域名/查单路径'],
-            ['key' => 'balance_url', 'label' => '余额接口地址', 'type' => 'text', 'required' => false, 'placeholder' => '不填则不查余额'],
+            ['key' => 'api_url', 'label' => '接口域名', 'type' => 'text', 'required' => true, 'placeholder' => 'https://上游域名'],
             ['key' => 'appid', 'label' => '商家ID（appid）', 'type' => 'text', 'required' => true],
             ['key' => 'secret', 'label' => '秘钥', 'type' => 'secret', 'required' => true],
             [
@@ -81,7 +86,7 @@ class ZhongkongDriver implements SupplierDriverInterface
 
     public function recharge(RechargeRequest $request): RechargeResult
     {
-        [$sent, $response] = $this->call($request->config, $request->config['recharge_url'] ?? '', [
+        [$sent, $response] = $this->call($request->config, $this->url($request->config, self::PATH_RECHARGE), [
             'inOrderNumber' => $request->attemptNo,
             'agentProductId' => $request->externalCode,
             'phone' => $request->mobile,
@@ -103,7 +108,7 @@ class ZhongkongDriver implements SupplierDriverInterface
 
     public function query(RechargeRequest $request): RechargeResult
     {
-        [$sent, $response] = $this->call($request->config, $request->config['query_url'] ?? '', ['inOrderNumber' => $request->attemptNo]);
+        [$sent, $response] = $this->call($request->config, $this->url($request->config, self::PATH_QUERY), ['inOrderNumber' => $request->attemptNo]);
         $body = $this->decode($response['body']);
         if ($body === null || $body['code'] !== self::CODE_OK || ! is_numeric($body['status'] ?? null)) {
             return RechargeResult::processing($request->supplierOrderNo, '查单未拿到明确结果：' . $this->describe($body, $response), $sent, $response['body']);
@@ -133,10 +138,7 @@ class ZhongkongDriver implements SupplierDriverInterface
 
     public function balance(array $config): ?string
     {
-        if (($config['balance_url'] ?? '') === '') {
-            return null;
-        }
-        [, $response] = $this->call($config, $config['balance_url'], []);
+        [, $response] = $this->call($config, $this->url($config, self::PATH_BALANCE), []);
         $body = $this->decode($response['body']);
         if ($body === null || $body['code'] !== self::CODE_OK || ! is_scalar($body['debtAmount'] ?? null)) {
             throw new RuntimeException('查询余额失败：' . mb_substr($response['body'], 0, 200));
@@ -191,6 +193,14 @@ class ZhongkongDriver implements SupplierDriverInterface
             self::STATUS_FAILED => RechargeResult::failed('上游充值失败', $supplierOrderNo, $request, $raw),
             default => RechargeResult::processing($supplierOrderNo, null, $request, $raw),
         };
+    }
+
+    /**
+     * @param array<string, string> $config
+     */
+    private function url(array $config, string $path): string
+    {
+        return rtrim($config['api_url'] ?? '', '/') . $path;
     }
 
     /**

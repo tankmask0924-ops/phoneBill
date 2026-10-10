@@ -9,7 +9,7 @@
 | 请求方式 | 全部 `POST` |
 | Content-Type | `application/json` |
 | 数据类型 | 参数值一律用字符串传输 |
-| 接口地址 | 原文没给域名和各接口路径（见待确认 1） |
+| 接口地址 | 域名由中控提供；路径原文没写，中控另行提供：下单 `/app/agent/order`、查单 `/app/agent/checkOrder`、余额 `/app/agent/checkAgent`、可售商品 `/app/agent/checkAgentProducts` |
 | 商家标识 | 每个请求都带 `appid`（平台分配的商家ID） |
 | 时间戳 | `timestamp`，格式 `yyyyMMddHHmmss`，如 `20170928115522`（原文示例里写的是 10 位数字，见待确认 2） |
 
@@ -44,6 +44,8 @@ function sign(array $params, string $secret): string
 空值参数是否参与签名，原文只在回调里说了 `param1`、`param2` 为空时不参与（见待确认 3）。
 
 ## 2. 充值下单
+
+`POST {域名}/app/agent/order`
 
 **请求参数**
 
@@ -87,6 +89,8 @@ function sign(array $params, string $secret): string
 
 ## 3. 订单查询
 
+`POST {域名}/app/agent/checkOrder`
+
 **请求参数**
 
 | 参数 | 名称 | 参与签名 | 必填 | 说明 |
@@ -124,6 +128,8 @@ function sign(array $params, string $secret): string
 | `cards` | String | 卡密商品成功时的卡密信息（JSON 字符串），话费不用 |
 
 ## 4. 余额查询
+
+`POST {域名}/app/agent/checkAgent`
 
 **请求参数**
 
@@ -188,6 +194,8 @@ function sign(array $params, string $secret): string
 
 ## 6. 可售商品查询
 
+`POST {域名}/app/agent/checkAgentProducts`
+
 **请求参数**
 
 | 参数 | 名称 | 必填 | 说明 |
@@ -228,7 +236,7 @@ function sign(array $params, string $secret): string
 | `parseCallback` | 结果回调 | 用 `thirdOrderId` 找回提交；回调带签名，可以验签 |
 | `balance` | 余额查询 | 取 `debtAmount`（待确认 6） |
 
-后台需要填的接口参数：下单 / 查单 / 余额三个接口的完整地址（文档没给路径，所以分开填；余额不填就不查）、商家ID（`appid`）、秘钥、时间戳格式（年月日时分秒或秒级时间戳，文档前后矛盾，默认按参数表选年月日时分秒）、回调地址。商品查询接口驱动不用，只在建供应商商品时查 `agentProductId` 用。只接话费，`num` 固定 `1`，不接卡密。
+后台需要填的接口参数：接口域名（各接口路径写在驱动里）、商家ID（`appid`）、秘钥、时间戳格式（年月日时分秒或秒级时间戳，文档前后矛盾，默认按参数表选年月日时分秒）、回调地址。商品查询接口驱动不用，只在建供应商商品时查 `agentProductId` 用。只接话费，`num` 固定 `1`，不接卡密。
 
 结果判定（待确认事项没回复前按保守方式处理）：
 
@@ -248,7 +256,7 @@ function sign(array $params, string $secret): string
 
 ## 待确认事项
 
-1. **接口地址**：域名，以及下单、查单、余额、商品查询四个接口各自的路径。
+1. ~~**接口地址**~~：已提供，见第 1 节。
 2. **时间戳格式**：参数表写的是 `yyyyMMddHHmmss`（如 `20170928115522`），传入示例里却是 10 位数字（`1234577844`，像秒级时间戳）。以哪个为准？允许和对方服务器时间相差多少？
 3. **空值参数**：请求里的空值参数是否参与签名？原文只在回调里说了 `param1`、`param2` 为空时不参与。签名用的值是否就是原始字符串（不做 URL 编码）？MD5 结果大写还是小写？
 4. **下单 `code=500`**：是否一定没生成订单？我们要据此判断能不能直接判失败、给商户退款。
