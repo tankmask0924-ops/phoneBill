@@ -63,6 +63,18 @@ class SupplierProductController extends AbstractController
         return $this->supplierAdminService->options();
     }
 
+    /**
+     * 实时查供应商的可售商品（驱动支持时），建供应商商品时从里面选。
+     */
+    #[Middleware(AdminAuthMiddleware::class)]
+    #[Middleware(AdminPermissionMiddleware::class)]
+    #[RequiresPermission('supplier_product.manage')]
+    #[GetMapping(path: 'upstream-products')]
+    public function upstreamProducts(): array
+    {
+        return $this->supplierProductAdminService->upstreamProducts($this->request->input('supplier_id'));
+    }
+
     #[Middleware(AdminAuthMiddleware::class)]
     #[Middleware(AdminPermissionMiddleware::class)]
     #[RequiresPermission('supplier_product.manage')]

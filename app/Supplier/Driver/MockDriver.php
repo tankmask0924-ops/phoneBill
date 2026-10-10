@@ -13,10 +13,12 @@ declare(strict_types=1);
 namespace App\Supplier\Driver;
 
 use App\Supplier\CallbackResult;
+use App\Supplier\ProvidesUpstreamProducts;
 use App\Supplier\RechargeRequest;
 use App\Supplier\RechargeResult;
 use App\Supplier\RechargeStatus;
 use App\Supplier\SupplierDriverInterface;
+use App\Supplier\UpstreamProduct;
 use Psr\Http\Message\ServerRequestInterface;
 use RuntimeException;
 use Swoole\Coroutine;
@@ -25,9 +27,10 @@ use Swoole\Coroutine;
  * 模拟供应商，开发和测试用，不发任何外部请求。
  *
  * - 充值、查单按接口参数里的「模拟结果」返回；选「超时」时充值直接抛异常（模拟网络超时），查单返回处理中；
- * - 回调：POST JSON {"attempt_no": "...", "status": "success|failed", "message": "..."}，回 ok。
+ * - 回调：POST JSON {"attempt_no": "...", "status": "success|failed", "message": "..."}，回 ok；
+ * - 商品列表返回固定的几个模拟商品，含一个下架的。
  */
-class MockDriver implements SupplierDriverInterface
+class MockDriver implements SupplierDriverInterface, ProvidesUpstreamProducts
 {
     public function code(): string
     {
@@ -97,6 +100,16 @@ class MockDriver implements SupplierDriverInterface
     public function balance(array $config): ?string
     {
         return '99999.00';
+    }
+
+    public function upstreamProducts(array $config): array
+    {
+        return [
+            new UpstreamProduct('MOCK_CMCC_100', '模拟 移动100', '98.50', 100, ['cmcc'], true, '全国'),
+            new UpstreamProduct('MOCK_CUCC_100', '模拟 联通100', '98.80', 100, ['cucc'], true, '全国'),
+            new UpstreamProduct('MOCK_CTCC_50', '模拟 电信50', '49.40', 50, ['ctcc']),
+            new UpstreamProduct('MOCK_OFF', '模拟 已下架', '9.90', 10, [], false),
+        ];
     }
 
     /**

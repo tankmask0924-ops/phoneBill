@@ -20,10 +20,12 @@ use App\Model\Supplier;
 use App\Security\Encrypter;
 use App\Service\AbstractService;
 use App\Supplier\CallbackResult;
+use App\Supplier\ProvidesUpstreamProducts;
 use App\Supplier\RechargeRequest;
 use App\Supplier\RechargeResult;
 use App\Supplier\SupplierDriverInterface;
 use App\Supplier\SupplierDriverRegistry;
+use App\Supplier\UpstreamProduct;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\Logger\LoggerFactory;
 use Psr\Http\Message\ServerRequestInterface;
@@ -76,6 +78,31 @@ class SupplierGateway extends AbstractService
         ]);
 
         return $result;
+    }
+
+    /**
+     * 驱动是否提供查询上游商品。
+     */
+    public function supportsUpstreamProducts(Supplier $supplier): bool
+    {
+        return $this->driverRegistry->find($supplier->driver) instanceof ProvidesUpstreamProducts;
+    }
+
+    /**
+     * 查上游可售商品，出错直接抛异常（只给后台建商品时用，不影响下单）。
+     *
+     * @return list<UpstreamProduct>
+     */
+    public function upstreamProducts(Supplier $supplier): array
+    {
+        $driver = $this->driver($supplier);
+        if (! $driver instanceof ProvidesUpstreamProducts) {
+            throw new RuntimeException("供应商 {$supplier->code} 的驱动不支持查询商品");
+        }
+        $products = $driver->upstreamProducts($this->decryptConfig($supplier));
+        $this->logger()->info('upstream_products', ['supplier' => $supplier->code, 'count' => count($products)]);
+
+        return $products;
     }
 
     /**

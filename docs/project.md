@@ -336,6 +336,7 @@ app/Supplier/
 - 供应商回调地址：`/notify/supplier/{supplier_code}`。
 - 请求和响应完整记到 `order_attempts`，同时写日志渠道 `supplier`。
 - 接入新供应商：写驱动类 → 注册驱动编码 → 后台新增供应商时选驱动、填参数。
+- 供应商提供了商品查询接口时，驱动再实现 `ProvidesUpstreamProducts`：后台建 / 编辑供应商商品时可以从上游商品列表里选，自动填写编码、名称、成本价，上游给了的话还有面值和运营商；下架的不能选，本供应商下已建过的标「已添加」。实时查上游，不缓存，出错时仍可手动填编码。已实现：`open_platform`、`shangteng`（逐页取完）、`zhongkong`、`mock`。
 
 ### 7.1 开放平台（驱动 `open_platform`）
 

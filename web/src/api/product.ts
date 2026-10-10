@@ -90,10 +90,27 @@ export interface SupplierOption {
   id: number
   name: string
   status: string
+  /** 驱动支持查询上游商品，建供应商商品时可以从列表里选 */
+  supports_upstream_products: boolean
+}
+
+/** 上游可售商品，上游没给的字段为 null / 空数组 */
+export interface UpstreamProduct {
+  code: string
+  name: string
+  price: string | null
+  face_value: number | null
+  operators: OperatorCode[]
+  on_sale: boolean
+  note: string | null
+  /** 本供应商下已经建过这个编码的供应商商品 */
+  added: boolean
 }
 
 export const supplierProductApi = {
   supplierOptions: () => http.get<SupplierOption[]>('/admin/supplier-products/supplier-options'),
+  upstreamProducts: (supplierId: number) =>
+    http.get<UpstreamProduct[]>('/admin/supplier-products/upstream-products', { supplier_id: supplierId }),
   list: (params: Query) => http.get<Paged<SupplierProduct>>('/admin/supplier-products', params),
   create: (data: SupplierProductForm) => http.post<SupplierProduct>('/admin/supplier-products', data),
   update: (id: number, data: Partial<SupplierProductForm>) => http.put<SupplierProduct>(`/admin/supplier-products/${id}`, data),

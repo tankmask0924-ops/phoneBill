@@ -2,9 +2,15 @@
 import StatusTag from '@/components/StatusTag.vue'
 import { usePagedList } from '@/utils/paged'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
-import { Plus } from '@element-plus/icons-vue'
-import { computed, onMounted, reactive, ref } from 'vue'
-import { type OperatorCode, type SupplierOption, type SupplierProduct, supplierProductApi } from '@/api/product'
+import { Plus, Refresh } from '@element-plus/icons-vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import {
+  type OperatorCode,
+  type SupplierOption,
+  type SupplierProduct,
+  type UpstreamProduct,
+  supplierProductApi,
+} from '@/api/product'
 import { labelOf, operatorLabels, shelfStatusLabels, toOptions } from '@/utils/labels'
 import { usePermissionStore } from '@/stores/permission'
 
@@ -34,6 +40,69 @@ const form = reactive({
 })
 // 已经被平台商品绑定的，面值不能改
 const faceValueLocked = computed(() => (editing.value?.bound_product_count ?? 0) > 0)
+
+// 供应商提供了商品查询接口时，从上游商品列表里选，自动填写表单
+const supportsUpstream = computed(
+  () => suppliers.value.find((s) => s.id === form.supplier_id)?.supports_upstream_products ?? false,
+)
+const upstream = ref<UpstreamProduct[]>([])
+const upstreamLoading = ref(false)
+const upstreamPick = ref('')
+
+async function loadUpstream() {
+  upstream.value = []
+  upstreamPick.value = ''
+  const supplierId = form.supplier_id
+  if (!supplierId || !supportsUpstream.value) {
+    return
+  }
+  upstreamLoading.value = true
+  try {
+    const products = await supplierProductApi.upstreamProducts(supplierId)
+    // 加载期间换了供应商，丢掉旧结果
+    if (form.supplier_id === supplierId) {
+      upstream.value = products
+      // 编辑时标出当前对应的上游商品（只是显示，不触发自动填写）
+      if (products.some((p) => p.code === form.external_code)) {
+        upstreamPick.value = form.external_code
+      }
+    }
+  } catch {
+    // 拦截器已经提示了错误，这里保持列表为空，可以手动填编码
+  } finally {
+    upstreamLoading.value = false
+  }
+}
+
+watch(
+  () => [dialogVisible.value, form.supplier_id] as const,
+  ([visible]) => {
+    if (visible) {
+      loadUpstream()
+    }
+  },
+)
+
+function onPickUpstream(code: string) {
+  const picked = upstream.value.find((p) => p.code === code)
+  if (!picked) {
+    return
+  }
+  form.external_code = picked.code
+  if (picked.name) {
+    form.name = picked.name.slice(0, 64)
+  }
+  const price = picked.price === null ? NaN : Number(picked.price)
+  if (Number.isFinite(price) && price > 0) {
+    form.cost_price = price.toFixed(2)
+  }
+  if (picked.face_value !== null && !faceValueLocked.value) {
+    form.face_value = picked.face_value
+  }
+  if (picked.operators.length > 0) {
+    form.operators = [...picked.operators]
+  }
+}
 
 const rules: FormRules = {
   supplier_id: [{ required: true, message: '请选择供应商', trigger: 'change' }],
@@ -208,6 +277,36 @@ onMounted(async () => {
           <el-option v-for="s in suppliers" :key="s.id" :label="s.name" :value="s.id" />
         </el-select>
       </el-form-item>
+      <el-form-item v-if="supportsUpstream" label="上游商品">
+        <div class="upstream">
+          <el-select
+            v-model="upstreamPick"
+            filterable
+            :loading="upstreamLoading"
+            placeholder="从上游商品列表里选"
+            no-data-text="上游没有返回商品"
+            class="upstream-select"
+            @change="onPickUpstream"
+          >
+            <el-option
+              v-for="p in upstream"
+              :key="p.code"
+              :value="p.code"
+              :label="`${p.name}（${p.code}）`"
+              :disabled="!p.on_sale"
+            >
+              <span>{{ p.name }}</span>
+              <span class="upstream-meta">
+                {{ p.code }}<template v-if="p.price"> · ¥{{ p.price }}</template><template v-if="p.note"> · {{ p.note }}</template>
+              </span>
+              <el-tag v-if="!p.on_sale" size="small" type="info" class="upstream-tag">下架</el-tag>
+              <el-tag v-else-if="p.added" size="small" type="warning" class="upstream-tag">已添加</el-tag>
+            </el-option>
+          </el-select>
+          <el-button :icon="Refresh" :loading="upstreamLoading" title="重新查询" @click="loadUpstream" />
+        </div>
+        <div class="tip upstream-tip">选择后自动填写名称、成本价，上游提供时还有面值和运营商，保存前请核对</div>
+      </el-form-item>
       <el-form-item label="商品名称" prop="name">
         <el-input v-model="form.name" maxlength="64" />
       </el-form-item>
@@ -257,5 +356,31 @@ onMounted(async () => {
   color: #909399;
   font-size: 12px;
   margin-left: 12px;
+}
+
+.upstream {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+
+.upstream-select {
+  flex: 1;
+  min-width: 0;
+}
+
+.upstream-tip {
+  margin-left: 0;
+  line-height: 1.6;
+}
+
+.upstream-meta {
+  color: #909399;
+  font-size: 12px;
+  margin-left: 8px;
+}
+
+.upstream-tag {
+  margin-left: 8px;
 }
 </style>

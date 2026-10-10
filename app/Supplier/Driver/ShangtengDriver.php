@@ -12,18 +12,21 @@ declare(strict_types=1);
 
 namespace App\Supplier\Driver;
 
+use App\Enum\Operator;
 use App\Network\HttpClient;
 use App\Supplier\CallbackResult;
+use App\Supplier\ProvidesUpstreamProducts;
 use App\Supplier\RechargeRequest;
 use App\Supplier\RechargeResult;
 use App\Supplier\SupplierDriverInterface;
+use App\Supplier\UpstreamProduct;
 use Hyperf\Di\Annotation\Inject;
 use Psr\Http\Message\ServerRequestInterface;
 use RuntimeException;
 use Throwable;
 
 /**
- * 商腾科技话费接口，文档见 docs/API接口.md（下单、查单、回调、余额）。
+ * 商腾科技话费接口，文档见 docs/API接口.md（下单、查单、回调、余额、商品列表）。
  *
  * - external_orderno 传提交单号 attempt_no，product_id 传供应商商品编码；
  * - 签名：参数按名升序转 JSON（不转义斜杠和中文），sha1(秒级时间戳 + JSON + ApiKey)，放在 Sign / Timestamp / Userid 请求头；
@@ -31,8 +34,16 @@ use Throwable;
  * - 下单返回 status 非 200 表示没建单（已和上游确认），直接失败；没拿到可解析的返回时不知道建没建单，按处理中等查单；
  * - 文档没说查不到订单时返回什么，所以查单只认明确状态，其余一律处理中，到时转异常人工处理。
  */
-class ShangtengDriver implements SupplierDriverInterface
+class ShangtengDriver implements SupplierDriverInterface, ProvidesUpstreamProducts
 {
+    /** 上游 isp：1 移动、2 联通、3 电信，4 虚拟不对应我们的运营商 */
+    private const OPERATORS = [1 => Operator::Cmcc, 2 => Operator::Cucc, 3 => Operator::Ctcc];
+
+    /** 商品列表每页条数和最多翻几页，防止上游分页信息异常时死循环 */
+    private const PRODUCT_PAGE_SIZE = 100;
+
+    private const PRODUCT_MAX_PAGES = 50;
+
     private const STATUS_OK = 200;
 
     /** 下单时传了会让上游校验面值的取值，其他面值不传 */
@@ -123,6 +134,32 @@ class ShangtengDriver implements SupplierDriverInterface
     }
 
     /**
+     * 商品列表是分页的，逐页取完。上架且开启了 API 充值的才算在售。
+     */
+    public function upstreamProducts(array $config): array
+    {
+        $products = [];
+        for ($page = 1; $page <= self::PRODUCT_MAX_PAGES; ++$page) {
+            [, $response] = $this->call($config, '/api/Product/index', ['limit' => (string) self::PRODUCT_PAGE_SIZE, 'page' => (string) $page]);
+            $body = $this->decode($response['body']);
+            if ($body === null || $body['status'] !== self::STATUS_OK) {
+                throw new RuntimeException('查询商品失败：' . $this->describe($body, $response));
+            }
+            [$items, $lastPage] = $this->productPage($body['data'] ?? null);
+            foreach ($items as $item) {
+                if (is_array($item) && is_scalar($item['id'] ?? null)) {
+                    $products[] = $this->toUpstreamProduct($item);
+                }
+            }
+            if ($items === [] || $page >= $lastPage) {
+                break;
+            }
+        }
+
+        return $products;
+    }
+
+    /**
      * 按上游文档「签名生成」计算签名，返回实际发送的请求体和 Sign。
      *
      * @param array<string, string> $params
@@ -165,6 +202,49 @@ class ShangtengDriver implements SupplierDriverInterface
             5 => RechargeResult::failed($reason === '' ? '上游充值失败' : $reason, $orderNo, $sent, $response['body']),
             default => RechargeResult::processing($orderNo, null, $sent, $response['body']),
         };
+    }
+
+    /**
+     * 文档示例里分页对象外面又包了一层数组，两种都认；没有分页信息时当只有一页。
+     *
+     * @return array{0: list<mixed>, 1: int} 本页商品、总页数
+     */
+    private function productPage(mixed $data): array
+    {
+        if (is_array($data) && array_is_list($data) && is_array($data[0] ?? null) && array_key_exists('data', $data[0])) {
+            $data = $data[0];
+        }
+        if (is_array($data) && array_key_exists('data', $data)) {
+            $items = is_array($data['data']) ? array_values($data['data']) : [];
+
+            return [$items, is_numeric($data['last_page'] ?? null) ? (int) $data['last_page'] : 1];
+        }
+
+        return [is_array($data) ? array_values($data) : [], 1];
+    }
+
+    /**
+     * @param array<string, mixed> $item
+     */
+    private function toUpstreamProduct(array $item): UpstreamProduct
+    {
+        $operator = is_numeric($item['isp'] ?? null) ? (self::OPERATORS[(int) $item['isp']] ?? null) : null;
+        $apiOpen = ! is_numeric($item['api_open'] ?? null) || (int) $item['api_open'] === 1;
+        $note = array_filter([
+            $apiOpen ? null : '未开启API充值',
+            is_scalar($item['success_rate'] ?? null) && $item['success_rate'] !== '' ? "成功率 {$item['success_rate']}" : null,
+            is_scalar($item['time_cost'] ?? null) && $item['time_cost'] !== '' ? "平均耗时 {$item['time_cost']}" : null,
+        ]);
+
+        return new UpstreamProduct(
+            (string) $item['id'],
+            is_scalar($item['name'] ?? null) ? (string) $item['name'] : '',
+            is_scalar($item['price'] ?? null) ? (string) $item['price'] : null,
+            null,
+            $operator === null ? [] : [$operator->value],
+            $apiOpen && is_numeric($item['status'] ?? null) && (int) $item['status'] === 1,
+            $note === [] ? null : implode(' · ', $note),
+        );
     }
 
     /**

@@ -72,6 +72,38 @@ class SupplierProductControllerTest extends HttpTestCase
         $this->assertContains($supplier->id, array_column($options, 'id'));
     }
 
+    public function testUpstreamProductsMarkAddedOnesAndNeedManagePermission()
+    {
+        $token = $this->loginAs($this->createAdminWithPermissions(['supplier_product.view', 'supplier_product.manage']));
+        $supplier = $this->createSupplier();
+
+        $options = $this->body($this->jsonRequest('GET', '/admin/supplier-products/supplier-options', $token));
+        $this->assertTrue(array_column($options, 'supports_upstream_products', 'id')[$supplier->id]);
+
+        $created = $this->body($this->jsonRequest('POST', '/admin/supplier-products', $token, [
+            'supplier_id' => $supplier->id, 'name' => '移动100', 'face_value' => 100, 'cost_price' => '98.5', 'external_code' => 'MOCK_CMCC_100', 'operators' => ['cmcc'],
+        ]));
+        $this->supplierProductIds[] = $created['id'];
+
+        $response = $this->jsonRequest('GET', "/admin/supplier-products/upstream-products?supplier_id={$supplier->id}", $token);
+        $this->assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $products = array_column($this->body($response), null, 'code');
+        $this->assertSame(['MOCK_CMCC_100', 'MOCK_CUCC_100', 'MOCK_CTCC_50', 'MOCK_OFF'], array_keys($products));
+        $this->assertTrue($products['MOCK_CMCC_100']['added']);
+        $this->assertFalse($products['MOCK_CUCC_100']['added']);
+        $this->assertSame(['cucc'], $products['MOCK_CUCC_100']['operators']);
+        $this->assertFalse($products['MOCK_OFF']['on_sale']);
+
+        // 不存在的供应商、驱动不支持
+        $this->assertSame(404, $this->jsonRequest('GET', '/admin/supplier-products/upstream-products?supplier_id=999999999', $token)->getStatusCode());
+        $supplier->update(['driver' => 'no_such_driver']);
+        $this->assertSame(422, $this->jsonRequest('GET', "/admin/supplier-products/upstream-products?supplier_id={$supplier->id}", $token)->getStatusCode());
+
+        // 只有查看权限：不能查
+        $viewer = $this->loginAs($this->createAdminWithPermissions(['supplier_product.view']));
+        $this->assertSame(403, $this->jsonRequest('GET', "/admin/supplier-products/upstream-products?supplier_id={$supplier->id}", $viewer)->getStatusCode());
+    }
+
     public function testValidationAndBoundFaceValue()
     {
         $token = $this->loginAs($this->createAdminWithPermissions(['supplier_product.manage']));

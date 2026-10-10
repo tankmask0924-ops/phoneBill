@@ -34,6 +34,7 @@ use HyperfTest\Cases\Admin\CreatesCatalog;
 use HyperfTest\HttpTestCase;
 use HyperfTest\Support\FakeHttpClient;
 use HyperfTest\Support\FakeOrderDispatcher;
+use RuntimeException;
 
 use function Hyperf\Support\make;
 
@@ -147,6 +148,29 @@ class OpenPlatformDriverTest extends HttpTestCase
         $result = $this->driver()->query($this->request());
         $this->assertSame(RechargeStatus::Processing, $result->status);
         $this->assertStringContainsString('42002', $result->message);
+    }
+
+    public function testUpstreamProductsMapOperatorFaceValueAndPrice()
+    {
+        $this->respond(['code' => 0, 'message' => 'ok', 'data' => [
+            ['id' => 12, 'name' => '移动 100 元快充', 'operator' => 'mobile', 'province' => null, 'charge_speed' => 'fast', 'card_type' => null, 'face_value' => '100.00', 'sale_price' => '99.20', 'rebate' => '0.30'],
+            ['id' => 13, 'name' => '电信 50 元', 'operator' => 'telecom', 'province' => '广东', 'charge_speed' => 'slow', 'card_type' => null, 'face_value' => '50.00', 'sale_price' => '49.60', 'rebate' => '0.10'],
+        ]]);
+        $products = array_map(static fn ($p) => $p->toArray(), $this->driver()->upstreamProducts(self::CONFIG));
+
+        $this->assertSame('GET', $this->http->requests[0]['method']);
+        $this->assertSame('https://upstream.test/open-api/products', $this->http->requests[0]['url']);
+        $this->assertSame('recharge', $this->http->requests[0]['payload']['business_line']);
+        $this->assertSame(
+            ['code' => '12', 'name' => '移动 100 元快充', 'price' => '99.20', 'face_value' => 100, 'operators' => ['cmcc'], 'on_sale' => true, 'note' => '全国 · 快充'],
+            $products[0]
+        );
+        $this->assertSame(['ctcc'], $products[1]['operators']);
+        $this->assertSame('限广东 · 慢充', $products[1]['note']);
+
+        $this->respond(['code' => 42007, 'message' => '业务线未开通', 'data' => null]);
+        $this->expectException(RuntimeException::class);
+        $this->driver()->upstreamProducts(self::CONFIG);
     }
 
     public function testBalance()

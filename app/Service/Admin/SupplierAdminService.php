@@ -133,8 +133,13 @@ class SupplierAdminService extends AbstractService
      */
     public function options(): array
     {
-        return $this->supplierDao->newQuery()->orderBy('id')->get(['id', 'name', 'status'])
-            ->map(static fn (Supplier $s) => ['id' => $s->id, 'name' => $s->name, 'status' => $s->status])
+        return $this->supplierDao->newQuery()->orderBy('id')->get(['id', 'name', 'status', 'driver'])
+            ->map(fn (Supplier $s) => [
+                'id' => $s->id,
+                'name' => $s->name,
+                'status' => $s->status,
+                'supports_upstream_products' => $this->supplierGateway->supportsUpstreamProducts($s),
+            ])
             ->values()->all();
     }
 

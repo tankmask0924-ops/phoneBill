@@ -14,9 +14,11 @@ namespace App\Supplier\Driver;
 
 use App\Network\HttpClient;
 use App\Supplier\CallbackResult;
+use App\Supplier\ProvidesUpstreamProducts;
 use App\Supplier\RechargeRequest;
 use App\Supplier\RechargeResult;
 use App\Supplier\SupplierDriverInterface;
+use App\Supplier\UpstreamProduct;
 use Hyperf\Di\Annotation\Inject;
 use Psr\Http\Message\ServerRequestInterface;
 use RuntimeException;
@@ -26,18 +28,21 @@ use RuntimeException;
  *
  * - inOrderNumber 传提交单号 attempt_no，agentProductId 传供应商商品编码，num 固定 1；
  * - 签名：除 sign 外参数按名升序拼 k=v&...，末尾拼 &key=秘钥，整串 md5；
- * - 接口路径文档里没写，中控另行提供：下单 /app/agent/order、查单 /app/agent/checkOrder、余额 /app/agent/checkAgent；
+ * - 接口路径文档里没写，中控另行提供：下单 /app/agent/order、查单 /app/agent/checkOrder、余额 /app/agent/checkAgent、
+ *   可售商品 /app/agent/checkAgentProducts；
  * - 文档里时间戳格式前后矛盾，做成可选项；
  * - 文档没说清下单 code=500 时是否建了单、查不到订单时返回什么，所以下单只有 code 为 0 / 1 才算受理，
  *   其余一律处理中，结果只认查单和验签通过的回调。
  */
-class ZhongkongDriver implements SupplierDriverInterface
+class ZhongkongDriver implements SupplierDriverInterface, ProvidesUpstreamProducts
 {
     private const PATH_RECHARGE = '/app/agent/order';
 
     private const PATH_QUERY = '/app/agent/checkOrder';
 
     private const PATH_BALANCE = '/app/agent/checkAgent';
+
+    private const PATH_PRODUCTS = '/app/agent/checkAgentProducts';
 
     private const CODE_OK = '0';
 
@@ -145,6 +150,38 @@ class ZhongkongDriver implements SupplierDriverInterface
         }
 
         return (string) $body['debtAmount'];
+    }
+
+    /**
+     * 只有编码、名称、售价、是否在售（isOnSale：0 在售、1 下架），面值和运营商要管理员自己填。
+     */
+    public function upstreamProducts(array $config): array
+    {
+        [, $response] = $this->call($config, $this->url($config, self::PATH_PRODUCTS), []);
+        $body = $this->decode($response['body']);
+        if ($body === null || $body['code'] !== self::CODE_OK || ! is_array($body['products'] ?? null)) {
+            throw new RuntimeException('查询商品失败：' . $this->describe($body, $response));
+        }
+
+        $products = [];
+        foreach ($body['products'] as $item) {
+            if (! is_array($item)) {
+                continue;
+            }
+            // 文档示例里字段名前面带了空格，防一手
+            $item = array_combine(array_map(static fn ($k) => trim((string) $k), array_keys($item)), $item);
+            if (! is_scalar($item['id'] ?? null) || (string) $item['id'] === '') {
+                continue;
+            }
+            $products[] = new UpstreamProduct(
+                (string) $item['id'],
+                is_scalar($item['productName'] ?? null) ? (string) $item['productName'] : '',
+                is_scalar($item['price'] ?? null) ? (string) $item['price'] : null,
+                onSale: is_scalar($item['isOnSale'] ?? null) && (string) $item['isOnSale'] === '0',
+            );
+        }
+
+        return $products;
     }
 
     /**

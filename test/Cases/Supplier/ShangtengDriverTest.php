@@ -146,6 +146,37 @@ class ShangtengDriverTest extends HttpTestCase
         $this->assertSame(RechargeStatus::Processing, $this->driver()->query($this->request())->status);
     }
 
+    public function testUpstreamProductsWalkPagesAndMapStatus()
+    {
+        $item = static fn (int $id, int $isp, int $status = 1, int $apiOpen = 1) => [
+            'id' => $id, 'name' => "商品{$id}", 'price' => '98.50', 'cate_name' => '话费', 'type_name' => '快充', 'product_name' => 'x',
+            'isp' => (string) $isp, 'remark' => '', 'margin' => '0', 'success_rate' => '95%', 'time_cost' => '30秒',
+            'api_open' => $apiOpen, 'timeout_auto_refund' => 0, 'status' => $status, 'sort' => 0, 'create_time' => 0,
+        ];
+        // 第一页按文档示例包了一层数组，第二页是分页对象本身
+        $this->http->responses = [
+            ['status' => 200, 'body' => json_encode(['status' => 200, 'data' => [['total' => 3, 'per_page' => 100, 'current_page' => 1, 'last_page' => 2, 'data' => [$item(1, 1), $item(2, 4)]]]])],
+            ['status' => 200, 'body' => json_encode(['status' => 200, 'data' => ['total' => 3, 'per_page' => 100, 'current_page' => 2, 'last_page' => 2, 'data' => [$item(3, 3, 1, 0)]]])],
+        ];
+        $products = array_map(static fn ($p) => $p->toArray(), $this->driver()->upstreamProducts(self::CONFIG));
+
+        $this->assertCount(2, $this->http->requests);
+        $this->assertSame('https://st.test/api/Product/index', $this->http->requests[0]['url']);
+        $this->assertSame(['limit' => '100', 'page' => '2'], json_decode($this->http->requests[1]['payload']['body'], true));
+        $this->assertSame(['1', '2', '3'], array_column($products, 'code'));
+        $this->assertSame(
+            ['code' => '1', 'name' => '商品1', 'price' => '98.50', 'face_value' => null, 'operators' => ['cmcc'], 'on_sale' => true, 'note' => '成功率 95% · 平均耗时 30秒'],
+            $products[0]
+        );
+        $this->assertSame([], $products[1]['operators'], '虚拟运营商不对应');
+        $this->assertFalse($products[2]['on_sale'], '没开 API 充值不能下单');
+        $this->assertStringContainsString('未开启API充值', $products[2]['note']);
+
+        $this->respond(['status' => 411, 'msg' => '签名错误']);
+        $this->expectException(RuntimeException::class);
+        $this->driver()->upstreamProducts(self::CONFIG);
+    }
+
     public function testBalance()
     {
         $this->respond(['status' => 200, 'data' => ['phone_balance' => 1000.5, 'power_balance' => 0, 'member_balance' => 0]]);

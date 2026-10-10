@@ -137,6 +137,29 @@ class ZhongkongDriverTest extends HttpTestCase
         $this->assertSame(RechargeStatus::Processing, $this->driver()->query($this->request())->status);
     }
 
+    public function testUpstreamProducts()
+    {
+        // 字段名前带空格是照着文档示例来的
+        $this->respond(['code' => '0', 'msg' => 'success', 'products' => [
+            [' id' => '4028b8815f7d4ae2015f86ee6aa70009', ' price' => '98.6', ' productName' => '移动100', ' isOnSale' => '0'],
+            ['id' => 7, 'price' => '49.5', 'productName' => '联通50', 'isOnSale' => '1'],
+        ]]);
+        $products = array_map(static fn ($p) => $p->toArray(), $this->driver()->upstreamProducts(self::CONFIG));
+
+        $this->assertSame('https://zk.test/app/agent/checkAgentProducts', $this->http->requests[0]['url']);
+        $this->assertSame(['appid', 'timestamp', 'sign'], array_keys($this->http->requests[0]['payload']));
+        $this->assertSame(
+            ['code' => '4028b8815f7d4ae2015f86ee6aa70009', 'name' => '移动100', 'price' => '98.6', 'face_value' => null, 'operators' => [], 'on_sale' => true, 'note' => null],
+            $products[0]
+        );
+        $this->assertSame('7', $products[1]['code']);
+        $this->assertFalse($products[1]['on_sale']);
+
+        $this->respond(['code' => '500', 'msg' => '签名错误']);
+        $this->expectException(RuntimeException::class);
+        $this->driver()->upstreamProducts(self::CONFIG);
+    }
+
     public function testBalance()
     {
         $this->respond(['code' => '0', 'message' => '操作成功', 'debtAmount' => '1000.50', 'amount' => '20', 'freezeAmount' => '0', 'qualification' => '0']);

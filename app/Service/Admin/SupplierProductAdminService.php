@@ -22,9 +22,12 @@ use App\Model\AdminUser;
 use App\Model\SupplierProduct;
 use App\Service\AbstractService;
 use App\Service\Product\ProductRouteService;
+use App\Service\Supplier\SupplierGateway;
+use App\Supplier\UpstreamProduct;
 use Hyperf\DbConnection\Db;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpMessage\Exception\HttpException;
+use Throwable;
 
 /**
  * 商品中心 - 供应商商品：面值、成本价、支持的运营商、供应商侧商品编码、上下架。
@@ -58,6 +61,9 @@ class SupplierProductAdminService extends AbstractService
 
     #[Inject]
     protected ProductRouteService $routeService;
+
+    #[Inject]
+    protected SupplierGateway $supplierGateway;
 
     /**
      * @param array<string, mixed> $query keyword / supplier_id / operator / face_value / status
@@ -94,6 +100,31 @@ class SupplierProductAdminService extends AbstractService
             'page' => $page,
             'per_page' => $perPage,
         ];
+    }
+
+    /**
+     * 实时查供应商那边的可售商品，给建供应商商品时挑选；added 表示这个编码在本供应商下已经建过。
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function upstreamProducts(mixed $supplierId): array
+    {
+        $supplier = is_numeric($supplierId) ? $this->supplierDao->find((int) $supplierId) : null;
+        if ($supplier === null) {
+            throw new HttpException(404, '供应商不存在');
+        }
+        if (! $this->supplierGateway->supportsUpstreamProducts($supplier)) {
+            throw new HttpException(422, '该供应商的接口不支持查询商品，请手动填写供应商商品编码');
+        }
+        try {
+            $products = $this->supplierGateway->upstreamProducts($supplier);
+        } catch (Throwable $e) {
+            throw new HttpException(422, mb_substr('查询上游商品失败：' . $e->getMessage(), 0, 255));
+        }
+        $codes = array_map(static fn (UpstreamProduct $p) => $p->code, $products);
+        $added = array_flip($codes === [] ? [] : $this->supplierProductDao->existingExternalCodes($supplier->id, $codes));
+
+        return array_map(static fn (UpstreamProduct $p) => $p->toArray() + ['added' => isset($added[$p->code])], $products);
     }
 
     /**

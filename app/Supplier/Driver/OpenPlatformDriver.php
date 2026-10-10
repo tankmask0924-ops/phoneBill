@@ -12,25 +12,31 @@ declare(strict_types=1);
 
 namespace App\Supplier\Driver;
 
+use App\Enum\Operator;
 use App\Network\HttpClient;
 use App\Supplier\CallbackResult;
+use App\Supplier\ProvidesUpstreamProducts;
 use App\Supplier\RechargeRequest;
 use App\Supplier\RechargeResult;
 use App\Supplier\SupplierDriverInterface;
+use App\Supplier\UpstreamProduct;
 use Hyperf\Di\Annotation\Inject;
 use Psr\Http\Message\ServerRequestInterface;
 use RuntimeException;
 
 /**
- * 上游开放平台的话费接口，文档见 docs/open-api-integration.md（只接话费：下单、查单、回调、余额）。
+ * 上游开放平台的话费接口，文档见 docs/open-api-integration.md（只接话费：下单、查单、回调、余额、商品列表）。
  *
  * - 我们是它的商户：merchant_order_no 传提交单号 attempt_no，product_id 传供应商商品编码；
  * - 签名：除 sign 外全部参数（空值也算）按参数名升序拼 k=v&...，AppSecret 做 HMAC-SHA256；
  * - 上游不识别运营商，一个上游商品只对应一个运营商，供应商商品要按运营商分开建；
  * - 同一个 merchant_order_no 重复提交只会返回第一次的订单，所以查单查不到时用原单号补提交是安全的。
  */
-class OpenPlatformDriver implements SupplierDriverInterface
+class OpenPlatformDriver implements SupplierDriverInterface, ProvidesUpstreamProducts
 {
+    /** 上游的运营商编码 → 我们的 */
+    private const OPERATORS = ['mobile' => Operator::Cmcc, 'unicom' => Operator::Cucc, 'telecom' => Operator::Ctcc];
+
     /** 请求和回调的时间戳允许误差（秒） */
     private const TIMESTAMP_TOLERANCE = 300;
 
@@ -106,6 +112,43 @@ class OpenPlatformDriver implements SupplierDriverInterface
         }
 
         return (string) $body['data']['available_balance'];
+    }
+
+    public function upstreamProducts(array $config): array
+    {
+        [, $response] = $this->call($config, 'GET', '/products', ['business_line' => 'recharge']);
+        $body = $this->decode($response['body']);
+        if ($body === null || (int) $body['code'] !== 0 || ! is_array($body['data'] ?? null)) {
+            throw new RuntimeException('查询商品失败：' . $this->describe($body, $response));
+        }
+
+        $products = [];
+        foreach ($body['data'] as $item) {
+            if (! is_array($item) || ! is_scalar($item['id'] ?? null)) {
+                continue;
+            }
+            $operator = self::OPERATORS[$item['operator'] ?? ''] ?? null;
+            $faceValue = $item['face_value'] ?? null;
+            $note = array_filter([
+                is_string($item['province'] ?? null) && $item['province'] !== '' ? "限{$item['province']}" : '全国',
+                match ($item['charge_speed'] ?? null) {
+                    'fast' => '快充',
+                    'slow' => '慢充',
+                    default => null,
+                },
+            ]);
+            $products[] = new UpstreamProduct(
+                (string) $item['id'],
+                is_scalar($item['name'] ?? null) ? (string) $item['name'] : '',
+                is_scalar($item['sale_price'] ?? null) ? (string) $item['sale_price'] : null,
+                is_numeric($faceValue) && (float) $faceValue == (int) $faceValue ? (int) $faceValue : null,
+                $operator === null ? [] : [$operator->value],
+                true,
+                implode(' · ', $note),
+            );
+        }
+
+        return $products;
     }
 
     /**
