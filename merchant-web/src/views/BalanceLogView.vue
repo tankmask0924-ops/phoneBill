@@ -5,12 +5,13 @@ import { onMounted } from 'vue'
 import { type BalanceLog, portalApi } from '@/api/portal'
 import { balanceTypeLabels, labelOf, toOptions } from '@/utils/labels'
 
-const list = usePagedList<BalanceLog, { type: string; dates: [string, string] | null }>(
+const list = usePagedList<BalanceLog, { order_no: string; type: string; dates: [string, string] | null }>(
   (params) => {
-    const { dates, ...rest } = params as Record<string, unknown> & { dates?: [string, string] }
-    return portalApi.balanceLogs(dates ? { ...rest, created_from: dates[0], created_to: dates[1] } : rest)
+    // 按订单号查时不限日期
+    const { dates, ...rest } = params as Record<string, unknown> & { dates?: [string, string]; order_no?: string }
+    return portalApi.balanceLogs(dates && !rest.order_no ? { ...rest, created_from: dates[0], created_to: dates[1] } : rest)
   },
-  { type: '', dates: recentDays() },
+  { order_no: '', type: '', dates: recentDays() },
   20,
 )
 const { rows, total, page, perPage, loading, filters } = list
@@ -21,6 +22,9 @@ onMounted(list.load)
 <template>
   <el-card shadow="never">
     <el-form inline @submit.prevent="list.search">
+      <el-form-item>
+        <el-input v-model.trim="filters.order_no" placeholder="平台 / 商户订单号（不限日期）" clearable style="width: 230px" />
+      </el-form-item>
       <el-form-item>
         <el-select v-model="filters.type" placeholder="全部类型" clearable style="width: 130px">
           <el-option v-for="o in toOptions(balanceTypeLabels)" :key="o.value" v-bind="o" />
@@ -57,6 +61,9 @@ onMounted(list.load)
       </el-table-column>
       <el-table-column label="商户订单号" min-width="160">
         <template #default="{ row }">{{ row.merchant_order_no ?? '-' }}</template>
+      </el-table-column>
+      <el-table-column label="手机号" width="120">
+        <template #default="{ row }">{{ row.mobile ?? '-' }}</template>
       </el-table-column>
       <el-table-column label="备注" min-width="140">
         <template #default="{ row }">{{ row.remark ?? '-' }}</template>

@@ -77,7 +77,7 @@ class BalanceLogAdminService extends AbstractService
         $logs = $builder->orderByDesc('id')->forPage($page, $perPage)->get();
         $merchants = $this->merchantDao->newQuery()->whereIn('id', $logs->pluck('merchant_id')->unique()->all())->pluck('name', 'id');
         $admins = $this->adminUserDao->newQuery()->whereIn('id', $logs->pluck('admin_user_id')->filter()->unique()->all())->pluck('real_name', 'id');
-        $orders = $this->orderDao->newQuery()->whereIn('id', $logs->pluck('order_id')->filter()->unique()->all())->pluck('order_no', 'id');
+        $orders = $this->orderDao->newQuery()->whereIn('id', $logs->pluck('order_id')->filter()->unique()->all())->get(['id', 'order_no', 'mobile'])->keyBy('id');
 
         return [
             'data' => $logs->map(static fn (MerchantBalanceLog $log) => [
@@ -88,7 +88,8 @@ class BalanceLogAdminService extends AbstractService
                 'amount' => $log->amount,
                 'balance_after' => $log->balance_after,
                 'order_id' => $log->order_id,
-                'order_no' => $log->order_id ? ($orders[$log->order_id] ?? null) : null,
+                'order_no' => $log->order_id ? $orders->get($log->order_id)?->order_no : null,
+                'mobile' => $log->order_id ? $orders->get($log->order_id)?->mobile : null,
                 'remark' => $log->remark,
                 'admin_user_id' => $log->admin_user_id,
                 'admin_name' => $log->admin_user_id ? ($admins[$log->admin_user_id] ?? null) : null,

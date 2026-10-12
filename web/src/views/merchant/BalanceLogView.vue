@@ -5,13 +5,13 @@ import { onMounted, ref } from 'vue'
 import { type BalanceLog, balanceLogApi, merchantApi, type MerchantOption } from '@/api/merchant'
 import { balanceTypeLabels, labelOf, toOptions } from '@/utils/labels'
 
-const list = usePagedList<BalanceLog, { merchant_id: number | ''; type: string; dates: [string, string] | null }>(
+const list = usePagedList<BalanceLog, { order_no: string; merchant_id: number | ''; type: string; dates: [string, string] | null }>(
   (params) => {
-    // 日期范围拆成 created_from / created_to
-    const { dates, ...rest } = params as Record<string, unknown> & { dates?: [string, string] }
-    return balanceLogApi.list(dates ? { ...rest, created_from: dates[0], created_to: dates[1] } : rest)
+    // 日期范围拆成 created_from / created_to；按订单号查时不限日期
+    const { dates, ...rest } = params as Record<string, unknown> & { dates?: [string, string]; order_no?: string }
+    return balanceLogApi.list(dates && !rest.order_no ? { ...rest, created_from: dates[0], created_to: dates[1] } : rest)
   },
-  { merchant_id: '', type: '', dates: recentDays() },
+  { order_no: '', merchant_id: '', type: '', dates: recentDays() },
   20,
 )
 const { rows, total, page, perPage, loading, filters } = list
@@ -27,6 +27,9 @@ onMounted(async () => {
 <template>
   <el-card shadow="never">
     <el-form inline @submit.prevent="list.search">
+      <el-form-item>
+        <el-input v-model.trim="filters.order_no" placeholder="平台订单号（不限日期）" clearable style="width: 210px" />
+      </el-form-item>
       <el-form-item>
         <el-select v-model="filters.merchant_id" placeholder="全部商户" clearable filterable style="width: 180px">
           <el-option v-for="m in merchants" :key="m.id" :label="m.name" :value="m.id" />
@@ -66,6 +69,9 @@ onMounted(async () => {
       <el-table-column prop="balance_after" label="变动后余额" width="120" align="right" />
       <el-table-column label="关联订单" width="210">
         <template #default="{ row }">{{ row.order_no ?? '-' }}</template>
+      </el-table-column>
+      <el-table-column label="手机号" width="120">
+        <template #default="{ row }">{{ row.mobile ?? '-' }}</template>
       </el-table-column>
       <el-table-column label="备注" min-width="160">
         <template #default="{ row }">{{ row.remark ?? '-' }}</template>

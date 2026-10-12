@@ -109,6 +109,8 @@ export interface BalanceLog {
   balance_after: string
   order_id: number | null
   order_no: string | null
+  /** 关联订单的手机号，人工加款 / 扣款没有 */
+  mobile: string | null
   remark: string | null
   admin_user_id: number | null
   admin_name: string | null

@@ -114,6 +114,21 @@ class MerchantPortalTest extends HttpTestCase
         $this->assertSame(2, $logs['total']);
         $this->assertArrayNotHasKey('admin_user_id', $logs['data'][0]);
         $this->assertSame($myOrder->merchant_order_no, $logs['data'][1]['merchant_order_no']);
+        $this->assertSame($myOrder->mobile, $logs['data'][1]['mobile']);
+
+        // 按订单号筛：平台订单号、商户订单号都行，别人的订单号查不到
+        foreach ([$myOrder->order_no, $myOrder->merchant_order_no] as $no) {
+            $filtered = $this->body($this->jsonRequest('GET', '/merchant/balance-logs?order_no=' . $no, $token));
+            $this->assertSame([$myOrder->id], array_column($filtered['data'], 'order_id'), $no);
+        }
+        $this->assertSame([], $this->body($this->jsonRequest('GET', '/merchant/balance-logs?order_no=' . $theirOrder->order_no, $token))['data']);
+
+        // 平台后台的资金流水同样带手机号，可按平台订单号筛
+        $adminToken = $this->loginAs($this->createAdminWithPermissions(['merchant.view']));
+        $adminLogs = $this->body($this->jsonRequest('GET', '/admin/balance-logs?order_no=' . $myOrder->order_no, $adminToken));
+        $this->assertSame([$myOrder->id], array_column($adminLogs['data'], 'order_id'));
+        $this->assertSame($myOrder->mobile, $adminLogs['data'][0]['mobile']);
+
 
         $dashboard = $this->body($this->jsonRequest('GET', '/merchant/dashboard', $token));
         $this->assertSame(Merchant::find($mine->id)->balance, $dashboard['balance']);

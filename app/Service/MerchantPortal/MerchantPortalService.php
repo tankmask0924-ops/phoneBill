@@ -140,7 +140,9 @@ class MerchantPortalService extends AbstractService
     }
 
     /**
-     * @param array<string, mixed> $query type / created_from / created_to
+     * order_no 填平台订单号或商户订单号都行，按订单号查时不默认限最近几天。
+     *
+     * @param array<string, mixed> $query type / order_no / created_from / created_to
      * @return array{data: list<array<string, mixed>>, total: int, page: int, per_page: int}
      */
     public function balanceLogs(Merchant $merchant, array $query): array
@@ -152,14 +154,18 @@ class MerchantPortalService extends AbstractService
         if (in_array($query['type'] ?? null, self::BALANCE_TYPES, true)) {
             $builder->where('type', $query['type']);
         }
-        $this->applyDateRange($builder, $query);
+        $orderNo = trim(is_string($query['order_no'] ?? null) ? $query['order_no'] : '');
+        if ($orderNo !== '') {
+            $builder->whereIn('order_id', $this->orderDao->idsForMerchantByNo($merchant->id, $orderNo));
+        }
+        $this->applyDateRange($builder, $query, $orderNo !== '');
 
         $total = (clone $builder)->count();
         $logs = $builder->orderByDesc('id')->forPage($page, $perPage)->get();
         $orders = $this->orderDao->newQuery()
             ->where('merchant_id', $merchant->id)
             ->whereIn('id', $logs->pluck('order_id')->filter()->unique()->all())
-            ->get(['id', 'order_no', 'merchant_order_no'])
+            ->get(['id', 'order_no', 'merchant_order_no', 'mobile'])
             ->keyBy('id');
 
         return [
@@ -171,6 +177,7 @@ class MerchantPortalService extends AbstractService
                 'order_id' => $l->order_id,
                 'order_no' => $l->order_id ? $orders->get($l->order_id)?->order_no : null,
                 'merchant_order_no' => $l->order_id ? $orders->get($l->order_id)?->merchant_order_no : null,
+                'mobile' => $l->order_id ? $orders->get($l->order_id)?->mobile : null,
                 'remark' => $l->remark,
                 'created_at' => $l->created_at?->toDateTimeString(),
             ])->values()->all(),

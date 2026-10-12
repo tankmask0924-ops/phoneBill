@@ -30,6 +30,22 @@ class OrderDao extends AbstractDao
         return $this->newQuery()->where('order_no', $orderNo)->first();
     }
 
+    /**
+     * 这个商户下平台订单号或商户订单号等于 $no 的订单 id（两个都走唯一索引）。
+     *
+     * @return list<int>
+     */
+    public function idsForMerchantByNo(int $merchantId, string $no): array
+    {
+        // 分两次查，各走各的唯一索引；合成一条 OR 可能只用上 merchant_id 前缀，扫这个商户的全部订单
+        $ids = [
+            $this->newQuery()->where('order_no', $no)->where('merchant_id', $merchantId)->value('id'),
+            $this->newQuery()->where('merchant_id', $merchantId)->where('merchant_order_no', $no)->value('id'),
+        ];
+
+        return array_values(array_unique(array_map('intval', array_filter($ids))));
+    }
+
     public function findByMerchantOrderNo(int $merchantId, string $merchantOrderNo): ?Order
     {
         return $this->newQuery()->where('merchant_id', $merchantId)->where('merchant_order_no', $merchantOrderNo)->first();

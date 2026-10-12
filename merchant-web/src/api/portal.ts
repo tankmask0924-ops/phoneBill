@@ -46,6 +46,8 @@ export interface BalanceLog {
   order_id: number | null
   order_no: string | null
   merchant_order_no: string | null
+  /** 关联订单的手机号，平台加款 / 扣款没有 */
+  mobile: string | null
   remark: string | null
   created_at: string | null
 }
