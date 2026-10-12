@@ -261,7 +261,14 @@ onMounted(async () => {
         <el-input v-model="filters.keyword" placeholder="平台 / 商户订单号" clearable style="width: 190px" />
       </el-form-item>
       <el-form-item>
-        <el-input v-model="filters.mobile" placeholder="手机号" clearable style="width: 130px" />
+        <el-input
+          v-model="filters.mobile"
+          type="textarea"
+          :autosize="{ minRows: 1, maxRows: 6 }"
+          resize="none"
+          placeholder="手机号，可批量粘贴（每行一个）"
+          style="width: 220px"
+        />
       </el-form-item>
       <el-form-item>
         <el-select v-model="filters.merchant_id" placeholder="商户" clearable filterable style="width: 140px">

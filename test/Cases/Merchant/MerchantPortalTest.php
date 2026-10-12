@@ -145,6 +145,23 @@ class MerchantPortalTest extends HttpTestCase
         $this->assertArrayNotHasKey('products', $account, '商品挪到「可下单商品」');
     }
 
+    public function testOrdersFilterByOperatorProvinceAndMobiles()
+    {
+        [$merchant] = $this->merchantWithProduct();
+        $token = $this->merchantLogin($this->createMerchantUser($merchant)->username, self::PASSWORD);
+        $gd = $this->createOrder($merchant, Order::STATUS_SUCCESS);
+        $hn = $this->createOrder($merchant, Order::STATUS_SUCCESS);
+        $hn->update(['operator' => 'cucc', 'province' => '湖南']);
+        $other = $this->createOrder($merchant, Order::STATUS_FAILED);
+        $ids = fn (array $query) => array_column($this->body($this->jsonRequest('GET', '/merchant/orders?' . http_build_query($query), $token))['data'], 'id');
+
+        $this->assertSame([$hn->id], $ids(['operator' => 'cucc']));
+        $this->assertSame([$hn->id], $ids(['province' => '湖南']));
+        $this->assertEqualsCanonicalizing([$gd->id, $other->id], $ids(['province' => '广东']));
+        $this->assertEqualsCanonicalizing([$gd->id, $hn->id], $ids(['mobile' => "{$gd->mobile}\n{$hn->mobile}"]), '批量手机号');
+        $this->assertCount(31, $this->body($this->jsonRequest('GET', '/merchant/order-filter-options', $token))['provinces']);
+    }
+
     public function testProductsWithRecentStats()
     {
         [$mine, $product] = $this->merchantWithProduct();

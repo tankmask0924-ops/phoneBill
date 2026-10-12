@@ -6,13 +6,16 @@ import { onMounted, ref } from 'vue'
 import { type Order, type OrderDetail, portalApi } from '@/api/portal'
 import { balanceTypeLabels, labelOf, operatorLabels, orderStatusLabels, toOptions } from '@/utils/labels'
 
-const list = usePagedList<Order, { keyword: string; mobile: string; status: string; dates: [string, string] | null }>(
+const list = usePagedList<
+  Order,
+  { keyword: string; mobile: string; status: string; operator: string; province: string; dates: [string, string] | null }
+>(
   (params) => {
     // 日期范围拆成 created_from / created_to
     const { dates, ...rest } = params as Record<string, unknown> & { dates?: [string, string] }
     return portalApi.orders(dates ? { ...rest, created_from: dates[0], created_to: dates[1] } : rest)
   },
-  { keyword: '', mobile: '', status: '', dates: recentDays() },
+  { keyword: '', mobile: '', status: '', operator: '', province: '', dates: recentDays() },
   20,
 )
 const { rows, total, page, perPage, loading, filters } = list
@@ -26,7 +29,12 @@ async function openDetail(row: Order) {
   detail.value = await portalApi.order(row.id)
 }
 
-onMounted(list.load)
+const provinces = ref<string[]>([])
+
+onMounted(async () => {
+  list.load()
+  provinces.value = (await portalApi.orderFilterOptions()).provinces
+})
 </script>
 
 <template>
@@ -36,7 +44,24 @@ onMounted(list.load)
         <el-input v-model="filters.keyword" placeholder="平台 / 商户订单号" clearable style="width: 200px" />
       </el-form-item>
       <el-form-item>
-        <el-input v-model="filters.mobile" placeholder="手机号" clearable style="width: 140px" />
+        <el-input
+          v-model="filters.mobile"
+          type="textarea"
+          :autosize="{ minRows: 1, maxRows: 6 }"
+          resize="none"
+          placeholder="手机号，可批量粘贴（每行一个）"
+          style="width: 220px"
+        />
+      </el-form-item>
+      <el-form-item>
+        <el-select v-model="filters.operator" placeholder="运营商" clearable style="width: 100px">
+          <el-option v-for="o in toOptions(operatorLabels)" :key="o.value" v-bind="o" />
+        </el-select>
+      </el-form-item>
+      <el-form-item>
+        <el-select v-model="filters.province" placeholder="地区" clearable filterable style="width: 110px">
+          <el-option v-for="p in provinces" :key="p" :label="p" :value="p" />
+        </el-select>
       </el-form-item>
       <el-form-item>
         <el-select v-model="filters.status" placeholder="全部状态" clearable style="width: 130px">

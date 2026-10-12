@@ -14,11 +14,14 @@ namespace App\Service\MerchantPortal;
 
 use App\Dao\MerchantBalanceLogDao;
 use App\Dao\OrderDao;
+use App\Enum\Operator;
+use App\Enum\Province;
 use App\Model\Merchant;
 use App\Model\MerchantBalanceLog;
 use App\Model\Order;
 use App\Service\AbstractService;
 use App\Service\FiltersByDateRange;
+use App\Service\FiltersByMobiles;
 use App\Service\Merchant\MerchantCatalogService;
 use App\Service\Order\OrderService;
 use Hyperf\Database\Model\Builder;
@@ -34,6 +37,7 @@ use Hyperf\HttpMessage\Exception\HttpException;
 class MerchantPortalService extends AbstractService
 {
     use FiltersByDateRange;
+    use FiltersByMobiles;
 
     private const MAX_PER_PAGE = 100;
 
@@ -86,7 +90,7 @@ class MerchantPortalService extends AbstractService
     }
 
     /**
-     * @param array<string, mixed> $query keyword（平台 / 商户订单号）/ mobile / status（processing / success / failed）/ created_from / created_to
+     * @param array<string, mixed> $query keyword（平台 / 商户订单号）/ mobile（可多个，见 FiltersByMobiles）/ status（processing / success / failed）/ operator / province / created_from / created_to
      * @return array{data: list<array<string, mixed>>, total: int, page: int, per_page: int}
      */
     public function orders(Merchant $merchant, array $query): array
@@ -99,14 +103,17 @@ class MerchantPortalService extends AbstractService
         if ($keyword !== '') {
             $builder->where(fn ($q) => $q->where('order_no', $keyword)->orWhere('merchant_order_no', $keyword));
         }
-        $mobile = trim((string) ($query['mobile'] ?? ''));
-        if ($mobile !== '') {
-            $builder->where('mobile', $mobile);
-        }
+        $byMobile = $this->applyMobileFilter($builder, $query['mobile'] ?? null);
         if (is_string($query['status'] ?? null) && isset(self::STATUS_FILTER[$query['status']])) {
             $this->whereMerchantStatus($builder, $query['status']);
         }
-        $this->applyDateRange($builder, $query, $keyword !== '' || $mobile !== '');
+        if (is_string($query['operator'] ?? null) && Operator::tryFrom($query['operator']) !== null) {
+            $builder->where('operator', $query['operator']);
+        }
+        if (is_string($query['province'] ?? null) && Province::isValid($query['province'])) {
+            $builder->where('province', $query['province']);
+        }
+        $this->applyDateRange($builder, $query, $keyword !== '' || $byMobile);
 
         $total = (clone $builder)->count();
         $orders = $builder->orderByDesc('id')->forPage($page, $perPage)->get();
@@ -202,6 +209,16 @@ class MerchantPortalService extends AbstractService
             'notify_url' => $merchant->notify_url,
             'ip_whitelist' => $merchant->ipWhitelist(),
         ];
+    }
+
+    /**
+     * 订单筛选的选项：省份（运营商前端写死）。
+     *
+     * @return array{provinces: list<string>}
+     */
+    public function orderFilterOptions(): array
+    {
+        return ['provinces' => Province::NAMES];
     }
 
     /**

@@ -155,7 +155,9 @@ export const fundingApi = {
 
 export const portalApi = {
   dashboard: () => http.get<Dashboard>('/merchant/dashboard'),
+  /** mobile 可以是多个手机号（换行、空格、逗号分隔，最多 200 个） */
   orders: (params: Query) => http.get<Paged<Order>>('/merchant/orders', params),
+  orderFilterOptions: () => http.get<{ provinces: string[] }>('/merchant/order-filter-options'),
   order: (id: number) => http.get<OrderDetail>(`/merchant/orders/${id}`),
   balanceLogs: (params: Query) => http.get<Paged<BalanceLog>>('/merchant/balance-logs', params),
   account: () => http.get<Account>('/merchant/account'),

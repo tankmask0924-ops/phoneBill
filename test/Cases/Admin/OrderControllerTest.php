@@ -138,6 +138,25 @@ class OrderControllerTest extends HttpTestCase
         $this->assertSame(['order_count' => 0, 'success_rate' => null, 'profit' => '0.00', 'avg_duration' => null], array_intersect_key($empty, array_flip(['order_count', 'success_rate', 'profit', 'avg_duration'])));
     }
 
+    public function testBatchMobileFilter()
+    {
+        $token = $this->loginAs($this->createAdminWithPermissions(['order.view']));
+        [$merchant, $product, $sp] = $this->fixture();
+        $a = $this->createOrder($merchant, $product, $sp, Order::STATUS_SUCCESS);
+        $b = $this->createOrder($merchant, $product, $sp, Order::STATUS_FAILED);
+        $c = $this->createOrder($merchant, $product, $sp, Order::STATUS_SUCCESS);
+        $ids = fn (string $mobile) => array_column($this->body($this->jsonRequest('GET', '/admin/orders?' . http_build_query(['mobile' => $mobile]), $token))['data'], 'id');
+
+        // 换行、中英文逗号、空格分隔都行，不像手机号的忽略；一个号码时照旧
+        $this->assertEqualsCanonicalizing([$a->id, $b->id], $ids("{$a->mobile}\n{$b->mobile}，abc"));
+        $this->assertEqualsCanonicalizing([$a->id, $c->id], $ids("{$a->mobile} {$c->mobile},{$a->mobile}"));
+        $this->assertSame([$b->id], $ids($b->mobile));
+        $this->assertSame([], $ids('abc'), '填了但没有手机号：查不到，不是忽略条件');
+
+        $tooMany = implode("\n", array_map(static fn ($i) => (string) (13800000000 + $i), range(1, 201)));
+        $this->assertSame(422, $this->jsonRequest('GET', '/admin/orders?' . http_build_query(['mobile' => $tooMany]), $token)->getStatusCode());
+    }
+
     public function testConfirmAbnormalOrders()
     {
         $token = $this->loginAs($this->createAdminWithPermissions(['order.view', 'order.manage']));
