@@ -123,7 +123,7 @@ npm run build        # 产物在 merchant-web/dist，部署在 /merchant/ 路径
 | GET | `/admin/operation-logs` | `operation_log.view` |
 | GET | `/admin/suppliers`、`/admin/suppliers/meta`、`/admin/suppliers/{id}/balance`（实时余额） | `supplier.view` |
 | POST/PUT | `/admin/suppliers`、`/{id}`、`/{id}/status` | `supplier.manage` |
-| GET | `/admin/supplier-products`、`/admin/supplier-products/supplier-options` | `supplier_product.view` |
+| GET | `/admin/supplier-products`、`/admin/supplier-products/meta`（省份）、`/admin/supplier-products/supplier-options`、`/admin/supplier-products/upstream-products` | `supplier_product.view` |
 | POST/PUT | `/admin/supplier-products`、`/{id}`、`/{id}/status` | `supplier_product.manage` |
 | GET | `/admin/products`、`/admin/products/supplier-product-options`、`/admin/product-stats`、`/admin/product-categories` | `product.view` |
 | POST/PUT | `/admin/products`、`/{id}`、`/{id}/status` | `product.manage` |

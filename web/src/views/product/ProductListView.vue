@@ -67,12 +67,6 @@ const covered = computed(() => {
 })
 
 const rules = computed<FormRules>(() => ({
-  code: editing.value
-    ? []
-    : [
-        { required: true, message: '请输入商品编码', trigger: 'blur' },
-        { pattern: /^[A-Za-z0-9_-]{1,32}$/, message: '1~32 位字母、数字、_ 或 -', trigger: 'blur' },
-      ],
   category_id: [{ required: true, message: '请选择商品分类', trigger: 'change' }],
   name: [{ required: true, message: '请输入商品名称', trigger: 'blur' }],
   face_value: [{ required: true, message: '请输入面值', trigger: 'blur' }],
@@ -170,7 +164,7 @@ async function save() {
   try {
     const saved = editing.value
       ? await productApi.update(editing.value.id, data)
-      : await productApi.create({ ...data, code: form.code, face_value: form.face_value })
+      : await productApi.create({ ...data, face_value: form.face_value })
     if (saved.warnings.length > 0) {
       ElMessage.warning({ message: `已保存，但有 ${saved.warnings.length} 条提醒，请在列表里查看`, duration: 4000 })
     } else {
@@ -314,7 +308,7 @@ onMounted(async () => {
       <el-row :gutter="16">
         <el-col :span="12">
           <el-form-item label="商品编码" prop="code">
-            <el-input v-model="form.code" :disabled="!!editing" placeholder="商户下单时传，建好后不能改" />
+            <el-input v-model="form.code" disabled placeholder="保存后按面值自动生成，如 HF100-001" />
           </el-form-item>
         </el-col>
         <el-col :span="12">

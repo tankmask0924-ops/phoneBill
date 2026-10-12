@@ -25,6 +25,7 @@ use App\Model\ProductRoute;
 use App\Service\AbstractService;
 use App\Service\Merchant\MerchantPriceService;
 use App\Service\Product\ProductRouteService;
+use Hyperf\Database\Exception\QueryException;
 use Hyperf\DbConnection\Db;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpMessage\Exception\HttpException;
@@ -34,7 +35,7 @@ use Hyperf\HttpMessage\Exception\HttpException;
  *
  * - 绑定多个同面值的供应商商品，各带优先级；覆盖哪些运营商由绑定的供应商商品决定；
  * - 默认售价按运营商设置，只能给已覆盖的运营商设，只用来在给商户开通商品时带出初始价格；
- * - 商品编码是商户下单时传的，面值决定能绑哪些供应商商品，这两项建好后都不能改；
+ * - 商品编码是商户下单时传的，新建时按面值自动生成（HF{面值}-{序号}，如 HF100-001）；面值决定能绑哪些供应商商品，这两项建好后都不能改；
  * - 必须选商品分类（ProductCategoryAdminService），老商品没有分类的显示为未分类，编辑时补上；
  * - 不提供删除，不卖了就下架。
  */
@@ -122,40 +123,29 @@ class ProductAdminService extends AbstractService
     }
 
     /**
-     * @param array<string, mixed> $data category_id / code / name / face_value / remark / routes / prices
+     * @param array<string, mixed> $data category_id / name / face_value / remark / routes / prices（编码自动生成，传了也不用）
      * @return array<string, mixed>
      */
     public function create(AdminUser $operator, array $data, ?string $ip): array
     {
-        $code = (string) ($data['code'] ?? '');
-        if (preg_match('/^[A-Za-z0-9_-]{1,32}$/', $code) !== 1) {
-            throw new HttpException(422, '商品编码为 1~32 位字母、数字、_ 或 -');
-        }
-        if ($this->productDao->newQuery()->where('code', $code)->exists()) {
-            throw new HttpException(422, "商品编码「{$code}」已存在");
-        }
         $categoryId = $this->categoryAdminService->assertExists($data['category_id'] ?? null);
         $faceValue = $this->faceValue($data['face_value'] ?? null);
         $name = $this->requiredString($data['name'] ?? null, '商品名称', 64);
         [$routes, $covered] = $this->validateRoutes($data['routes'] ?? [], $faceValue);
         $prices = $this->validatePrices($data['prices'] ?? [], $covered);
 
-        $result = Db::transaction(function () use ($operator, $categoryId, $code, $name, $faceValue, $routes, $prices, $data, $ip) {
-            $product = $this->productDao->create([
-                'category_id' => $categoryId,
-                'code' => $code,
-                'name' => $name,
-                'face_value' => $faceValue,
-                'status' => 'active',
-                'remark' => $this->remark($data['remark'] ?? null),
-            ]);
-            $this->productRouteDao->replaceForProduct($product->id, $routes);
-            $this->productPriceDao->replaceForProduct($product->id, $prices);
-            $after = $this->formatMany([$product])[0];
-            $this->operationLogDao->record($operator->id, self::MODULE, 'create_product', 'product', $product->id, null, $after, $ip);
-
-            return $after;
-        });
+        // 两个人同时建同面值的商品会撞编码（唯一索引），换下一个序号重试
+        for ($try = 1;; ++$try) {
+            $code = $this->nextCode($faceValue);
+            try {
+                $result = $this->createWithCode($operator, $code, $categoryId, $name, $faceValue, $routes, $prices, $data, $ip);
+                break;
+            } catch (QueryException $e) {
+                if ($try >= 3 || ! str_contains($e->getMessage(), 'products_code_unique')) {
+                    throw $e;
+                }
+            }
+        }
         // 有商户可能在建好之前就用这个编码下过单，缓存了「不存在」
         $this->priceService->flush();
         $this->routeService->flushConfig();
@@ -257,6 +247,48 @@ class ProductAdminService extends AbstractService
         }
 
         return array_column($this->formatMany($this->productDao->newQuery()->whereIn('id', $ids)->get()->all()), null, 'id');
+    }
+
+    /**
+     * @param list<array{supplier_product_id: int, priority: int}> $routes
+     * @param array<string, string> $prices
+     * @param array<string, mixed> $data
+     * @return array<string, mixed>
+     */
+    private function createWithCode(AdminUser $operator, string $code, int $categoryId, string $name, int $faceValue, array $routes, array $prices, array $data, ?string $ip): array
+    {
+        return Db::transaction(function () use ($operator, $categoryId, $code, $name, $faceValue, $routes, $prices, $data, $ip) {
+            $product = $this->productDao->create([
+                'category_id' => $categoryId,
+                'code' => $code,
+                'name' => $name,
+                'face_value' => $faceValue,
+                'status' => 'active',
+                'remark' => $this->remark($data['remark'] ?? null),
+            ]);
+            $this->productRouteDao->replaceForProduct($product->id, $routes);
+            $this->productPriceDao->replaceForProduct($product->id, $prices);
+            $after = $this->formatMany([$product])[0];
+            $this->operationLogDao->record($operator->id, self::MODULE, 'create_product', 'product', $product->id, null, $after, $ip);
+
+            return $after;
+        });
+    }
+
+    /**
+     * 这个面值的下一个商品编码：HF{面值}-{已有最大序号 + 1}，序号至少 3 位。
+     */
+    private function nextCode(int $faceValue): string
+    {
+        $prefix = "HF{$faceValue}-";
+        $max = 0;
+        foreach ($this->productDao->newQuery()->where('code', 'like', $prefix . '%')->pluck('code') as $code) {
+            if (preg_match('/^HF\d+-(\d+)$/', (string) $code, $m) === 1) {
+                $max = max($max, (int) $m[1]);
+            }
+        }
+
+        return $prefix . str_pad((string) ($max + 1), 3, '0', STR_PAD_LEFT);
     }
 
     private function findOrFail(int $id): Product

@@ -183,7 +183,6 @@ export interface Product {
 
 export interface ProductForm {
   category_id?: number
-  code?: string
   name: string
   face_value?: number
   remark: string

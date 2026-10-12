@@ -41,11 +41,10 @@ class ProductControllerTest extends HttpTestCase
         $mobileUnicom = $this->createSupplierProduct($supplier, ['cmcc', 'cucc'], 100, '99.00');
         $telecom = $this->createSupplierProduct($supplier, ['ctcc'], 100, '98.90');
         $category = $this->createCategory();
-        $code = $this->uniq('P');
 
         $created = $this->jsonRequest('POST', '/admin/products', $token, [
             'category_id' => $category->id,
-            'code' => $code,
+            'code' => 'IGNORED',
             'name' => '新话费100',
             'face_value' => 100,
             'routes' => [
@@ -57,6 +56,8 @@ class ProductControllerTest extends HttpTestCase
         $body = $this->body($created);
         $this->assertSame(200, $created->getStatusCode(), (string) $created->getBody());
         $this->productIds[] = $body['id'];
+        $code = $body['code'];
+        $this->assertMatchesRegularExpression('/^HF100-\d{3,}$/', $code, '编码按面值自动生成，传了也不用');
         $this->assertSame($category->id, $body['category_id']);
         $this->assertSame($category->name, $body['category_name']);
         $this->assertSame(['cmcc', 'cucc', 'ctcc'], $body['operators']);
@@ -91,13 +92,11 @@ class ProductControllerTest extends HttpTestCase
         $mobile = $this->createSupplierProduct($supplier, ['cmcc'], 100);
         $fifty = $this->createSupplierProduct($supplier, ['cmcc'], 50);
         $existing = $this->createProduct([$mobile->id => 1]);
-        $valid = ['category_id' => $this->createCategory()->id, 'code' => $this->uniq('P'), 'name' => 'x', 'face_value' => 100, 'routes' => [['supplier_product_id' => $mobile->id]], 'prices' => []];
+        $valid = ['category_id' => $this->createCategory()->id, 'name' => 'x', 'face_value' => 100, 'routes' => [['supplier_product_id' => $mobile->id]], 'prices' => []];
 
         foreach ([
             ['category_id' => null],
             ['category_id' => 999999999],
-            ['code' => 'bad code'],
-            ['code' => $existing->code],
             ['routes' => [['supplier_product_id' => $fifty->id]]],
             ['routes' => [['supplier_product_id' => $mobile->id], ['supplier_product_id' => $mobile->id]]],
             ['routes' => [['supplier_product_id' => 999999999]]],
@@ -113,6 +112,27 @@ class ProductControllerTest extends HttpTestCase
         $this->assertSame(422, $this->jsonRequest('PUT', "/admin/products/{$existing->id}", $token, ['face_value' => 50])->getStatusCode());
         $this->assertSame(422, $this->jsonRequest('PUT', "/admin/products/{$existing->id}", $token, ['category_id' => 999999999])->getStatusCode());
         $this->assertSame('disabled', $this->body($this->jsonRequest('POST', "/admin/products/{$existing->id}/status", $token, ['status' => 'disabled']))['status']);
+    }
+
+    public function testCodeIsGeneratedPerFaceValue()
+    {
+        $token = $this->loginAs($this->createAdminWithPermissions(['product.manage']));
+        $create = function (int $faceValue) use ($token) {
+            $body = $this->body($this->jsonRequest('POST', '/admin/products', $token, [
+                'category_id' => $this->createCategory()->id, 'name' => 'x', 'face_value' => $faceValue, 'routes' => [], 'prices' => [],
+            ]));
+            $this->productIds[] = $body['id'];
+
+            return $body['code'];
+        };
+
+        // 没用过的面值从 001 开始；同面值按已有最大序号递增
+        $this->assertSame('HF98765-001', $create(98765));
+        $this->assertSame('HF98765-002', $create(98765));
+        $this->assertSame('HF98764-001', $create(98764));
+        $first = $create(50);
+        $second = $create(50);
+        $this->assertSame((int) substr($first, 5) + 1, (int) substr($second, 5));
     }
 
     public function testWarningsForEmptyAndDisabledRoutes()
