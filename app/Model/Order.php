@@ -37,6 +37,9 @@ use Carbon\Carbon;
  * @property null|string $notify_url
  * @property string $notify_status
  * @property null|Carbon $notified_at
+ * @property bool $manual_only 人工处理单：提交时接口异常，上游结果只记录，状态和回调全部人工
+ * @property null|Carbon $manual_notified_at 最近一次手动回调时间
+ * @property int $notify_round 通知轮次，每次手动回调加 1
  * @property null|Carbon $finished_at
  * @property Carbon $created_at
  * @property Carbon $updated_at
@@ -90,19 +93,41 @@ class Order extends Model
         'notify_status',
         'notified_at',
         'finished_at',
+        'manual_only',
+        'manual_notified_at',
+        'notify_round',
     ];
 
     protected array $casts = [
         'face_value' => 'integer',
+        'manual_only' => 'boolean',
+        'notify_round' => 'integer',
     ];
 
     protected array $dates = [
         'notified_at',
         'finished_at',
+        'manual_notified_at',
     ];
 
     public function isFinal(): bool
     {
         return in_array($this->status, [self::STATUS_SUCCESS, self::STATUS_FAILED], true);
+    }
+
+    /**
+     * 商户能不能看到最终结果：人工处理单要手动回调之后才给商户看，之前查单一律是处理中。
+     */
+    public function resultVisibleToMerchant(): bool
+    {
+        return $this->isFinal() && (! $this->manual_only || $this->manual_notified_at !== null);
+    }
+
+    /**
+     * 上游的结果只记录、不改订单、不推给商户：人工处理单，或者已经手动回调过的订单。
+     */
+    public function holdsUpstreamResults(): bool
+    {
+        return $this->manual_only || $this->manual_notified_at !== null;
     }
 }

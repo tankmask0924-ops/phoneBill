@@ -21,14 +21,18 @@ use Hyperf\Context\ApplicationContext;
  */
 class NotifyMerchantJob extends Job
 {
+    /** 通知轮次（见 orders.notify_round）；写成普通属性带默认值，队列里升级前的旧任务反序列化后为 0 */
+    public int $round = 0;
+
     protected int $maxAttempts = 0;
 
-    public function __construct(public int $orderId, public int $attemptNo)
+    public function __construct(public int $orderId, public int $attemptNo, int $round = 0)
     {
+        $this->round = $round;
     }
 
     public function handle(): void
     {
-        ApplicationContext::getContainer()->get(MerchantNotifyService::class)->notify($this->orderId, $this->attemptNo);
+        ApplicationContext::getContainer()->get(MerchantNotifyService::class)->notify($this->orderId, $this->attemptNo, $this->round);
     }
 }

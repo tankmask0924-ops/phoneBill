@@ -61,11 +61,13 @@ class MerchantNotifyService extends AbstractService
 
     /**
      * @param int $attemptNo 第几次通知，从 1 开始
+     * @param int $round 通知轮次：手动回调会开新一轮，之前排队的通知（含自动重试）作废
      */
-    public function notify(int $orderId, int $attemptNo): void
+    public function notify(int $orderId, int $attemptNo, int $round = 0): void
     {
         $order = $this->orderDao->find($orderId);
-        if ($order === null || ! $order->isFinal()) {
+        // 人工处理单没有手动回调前不通知（正常不会推到这里，兜底）
+        if ($order === null || ! $order->resultVisibleToMerchant() || $round !== $order->notify_round) {
             return;
         }
         $merchant = $this->merchantDao->find($order->merchant_id);
@@ -112,7 +114,7 @@ class MerchantNotifyService extends AbstractService
         $delays = (array) $this->config->get('order.notify_retry_delays', []);
         if ($attemptNo <= count($delays)) {
             $this->orderDao->update($order->id, ['notify_status' => Order::NOTIFY_RETRYING]);
-            $this->dispatcher->notify($order->id, $attemptNo + 1, (int) $delays[$attemptNo - 1]);
+            $this->dispatcher->notify($order->id, $attemptNo + 1, (int) $delays[$attemptNo - 1], $round);
         } else {
             $this->orderDao->update($order->id, ['notify_status' => Order::NOTIFY_FAILED]);
         }

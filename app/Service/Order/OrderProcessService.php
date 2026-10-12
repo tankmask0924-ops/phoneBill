@@ -70,8 +70,10 @@ class OrderProcessService extends AbstractService
 
     /**
      * 把订单提交给下一个还没试过的候选供应商商品；没有可试的就失败退款。
+     *
+     * @param null|int $preferredSupplierProductId 手动补单指定的供应商商品：试过的也可以再提交一次；已经不能用了就按正常顺序
      */
-    public function submit(int $orderId): void
+    public function submit(int $orderId, ?int $preferredSupplierProductId = null): void
     {
         $lockKey = "order:submit:{$orderId}";
         $token = $this->lock->acquire($lockKey, 60);
@@ -90,11 +92,16 @@ class OrderProcessService extends AbstractService
                     return;
                 }
 
-                $tried = $attempts->pluck('supplier_product_id')->all();
-                $candidates = array_values(array_filter(
-                    $this->productRouteService->candidates([$order->product_id], $order->operator, $order->province)[$order->product_id] ?? [],
-                    static fn (array $c) => ! in_array($c['supplier_product_id'], $tried, true)
-                ));
+                $all = $this->productRouteService->candidates([$order->product_id], $order->operator, $order->province)[$order->product_id] ?? [];
+                $candidates = [];
+                if ($preferredSupplierProductId !== null) {
+                    $candidates = array_values(array_filter($all, static fn (array $c) => (int) $c['supplier_product_id'] === $preferredSupplierProductId));
+                    $preferredSupplierProductId = null;
+                }
+                if ($candidates === []) {
+                    $tried = $attempts->pluck('supplier_product_id')->all();
+                    $candidates = array_values(array_filter($all, static fn (array $c) => ! in_array($c['supplier_product_id'], $tried, true)));
+                }
                 if ($candidates === []) {
                     $last = $attempts->last()?->message;
                     $reason = $attempts->isEmpty() ? '没有可用的供应商通道' : '所有供应商都充值失败' . ($last ? "：{$last}" : '');
@@ -165,9 +172,18 @@ class OrderProcessService extends AbstractService
             'supplier_order_no' => $result->supplierOrderNo,
             'message' => $result->message === null ? null : mb_substr($result->message, 0, 255),
         ], static fn ($v) => $v !== null && $v !== '');
+        // 人工处理单、已手动回调的订单：上游结果只记到这次提交上，不改订单、不推给商户
+        $order = $this->orderDao->find($attempt->order_id);
+        $hold = $order !== null && $order->holdsUpstreamResults();
 
         switch ($result->status) {
             case RechargeStatus::Success:
+                if ($hold) {
+                    if ($this->attemptDao->transition($attempt->id, OrderAttempt::STATUS_PROCESSING, OrderAttempt::STATUS_SUCCESS, $extra + ['finished_at' => $now])) {
+                        $this->logHeldResult($order, $attempt, RechargeStatus::Success);
+                    }
+                    break;
+                }
                 $orderUpdated = Db::transaction(function () use ($attempt, $extra, $now) {
                     if (! $this->attemptDao->transition($attempt->id, OrderAttempt::STATUS_PROCESSING, OrderAttempt::STATUS_SUCCESS, $extra + ['finished_at' => $now])) {
                         return false;
@@ -182,7 +198,7 @@ class OrderProcessService extends AbstractService
                     ]);
                 });
                 if ($orderUpdated) {
-                    $this->dispatcher->notify($attempt->order_id);
+                    $this->dispatcher->notify($attempt->order_id, 1, 0, $order?->notify_round ?? 0);
                 } elseif ($this->attemptDao->find($attempt->id)?->status === OrderAttempt::STATUS_SUCCESS) {
                     // 供应商说充上了，但订单已经被判失败（比如人工置失败、已退款）：可能资损，必须人工核对
                     $this->logger()->error('供应商成功但订单已不在处理中，请人工核对', ['attempt_no' => $attempt->attempt_no, 'order_id' => $attempt->order_id]);
@@ -196,6 +212,10 @@ class OrderProcessService extends AbstractService
                     }
 
                     return;
+                }
+                if ($hold) {
+                    $this->logHeldResult($order, $attempt, RechargeStatus::Failed);
+                    break;
                 }
                 // 异常订单交给人工，不再自动换供应商
                 if ($resubmitOnFailure && $this->orderDao->find($attempt->order_id)?->status === Order::STATUS_PROCESSING) {
@@ -218,11 +238,14 @@ class OrderProcessService extends AbstractService
      */
     public function fail(Order $order, array $from, string $reason): bool
     {
-        $done = Db::transaction(function () use ($order, $from, $reason) {
+        // 人工处理单不自动通知商户，人工手动回调
+        $current = $this->orderDao->find($order->id);
+        $notify = $current !== null && ! $current->manual_only;
+        $done = Db::transaction(function () use ($order, $from, $reason, $notify) {
             $changed = $this->orderDao->transition($order->id, $from, Order::STATUS_FAILED, [
                 'fail_reason' => mb_substr($reason, 0, 255),
                 'finished_at' => date('Y-m-d H:i:s'),
-                'notify_status' => Order::NOTIFY_PENDING,
+                'notify_status' => $notify ? Order::NOTIFY_PENDING : Order::NOTIFY_NONE,
             ]);
             if ($changed) {
                 $this->balanceService->change($order->merchant_id, MerchantBalanceLog::TYPE_ORDER_REFUND, $order->sale_price, $order->id, '订单失败退款');
@@ -230,8 +253,8 @@ class OrderProcessService extends AbstractService
 
             return $changed;
         });
-        if ($done) {
-            $this->dispatcher->notify($order->id);
+        if ($done && $notify) {
+            $this->dispatcher->notify($order->id, 1, 0, $current->notify_round);
         }
 
         return $done;
@@ -249,13 +272,16 @@ class OrderProcessService extends AbstractService
             return false;
         }
         $now = date('Y-m-d H:i:s');
-        $done = Db::transaction(function () use ($order, $attempt, $note, $now) {
+        // 人工处理单不自动通知商户，人工手动回调
+        $current = $this->orderDao->find($order->id);
+        $notify = $current !== null && ! $current->manual_only;
+        $done = Db::transaction(function () use ($order, $attempt, $note, $now, $notify) {
             $changed = $this->orderDao->transition($order->id, [Order::STATUS_ABNORMAL], Order::STATUS_SUCCESS, [
                 'supplier_id' => $attempt->supplier_id,
                 'supplier_product_id' => $attempt->supplier_product_id,
                 'cost_price' => $attempt->cost_price,
                 'finished_at' => $now,
-                'notify_status' => Order::NOTIFY_PENDING,
+                'notify_status' => $notify ? Order::NOTIFY_PENDING : Order::NOTIFY_NONE,
             ]);
             if ($changed) {
                 $this->attemptDao->transition($attempt->id, OrderAttempt::STATUS_PROCESSING, OrderAttempt::STATUS_SUCCESS, [
@@ -266,8 +292,8 @@ class OrderProcessService extends AbstractService
 
             return $changed;
         });
-        if ($done) {
-            $this->dispatcher->notify($order->id);
+        if ($done && $notify) {
+            $this->dispatcher->notify($order->id, 1, 0, $current->notify_round);
         }
 
         return $done;
@@ -379,13 +405,28 @@ class OrderProcessService extends AbstractService
     }
 
     /**
+     * 只记录、不采用的上游结果：和订单已有的结果矛盾时记 error，提醒人工核对资金。
+     */
+    private function logHeldResult(Order $order, OrderAttempt $attempt, RechargeStatus $upstream): void
+    {
+        $context = ['order_id' => $order->id, 'attempt_no' => $attempt->attempt_no, 'order_status' => $order->status, 'upstream' => $upstream->value];
+        $conflict = ($upstream === RechargeStatus::Success && $order->status === Order::STATUS_FAILED)
+            || ($upstream === RechargeStatus::Failed && $order->status === Order::STATUS_SUCCESS);
+        if ($conflict) {
+            $this->logger()->error('上游结果和订单结果不一致（人工处理单 / 已手动回调），请人工核对资金', $context);
+        } else {
+            $this->logger()->info('人工处理单 / 已手动回调：上游结果只记录，不改订单、不通知商户', $context);
+        }
+    }
+
+    /**
      * 提交时调供应商接口出了异常（连不上、超时、握手失败等）：上游可能已经建单（实测连接超时的单商腾那边照样建了），
-     * 判失败换下一家可能重复充值，等 2 小时又太久，所以立即转异常订单交给人工。查单、回调照常进行，
-     * 上游明确成功的会自动改为成功；明确失败的保持异常，人工核实后置为失败并退款。
+     * 判失败换下一家可能重复充值，等 2 小时又太久，所以立即转异常订单，并标为人工处理单：
+     * 之后上游的回调、查单结果只记录，不改订单、不通知商户；人工置为成功 / 失败也不自动通知，人工手动回调。
      */
     private function markAbnormalAfterCallFailure(Order $order, OrderAttempt $attempt, RechargeResult $result): void
     {
-        if ($this->orderDao->transition($order->id, [Order::STATUS_PROCESSING], Order::STATUS_ABNORMAL)) {
+        if ($this->orderDao->transition($order->id, [Order::STATUS_PROCESSING], Order::STATUS_ABNORMAL, ['manual_only' => true])) {
             $this->logger()->warning('提交供应商时接口异常，订单转异常', [
                 'order_id' => $order->id,
                 'attempt_no' => $attempt->attempt_no,

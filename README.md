@@ -24,7 +24,7 @@ Hyperf 3.1 + PHP 8.4 + Swoole 后端，附带 Web 管理后台（Vue 3 + TypeScr
 - 商户中心：商户（AppKey/AppSecret、IP 白名单、通知地址）、按运营商定价、加减款、资金流水
 - 风控：号码黑名单、通道维护
 - 订单：开放接口下单（商户接入文档 [docs/api.md](docs/api.md)）、扣款、提交供应商、失败换供应商、回调、查单、超时转异常、失败退款、通知商户
-- 订单中心：订单列表与详情、异常订单、人工查单 / 置成功 / 置失败 / 冲正 / 重发通知、导出 CSV
+- 订单中心：订单列表与详情、异常订单、人工查单 / 置成功 / 置失败 / 冲正 / 手动回调 / 手动补单、导出 CSV
 - 定时任务 `OrderCrontab` 每分钟查单、转异常、补推丢了的提交；日志渠道 `supplier`、`order`
 
 第三阶段：
@@ -140,7 +140,7 @@ npm run build        # 产物在 merchant-web/dist，部署在 /merchant/ 路径
 | PUT | `/admin/merchants/{id}/products/{productId}` | `merchant.price` |
 | POST | `/admin/merchants/{id}/balance` | `merchant.balance` |
 | GET | `/admin/orders`、`/filter-options`、`/export`、`/{id}` | `order.view` |
-| POST | `/admin/orders/{id}/query`、`/{id}/success`、`/{id}/fail`、`/{id}/notify`、`/{id}/resubmit` | `order.manage` |
+| GET/POST | `/admin/orders/{id}/query`、`/{id}/success`、`/{id}/fail`、`/{id}/notify`（手动回调）、`/{id}/resupply-options`、`/{id}/resupply`（手动补单） | `order.manage` |
 | POST | `/admin/orders/{id}/reverse` | `order.reverse` |
 | GET/POST | `/open/v1/recharge`、`/order`、`/balance`、`/products` | 商户签名，见 [docs/api.md](docs/api.md) |
 | GET/POST | `/notify/supplier/{供应商编码}` | 供应商回调，由驱动验签 |

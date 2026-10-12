@@ -25,13 +25,19 @@ class FakeOrderDispatcher extends OrderDispatcher
     /** @var list<array{order_id: int, attempt_no: int, delay: int}> */
     public array $notifies = [];
 
-    public function submit(int $orderId, int $delaySeconds = 0): void
+    /**
+     * 指定了补单的供应商商品时才多记一个 preferred，其余和以前一样。
+     */
+    public function submit(int $orderId, int $delaySeconds = 0, ?int $preferredSupplierProductId = null): void
     {
-        $this->submits[] = ['order_id' => $orderId, 'delay' => $delaySeconds];
+        $this->submits[] = ['order_id' => $orderId, 'delay' => $delaySeconds] + ($preferredSupplierProductId === null ? [] : ['preferred' => $preferredSupplierProductId]);
     }
 
-    public function notify(int $orderId, int $attemptNo = 1, int $delaySeconds = 0): void
+    /**
+     * 通知轮次不是 0（手动回调过）时才多记一个 round。
+     */
+    public function notify(int $orderId, int $attemptNo = 1, int $delaySeconds = 0, int $round = 0): void
     {
-        $this->notifies[] = ['order_id' => $orderId, 'attempt_no' => $attemptNo, 'delay' => $delaySeconds];
+        $this->notifies[] = ['order_id' => $orderId, 'attempt_no' => $attemptNo, 'delay' => $delaySeconds] + ($round === 0 ? [] : ['round' => $round]);
     }
 }

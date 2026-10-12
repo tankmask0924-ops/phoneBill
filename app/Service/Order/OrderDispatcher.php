@@ -27,13 +27,19 @@ class OrderDispatcher
     #[Inject]
     protected DriverFactory $driverFactory;
 
-    public function submit(int $orderId, int $delaySeconds = 0): void
+    /**
+     * @param null|int $preferredSupplierProductId 手动补单时指定先提交给哪个供应商商品
+     */
+    public function submit(int $orderId, int $delaySeconds = 0, ?int $preferredSupplierProductId = null): void
     {
-        $this->driverFactory->get('default')->push(new SubmitOrderJob($orderId), $delaySeconds);
+        $this->driverFactory->get('default')->push(new SubmitOrderJob($orderId, $preferredSupplierProductId), $delaySeconds);
     }
 
-    public function notify(int $orderId, int $attemptNo = 1, int $delaySeconds = 0): void
+    /**
+     * @param int $round 通知轮次（orders.notify_round），轮次对不上的任务执行时直接作废
+     */
+    public function notify(int $orderId, int $attemptNo = 1, int $delaySeconds = 0, int $round = 0): void
     {
-        $this->driverFactory->get('notify')->push(new NotifyMerchantJob($orderId, $attemptNo), $delaySeconds);
+        $this->driverFactory->get('notify')->push(new NotifyMerchantJob($orderId, $attemptNo, $round), $delaySeconds);
     }
 }

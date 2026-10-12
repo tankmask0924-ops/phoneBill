@@ -118,18 +118,27 @@ class OrderController extends AbstractController
     #[Middleware(AdminPermissionMiddleware::class)]
     #[RequiresPermission('order.manage')]
     #[PostMapping(path: '{id:\d+}/notify')]
-    public function resendNotify(int $id): array
+    public function manualNotify(int $id): array
     {
-        return $this->orderAdminService->resendNotify($this->admin(), $id, $this->clientIp());
+        return $this->orderAdminService->manualNotify($this->admin(), $id, $this->clientIp());
     }
 
     #[Middleware(AdminAuthMiddleware::class)]
     #[Middleware(AdminPermissionMiddleware::class)]
     #[RequiresPermission('order.manage')]
-    #[PostMapping(path: '{id:\d+}/resubmit')]
-    public function resubmit(int $id): array
+    #[GetMapping(path: '{id:\d+}/resupply-options')]
+    public function resupplyOptions(int $id): array
     {
-        return $this->orderAdminService->resubmit($this->admin(), $id, $this->clientIp());
+        return $this->orderAdminService->resupplyOptions($id);
+    }
+
+    #[Middleware(AdminAuthMiddleware::class)]
+    #[Middleware(AdminPermissionMiddleware::class)]
+    #[RequiresPermission('order.manage')]
+    #[PostMapping(path: '{id:\d+}/resupply')]
+    public function resupply(int $id): array
+    {
+        return $this->orderAdminService->resupply($this->admin(), $id, $this->request->input('supplier_product_id'), $this->request->input('remark'), $this->clientIp());
     }
 
     private function admin(): AdminUser

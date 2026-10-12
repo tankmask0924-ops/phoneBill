@@ -160,7 +160,8 @@ class OrderService extends AbstractService
     }
 
     /**
-     * 给商户看的订单信息（开放接口返回、结果通知用同一份）。等待中、异常都显示为 processing。
+     * 给商户看的订单信息（开放接口返回、结果通知用同一份）。等待中、异常都显示为 processing；
+     * 人工处理单在手动回调之前也显示为 processing（结果由人工决定什么时候给商户）。
      *
      * @return array<string, mixed>
      */
@@ -174,10 +175,10 @@ class OrderService extends AbstractService
             'operator' => $order->operator,
             'face_value' => $order->face_value,
             'amount' => $order->sale_price,
-            'status' => $order->isFinal() ? $order->status : 'processing',
-            'fail_reason' => $order->status === Order::STATUS_FAILED ? $order->fail_reason : null,
+            'status' => $order->resultVisibleToMerchant() ? $order->status : 'processing',
+            'fail_reason' => $order->resultVisibleToMerchant() && $order->status === Order::STATUS_FAILED ? $order->fail_reason : null,
             'created_at' => $order->created_at?->toDateTimeString(),
-            'finished_at' => $order->isFinal() ? $order->finished_at?->toDateTimeString() : null,
+            'finished_at' => $order->resultVisibleToMerchant() ? $order->finished_at?->toDateTimeString() : null,
         ];
     }
 

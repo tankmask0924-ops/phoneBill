@@ -66,7 +66,7 @@ class AdminBootstrapService extends AbstractService
         ['code' => 'funding.review', 'module' => 'merchant', 'name' => '加款申请审核（入账）、付款账号审核', 'type' => 'action'],
         ['code' => 'funding.config', 'module' => 'merchant', 'name' => '收款配置（收款账户、分配给商户）', 'type' => 'action'],
         ['code' => 'order.view', 'module' => 'order', 'name' => '订单查看（含导出）', 'type' => 'action'],
-        ['code' => 'order.manage', 'module' => 'order', 'name' => '订单处理（查单、异常订单置成功/失败、重发通知）', 'type' => 'action'],
+        ['code' => 'order.manage', 'module' => 'order', 'name' => '订单处理（查单、异常订单置成功/失败、手动回调、手动补单）', 'type' => 'action'],
         ['code' => 'order.reverse', 'module' => 'order', 'name' => '订单冲正（成功改失败并退款）', 'type' => 'action'],
     ];
 

@@ -5,7 +5,7 @@ import { usePagedList } from '@/utils/paged'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Download } from '@element-plus/icons-vue'
 import { computed, onMounted, ref } from 'vue'
-import { downloadOrders, type Order, orderApi, type OrderDetail, type OrderFilterOptions } from '@/api/order'
+import { downloadOrders, type Order, orderApi, type OrderDetail, type OrderFilterOptions, type ResupplyOption } from '@/api/order'
 import {
   attemptStatusLabels,
   balanceTypeLabels,
@@ -131,7 +131,9 @@ async function query() {
     return `${r.attempt_no}：供应商还没有明确结果${reason}，订单状态不变`
   })
   let next = ''
-  if (result.status === 'success') {
+  if (result.manual_only) {
+    next = '这是人工处理单：上游结果只记录，订单状态不会自动变。请核实后置为成功 / 失败，再手动回调；确认上游没有充上也可以手动补单。'
+  } else if (result.status === 'success') {
     next = '订单已改为成功，会通知商户。'
   } else if (result.status === 'abnormal' && result.query_results.some((r) => r.status === 'failed')) {
     next = '异常订单不会自动退款：请到供应商后台核实没有充值到账后，点「置为失败并退款」。'
@@ -144,43 +146,72 @@ async function query() {
   }).catch(() => undefined)
 }
 
+/** 人工处理单置成功 / 失败后不自动通知商户 */
+function notifyHint(): string {
+  return detail.value!.manual_only ? '这是人工处理单，不会自动通知商户，处理完请点「手动回调」。' : '并通知商户。'
+}
+
 async function confirmSuccess() {
-  const remark = await askRemark('置为成功', '确认供应商已经充值到账？订单将改为成功并通知商户，不退款。')
+  const remark = await askRemark('置为成功', `确认供应商已经充值到账？订单将改为成功，不退款，${notifyHint()}`)
   if (remark) {
     await act(() => orderApi.confirmSuccess(detail.value!.id, remark), '已置为成功')
   }
 }
 
 async function confirmFailed() {
-  const remark = await askRemark('置为失败', `确认没有充值到账？订单将改为失败，退给商户 ${detail.value!.sale_price} 元并通知商户。`)
+  const remark = await askRemark('置为失败', `确认没有充值到账？订单将改为失败，退给商户 ${detail.value!.sale_price} 元，${notifyHint()}`)
   if (remark) {
     await act(() => orderApi.confirmFailed(detail.value!.id, remark), '已置为失败并退款')
   }
 }
 
 async function reverse() {
-  const remark = await askRemark('冲正', `成功的订单将改为失败，退给商户 ${detail.value!.sale_price} 元并重新通知商户。请填写冲正原因：`)
+  const remark = await askRemark('冲正', `成功的订单将改为失败，退给商户 ${detail.value!.sale_price} 元，${notifyHint()}请填写冲正原因：`)
   if (remark) {
     await act(() => orderApi.reverse(detail.value!.id, remark), '已冲正并退款')
   }
 }
 
-async function resendNotify() {
-  await act(() => orderApi.resendNotify(detail.value!.id), '已重新推送通知')
-}
-
-async function resubmit() {
+async function manualNotify() {
   const d = detail.value!
+  const result = d.status === 'success' ? '成功' : `失败（${d.fail_reason ?? ''}）`
   try {
     await ElMessageBox.confirm(
-      `将按原订单的商品、手机号（${d.mobile}）新建一笔订单，重新扣商户 ${d.sale_price} 元并提交给供应商，出结果后同样会通知商户。原订单不变。确定重新提交吗？`,
-      '重新提交',
+      `将把「${result}」推送给商户（没收到 success 会按间隔重试）。回调之后，上游再来的结果都只记录、不会再推给商户。确定回调吗？`,
+      '手动回调',
       { type: 'warning' },
     )
   } catch {
     return
   }
-  await act(() => orderApi.resubmit(d.id), '已新建订单并提交，详情已切换到新订单')
+  await act(() => orderApi.manualNotify(d.id), '已推送给商户')
+}
+
+// ---- 手动补单 ----
+const resupplyVisible = ref(false)
+const resupplyOptions = ref<ResupplyOption[]>([])
+const resupplyForm = ref<{ supplier_product_id: number | undefined; remark: string }>({ supplier_product_id: undefined, remark: '' })
+
+async function openResupply() {
+  resupplyOptions.value = await orderApi.resupplyOptions(detail.value!.id)
+  if (resupplyOptions.value.length === 0) {
+    ElMessage.warning('这笔订单现在没有能走的供应商商品（可能都下架、停用或在维护）')
+    return
+  }
+  // 默认选还没试过的第一个，都试过就选第一个
+  const first = resupplyOptions.value.find((o) => !o.tried) ?? resupplyOptions.value[0]
+  resupplyForm.value = { supplier_product_id: first.supplier_product_id, remark: '' }
+  resupplyVisible.value = true
+}
+
+async function resupply() {
+  const { supplier_product_id: spId, remark } = resupplyForm.value
+  if (!spId || !remark.trim()) {
+    ElMessage.warning('请选择供应商商品并填写备注')
+    return
+  }
+  resupplyVisible.value = false
+  await act(() => orderApi.resupply(detail.value!.id, spId, remark.trim()), '已补单，正在提交给供应商，稍后点「刷新」看结果')
 }
 
 /** 只重新读取详情，看处理进度和耗时 */
@@ -208,7 +239,7 @@ onMounted(async () => {
       :closable="false"
       show-icon
       class="tip-bar"
-      title="两种情况会进这里：提交给供应商时接口异常（连不上、超时等，看提交记录里的说明），或下单超过 2 小时还没有结果。请先到供应商后台核实，再在详情里「置为成功」或「置为失败」（失败会退款）；供应商后来明确成功的会自动改为成功。"
+      title="两种情况会进这里：① 提交给供应商时接口异常（标「人工」）：上游结果只记录，状态和回调全部人工，置为成功 / 失败后要再点「手动回调」商户才会知道；② 下单超过 2 小时还没有结果：上游后来明确成功的会自动改为成功并通知商户。上游确认没有充上的，可以「手动补单」重新提交（同一笔订单，不重复扣款）。"
     />
     <el-form inline @submit.prevent="list.search">
       <el-form-item>
@@ -275,7 +306,10 @@ onMounted(async () => {
         <template #default="{ row }">{{ row.supplier_name ?? '-' }}</template>
       </el-table-column>
       <el-table-column label="状态" width="120">
-        <template #default="{ row }"><StatusTag :map="orderStatusLabels" :value="row.status" /></template>
+        <template #default="{ row }">
+          <StatusTag :map="orderStatusLabels" :value="row.status" />
+          <el-tag v-if="row.manual_only" type="danger" size="small" class="manual-tag">人工</el-tag>
+        </template>
       </el-table-column>
       <el-table-column prop="created_at" label="下单时间" width="170" />
       <el-table-column label="耗时" width="100" align="right">
@@ -310,14 +344,19 @@ onMounted(async () => {
             <el-button type="danger" @click="confirmFailed">置为失败并退款</el-button>
           </template>
           <el-button v-if="canReverse && detail.status === 'success'" type="danger" plain @click="reverse">冲正</el-button>
-          <el-button v-if="canManage && ['success', 'failed'].includes(detail.status)" @click="resendNotify">重发通知</el-button>
-          <el-button v-if="canManage && detail.status === 'failed'" type="primary" plain @click="resubmit">重新提交</el-button>
+          <el-button v-if="canManage && detail.status === 'abnormal'" type="primary" plain @click="openResupply">手动补单</el-button>
+          <el-button v-if="canManage && ['success', 'failed'].includes(detail.status)" type="primary" plain @click="manualNotify">手动回调</el-button>
         </div>
+
+        <el-alert v-for="w in detail.warnings" :key="w" type="error" :closable="false" show-icon :title="w" class="warning" />
 
         <el-descriptions :column="3" border size="small">
           <el-descriptions-item label="平台订单号">{{ detail.order_no }}</el-descriptions-item>
           <el-descriptions-item label="商户订单号">{{ detail.merchant_order_no }}</el-descriptions-item>
-          <el-descriptions-item label="状态"><StatusTag :map="orderStatusLabels" :value="detail.status" /></el-descriptions-item>
+          <el-descriptions-item label="状态">
+            <StatusTag :map="orderStatusLabels" :value="detail.status" />
+            <el-tag v-if="detail.manual_only" type="danger" size="small" class="manual-tag">人工处理单</el-tag>
+          </el-descriptions-item>
           <el-descriptions-item label="商户">{{ detail.merchant_name }}</el-descriptions-item>
           <el-descriptions-item label="商品">{{ detail.product_name }}（{{ detail.product_code }}）</el-descriptions-item>
           <el-descriptions-item label="号码">
@@ -331,6 +370,7 @@ onMounted(async () => {
           <el-descriptions-item label="耗时">{{ formatDuration(detail.duration) }}</el-descriptions-item>
           <el-descriptions-item label="通知">
             <StatusTag :map="notifyStatusLabels" :value="detail.notify_status" />
+            <span v-if="detail.manual_notified_at" class="muted">（{{ detail.manual_notified_at }} 手动回调）</span>
           </el-descriptions-item>
           <el-descriptions-item v-if="detail.fail_reason" label="失败原因" :span="3">{{ detail.fail_reason }}</el-descriptions-item>
         </el-descriptions>
@@ -392,6 +432,32 @@ onMounted(async () => {
       </template>
     </div>
   </el-drawer>
+
+  <el-dialog v-model="resupplyVisible" title="手动补单" width="620px">
+    <el-alert type="warning" :closable="false" show-icon class="warning">
+      补单会把这笔订单（同一个订单号、不重复扣款）重新提交给下面选的供应商商品。
+      <b>请先到上游后台确认原来的提交确实没有充上</b>，否则会重复充值。原来还在处理中的提交会记为「人工确认上游未成功」。
+    </el-alert>
+    <el-form label-width="96px">
+      <el-form-item label="供应商商品">
+        <el-select v-model="resupplyForm.supplier_product_id" style="width: 100%">
+          <el-option
+            v-for="o in resupplyOptions"
+            :key="o.supplier_product_id"
+            :value="o.supplier_product_id"
+            :label="`${o.supplier_name} · ${o.supplier_product_name} · 成本 ${o.cost_price}${o.tried ? '（这笔订单提交过）' : ''}`"
+          />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="备注" required>
+        <el-input v-model="resupplyForm.remark" type="textarea" :rows="2" maxlength="200" placeholder="必填，如：已在上游后台确认没有这笔单" />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="resupplyVisible = false">取消</el-button>
+      <el-button type="primary" @click="resupply">确认补单</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <style scoped>
@@ -413,6 +479,14 @@ onMounted(async () => {
   display: flex;
   gap: 8px;
   margin-bottom: 16px;
+}
+
+.warning {
+  margin-bottom: 12px;
+}
+
+.manual-tag {
+  margin-left: 4px;
 }
 
 .actions .el-button + .el-button {

@@ -26,6 +26,7 @@ use App\Security\OpenApiSigner;
 use App\Service\Order\MerchantNotifyService;
 use App\Service\Order\OrderDispatcher;
 use App\Service\Order\OrderProcessService;
+use App\Service\Order\OrderService;
 use Hyperf\Context\ApplicationContext;
 use Hyperf\Contract\ApplicationInterface;
 use Hyperf\Di\Container;
@@ -137,7 +138,7 @@ class OrderFlowTest extends HttpTestCase
         $this->assertSame('100.50', Merchant::find($merchant->id)->balance);
     }
 
-    public function testCallFailureTurnsAbnormalAndWaitsForCallback()
+    public function testCallFailureMakesManualOnlyOrderAndOnlyRecordsUpstreamResults()
     {
         [$merchant, $product, $mobile, $suppliers] = $this->scenario([
             ['provinces' => ['*'], 'operators' => ['cmcc'], 'cost' => '98.00', 'result' => 'timeout', 'priority' => 1],
@@ -157,9 +158,24 @@ class OrderFlowTest extends HttpTestCase
         $this->process()->submit($order->id);
         $this->assertSame(1, OrderAttempt::where('order_id', $order->id)->count());
 
+        $this->assertTrue(Order::find($order->id)->manual_only, '标为人工处理单');
+
+        // 人工处理单：上游说成功也只记到提交上，订单保持异常、不通知商户，商户查单还是处理中
+        $this->dispatcher->notifies = [];
         $reply = $this->supplierCallback($suppliers[0], ['attempt_no' => $attempt->attempt_no, 'status' => 'success']);
         $this->assertSame([200, 'ok'], $reply);
-        $this->assertSame(Order::STATUS_SUCCESS, Order::find($order->id)->status);
+        $this->assertSame(OrderAttempt::STATUS_SUCCESS, OrderAttempt::find($attempt->id)->status);
+        $this->assertSame(Order::STATUS_ABNORMAL, Order::find($order->id)->status);
+        $this->assertSame([], $this->dispatcher->notifies);
+        $this->assertSame('processing', make(OrderService::class)->present(Order::find($order->id))['status']);
+
+        // 人工置为成功也不自动通知，商户查单仍是处理中，等手动回调
+        $this->assertTrue($this->process()->confirmSuccess(Order::find($order->id), '上游核实已到账'));
+        $order = Order::find($order->id);
+        $this->assertSame(Order::STATUS_SUCCESS, $order->status);
+        $this->assertSame(Order::NOTIFY_NONE, $order->notify_status);
+        $this->assertSame([], $this->dispatcher->notifies);
+        $this->assertSame('processing', make(OrderService::class)->present($order)['status']);
 
         // 重复回调、矛盾的回调都不再改变结果
         $this->supplierCallback($suppliers[0], ['attempt_no' => $attempt->attempt_no, 'status' => 'failed']);

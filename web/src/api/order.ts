@@ -29,6 +29,10 @@ export interface Order {
   notify_url: string | null
   notify_status: string
   notified_at: string | null
+  /** 人工处理单：提交时接口异常，上游结果只记录，状态和回调全部人工 */
+  manual_only: boolean
+  /** 最近一次手动回调；回调过之后上游结果不再推给商户 */
+  manual_notified_at: string | null
   created_at: string | null
   finished_at: string | null
   /** 下单受理到出结果的秒数，还没结果时为 null */
@@ -55,6 +59,8 @@ export interface OrderAttempt {
 }
 
 export interface OrderDetail extends Order {
+  /** 标红提醒：上游结果和订单矛盾、人工处理单待办 */
+  warnings: string[]
   attempts: OrderAttempt[]
   notify_logs: {
     attempt_no: number
@@ -65,6 +71,17 @@ export interface OrderDetail extends Order {
     created_at: string | null
   }[]
   balance_logs: { type: string; amount: string; balance_after: string; created_at: string | null }[]
+}
+
+/** 手动补单可选的供应商商品 */
+export interface ResupplyOption {
+  supplier_product_id: number
+  supplier_product_name: string
+  supplier_name: string
+  cost_price: string
+  priority: number
+  /** 这笔订单之前提交过 */
+  tried: boolean
 }
 
 export interface OrderFilterOptions {
@@ -83,9 +100,12 @@ export const orderApi = {
   confirmSuccess: (id: number, remark: string) => http.post<OrderDetail>(`/admin/orders/${id}/success`, { remark }),
   confirmFailed: (id: number, remark: string) => http.post<OrderDetail>(`/admin/orders/${id}/fail`, { remark }),
   reverse: (id: number, remark: string) => http.post<OrderDetail>(`/admin/orders/${id}/reverse`, { remark }),
-  resendNotify: (id: number) => http.post<OrderDetail>(`/admin/orders/${id}/notify`),
-  /** 失败订单重新提交：新建一笔订单，返回新订单的详情 */
-  resubmit: (id: number) => http.post<OrderDetail>(`/admin/orders/${id}/resubmit`),
+  /** 手动回调：把当前结果推给商户 */
+  manualNotify: (id: number) => http.post<OrderDetail>(`/admin/orders/${id}/notify`),
+  resupplyOptions: (id: number) => http.get<ResupplyOption[]>(`/admin/orders/${id}/resupply-options`),
+  /** 手动补单：同一笔订单重新提交给指定的供应商商品 */
+  resupply: (id: number, supplierProductId: number, remark: string) =>
+    http.post<OrderDetail>(`/admin/orders/${id}/resupply`, { supplier_product_id: supplierProductId, remark }),
 }
 
 /**

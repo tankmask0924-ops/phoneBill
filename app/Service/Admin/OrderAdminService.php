@@ -22,7 +22,6 @@ use App\Dao\SupplierDao;
 use App\Dao\SupplierProductDao;
 use App\Enum\Operator;
 use App\Enum\Province;
-use App\Exception\OpenApiException;
 use App\Model\AdminUser;
 use App\Model\MerchantBalanceLog;
 use App\Model\Order;
@@ -32,7 +31,8 @@ use App\Service\AbstractService;
 use App\Service\FiltersByDateRange;
 use App\Service\Order\OrderDispatcher;
 use App\Service\Order\OrderProcessService;
-use App\Service\Order\OrderService;
+use App\Service\Product\ProductRouteService;
+use App\Support\RedisLock;
 use Carbon\CarbonInterface;
 use Hyperf\Database\Model\Builder;
 use Hyperf\Di\Annotation\Inject;
@@ -42,9 +42,10 @@ use Hyperf\HttpMessage\Exception\HttpException;
  * 订单中心：列表、详情、导出，以及人工处理（docs/project.md 4.7）。
  *
  * - 置成功 / 置失败只对异常订单；冲正只对成功订单，要单独权限；三者都必须写备注，都记操作日志；
- * - 置失败、冲正都会退款并重新通知商户；
- * - 重新提交只对失败订单：原单不动，按原单的商户、商品、手机号、通知地址新建一笔（商户订单号加 -R1、-R2…），
- *   完整走一遍下单流程（重新扣款、提交供应商、出结果后通知商户），用来人工重试和测耗时。
+ * - 置失败、冲正都会退款并通知商户；人工处理单（提交时接口异常）不自动通知，人工手动回调；
+ * - 手动回调只对成功 / 失败的订单：开新一轮通知，之前排队的通知作废；回调过的订单之后上游结果只记录、不再推给商户；
+ * - 手动补单只对异常订单：同一笔订单重新提交给指定的供应商商品，不新建订单、不重复扣款；
+ *   原来还在处理中的提交记为「人工确认上游未成功」，补单前必须先到上游确认原单没有充上，否则会重复充值。
  */
 class OrderAdminService extends AbstractService
 {
@@ -87,7 +88,10 @@ class OrderAdminService extends AbstractService
     protected OrderDispatcher $dispatcher;
 
     #[Inject]
-    protected OrderService $orderService;
+    protected ProductRouteService $routeService;
+
+    #[Inject]
+    protected RedisLock $lock;
 
     #[Inject]
     protected AdminOperationLogDao $operationLogDao;
@@ -168,6 +172,7 @@ class OrderAdminService extends AbstractService
         $supplierProducts = $this->supplierProductDao->newQuery()->whereIn('id', $attempts->pluck('supplier_product_id')->unique()->all())->pluck('name', 'id');
 
         return $this->formatMany([$order])[0] + [
+            'warnings' => $this->warnings($order, $attempts->all()),
             'attempts' => $attempts->map(static fn (OrderAttempt $a) => [
                 'id' => $a->id,
                 'attempt_no' => $a->attempt_no,
@@ -283,68 +288,95 @@ class OrderAdminService extends AbstractService
     }
 
     /**
-     * 从第 1 次开始重新通知商户。
+     * 手动回调：把订单当前结果推给商户（从第 1 次开始，失败按间隔重试）。开新一轮通知，之前排队的通知作废；
+     * 回调过的订单之后上游再来的结果只记录、不再推给商户。人工处理单要先人工置为成功 / 失败再回调。
      *
      * @return array<string, mixed>
      */
-    public function resendNotify(AdminUser $operator, int $id, ?string $ip): array
+    public function manualNotify(AdminUser $operator, int $id, ?string $ip): array
     {
         $order = $this->findOrFail($id);
         if (! $order->isFinal()) {
-            throw new HttpException(422, '订单还没出结果，不能通知');
+            throw new HttpException(422, '订单还没有成功或失败，不能回调；异常订单请先置为成功或失败');
         }
-        $this->orderDao->update($order->id, ['notify_status' => Order::NOTIFY_PENDING]);
-        $this->dispatcher->notify($order->id);
-        $this->operationLogDao->record($operator->id, self::MODULE, 'resend_order_notify', 'order', $order->id, null, null, $ip);
+        $this->orderDao->newQuery()->where('id', $order->id)->increment('notify_round', 1, [
+            'manual_notified_at' => date('Y-m-d H:i:s'),
+            'notify_status' => Order::NOTIFY_PENDING,
+        ]);
+        $round = (int) $this->findOrFail($order->id)->notify_round;
+        $this->dispatcher->notify($order->id, 1, 0, $round);
+        $this->operationLogDao->record($operator->id, self::MODULE, 'manual_notify_order', 'order', $order->id, null, ['status' => $order->status, 'round' => $round], $ip);
 
         return $this->detail($order->id);
     }
 
     /**
-     * 失败订单重新提交：新建一笔订单，返回新订单的详情。
+     * 手动补单可选的供应商商品：这笔订单现在能走的全部候选，标出试过的。
      *
-     * @return array<string, mixed>
+     * @return list<array<string, mixed>>
      */
-    public function resubmit(AdminUser $operator, int $id, ?string $ip): array
+    public function resupplyOptions(int $id): array
     {
         $order = $this->findOrFail($id);
-        if ($order->status !== Order::STATUS_FAILED) {
-            throw new HttpException(422, '只有失败的订单可以重新提交');
-        }
-        $merchant = $this->merchantDao->find($order->merchant_id);
-        if ($merchant === null || $merchant->status !== 'active') {
-            throw new HttpException(422, '商户不存在或已停用');
-        }
-        try {
-            $new = $this->orderService->create($merchant, [
-                'product_code' => $order->product_code,
-                'mobile' => $order->mobile,
-                'merchant_order_no' => $this->retryMerchantOrderNo($order),
-                'notify_url' => $order->notify_url ?? '',
-            ]);
-        } catch (OpenApiException $e) {
-            // 余额不足、商品下架、同号码有处理中的订单等，和商户下单时的提示一样
-            throw new HttpException(422, '重新提交失败：' . $e->getMessage());
-        }
-        $this->operationLogDao->record($operator->id, self::MODULE, 'resubmit_order', 'order', $order->id, null, ['new_order_id' => $new->id, 'new_order_no' => $new->order_no], $ip);
+        $tried = $this->attemptDao->forOrder($order->id)->pluck('supplier_product_id')->map(static fn ($v) => (int) $v)->all();
+        $candidates = $this->routeService->candidates([$order->product_id], $order->operator, $order->province)[$order->product_id] ?? [];
 
-        return $this->detail($new->id);
+        return array_map(static fn (array $c) => [
+            'supplier_product_id' => $c['supplier_product_id'],
+            'supplier_product_name' => $c['supplier_product_name'],
+            'supplier_name' => $c['supplier_name'],
+            'cost_price' => $c['cost_price'],
+            'priority' => $c['priority'],
+            'tried' => in_array($c['supplier_product_id'], $tried, true),
+        ], $candidates);
     }
 
     /**
-     * 原商户订单号去掉已有的 -Rn 后缀，找下一个没用过的 -Rn；超长时截掉前面部分。
+     * 手动补单：异常订单重新提交给指定的供应商商品（同一笔订单，不重复扣款），提交在队列里异步进行。
+     *
+     * @return array<string, mixed>
      */
-    private function retryMerchantOrderNo(Order $order): string
+    public function resupply(AdminUser $operator, int $id, mixed $supplierProductId, mixed $remark, ?string $ip): array
     {
-        $base = (string) preg_replace('/-R\d+$/', '', $order->merchant_order_no);
-        for ($n = 1; $n <= 999; ++$n) {
-            $suffix = "-R{$n}";
-            $candidate = substr($base, 0, 64 - strlen($suffix)) . $suffix;
-            if ($this->orderDao->findByMerchantOrderNo($order->merchant_id, $candidate) === null) {
-                return $candidate;
-            }
+        $order = $this->findOrFail($id);
+        if ($order->status !== Order::STATUS_ABNORMAL) {
+            throw new HttpException(422, '只有异常订单可以手动补单');
         }
-        throw new HttpException(422, '这笔订单重新提交的次数太多了');
+        $remark = $this->requiredString($remark, '备注', 200);
+        $spId = is_numeric($supplierProductId) ? (int) $supplierProductId : 0;
+        if (! in_array($spId, array_column($this->resupplyOptions($order->id), 'supplier_product_id'), true)) {
+            throw new HttpException(422, '请选择这笔订单现在能走的供应商商品');
+        }
+        // 和提交任务用同一把锁，防止补单时正好有提交在进行
+        $token = $this->lock->acquire("order:submit:{$order->id}", 60);
+        if ($token === null) {
+            throw new HttpException(422, '订单正在提交中，请稍后再试');
+        }
+        try {
+            $previous = [];
+            foreach ($this->attemptDao->forOrder($order->id) as $attempt) {
+                if ($this->attemptDao->transition($attempt->id, OrderAttempt::STATUS_PROCESSING, OrderAttempt::STATUS_FAILED, [
+                    'message' => mb_substr("人工确认上游未成功（补单）：{$remark}", 0, 255),
+                    'finished_at' => date('Y-m-d H:i:s'),
+                ])) {
+                    $previous[] = $attempt->attempt_no;
+                }
+            }
+            // 补单后按正常流程自动处理；补单时再出接口异常会重新标为人工处理单
+            if (! $this->orderDao->transition($order->id, [Order::STATUS_ABNORMAL], Order::STATUS_PROCESSING, ['manual_only' => false])) {
+                throw new HttpException(422, '订单状态已经变了，请刷新');
+            }
+        } finally {
+            $this->lock->release("order:submit:{$order->id}", $token);
+        }
+        $this->dispatcher->submit($order->id, 0, $spId);
+        $this->operationLogDao->record($operator->id, self::MODULE, 'resupply_order', 'order', $order->id, ['status' => $order->status, 'closed_attempts' => $previous], [
+            'status' => Order::STATUS_PROCESSING,
+            'supplier_product_id' => $spId,
+            'remark' => $remark,
+        ], $ip);
+
+        return $this->detail($order->id);
     }
 
     private function findOrFail(int $id): Order
@@ -425,11 +457,40 @@ class OrderAdminService extends AbstractService
             'notify_url' => $o->notify_url,
             'notify_status' => $o->notify_status,
             'notified_at' => $o->notified_at?->toDateTimeString(),
+            // 人工处理单：提交时接口异常，上游结果只记录，状态和回调全部人工
+            'manual_only' => $o->manual_only,
+            // 最近一次手动回调；回调过之后上游结果不再推给商户
+            'manual_notified_at' => $o->manual_notified_at?->toDateTimeString(),
             'created_at' => $o->created_at?->toDateTimeString(),
             'finished_at' => $o->finished_at?->toDateTimeString(),
             // 下单受理到出结果（成功或失败）的秒数，还没结果时为 null
             'duration' => self::seconds($o->created_at, $o->finished_at),
         ], $orders);
+    }
+
+    /**
+     * 详情页标红的提醒：上游结果和订单结果矛盾（可能资损），以及人工处理单待办。
+     *
+     * @param list<OrderAttempt> $attempts
+     * @return list<string>
+     */
+    private function warnings(Order $order, array $attempts): array
+    {
+        $warnings = [];
+        $statuses = array_map(static fn (OrderAttempt $a) => $a->status, $attempts);
+        if ($order->status === Order::STATUS_FAILED && in_array(OrderAttempt::STATUS_SUCCESS, $statuses, true)) {
+            $warnings[] = '有供应商提交是成功的，但订单是失败（已退款），请核对资金';
+        }
+        if ($order->status === Order::STATUS_SUCCESS && $attempts !== [] && end($attempts)->status === OrderAttempt::STATUS_FAILED) {
+            $warnings[] = '最后一次供应商提交是失败的，但订单是成功，请核对是否到账';
+        }
+        if ($order->manual_only && $order->manual_notified_at === null) {
+            $warnings[] = $order->isFinal()
+                ? '人工处理单：结果还没有回调给商户（商户查单看到的是处理中），核实无误后请点「手动回调」'
+                : '人工处理单：提交时接口异常，上游结果只记录不自动处理。请到上游核实后置为成功 / 失败，或确认上游没有充上后手动补单';
+        }
+
+        return $warnings;
     }
 
     private static function seconds(?CarbonInterface $from, ?CarbonInterface $to): ?int

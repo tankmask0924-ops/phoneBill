@@ -21,6 +21,7 @@ use App\Service\AbstractService;
 use App\Service\FiltersByDateRange;
 use App\Service\Merchant\MerchantCatalogService;
 use App\Service\Order\OrderService;
+use Hyperf\Database\Model\Builder;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpMessage\Exception\HttpException;
 
@@ -76,10 +77,10 @@ class MerchantPortalService extends AbstractService
             'merchant_status' => $merchant->status,
             'today' => [
                 'order_count' => $base()->count(),
-                'processing_count' => $base()->whereIn('status', self::STATUS_FILTER['processing'])->count(),
-                'success_count' => $base()->where('status', Order::STATUS_SUCCESS)->count(),
-                'failed_count' => $base()->where('status', Order::STATUS_FAILED)->count(),
-                'success_amount' => bcadd((string) ($base()->where('status', Order::STATUS_SUCCESS)->sum('sale_price') ?? '0'), '0', 2),
+                'processing_count' => $this->whereMerchantStatus($base(), 'processing')->count(),
+                'success_count' => $this->whereMerchantStatus($base(), 'success')->count(),
+                'failed_count' => $this->whereMerchantStatus($base(), 'failed')->count(),
+                'success_amount' => bcadd((string) ($this->whereMerchantStatus($base(), 'success')->sum('sale_price') ?? '0'), '0', 2),
             ],
         ];
     }
@@ -103,7 +104,7 @@ class MerchantPortalService extends AbstractService
             $builder->where('mobile', $mobile);
         }
         if (is_string($query['status'] ?? null) && isset(self::STATUS_FILTER[$query['status']])) {
-            $builder->whereIn('status', self::STATUS_FILTER[$query['status']]);
+            $this->whereMerchantStatus($builder, $query['status']);
         }
         $this->applyDateRange($builder, $query, $keyword !== '' || $mobile !== '');
 
@@ -202,6 +203,21 @@ class MerchantPortalService extends AbstractService
             'ip_whitelist' => $merchant->ipWhitelist(),
             'products' => $this->catalogService->openedProducts($merchant),
         ];
+    }
+
+    /**
+     * 按商户看到的状态筛选，和 Order::resultVisibleToMerchant() 一致：人工处理单手动回调之前算处理中。
+     */
+    private function whereMerchantStatus(Builder $builder, string $status): Builder
+    {
+        $hidden = static fn ($q) => $q->where('manual_only', true)->whereNull('manual_notified_at');
+        if ($status === 'processing') {
+            return $builder->where(static fn ($q) => $q->whereIn('status', self::STATUS_FILTER['processing'])
+                ->orWhere(static fn ($q) => $hidden($q->whereIn('status', [Order::STATUS_SUCCESS, Order::STATUS_FAILED]))));
+        }
+
+        return $builder->whereIn('status', self::STATUS_FILTER[$status])
+            ->where(static fn ($q) => $q->where('manual_only', false)->orWhereNotNull('manual_notified_at'));
     }
 
     /**

@@ -16,10 +16,15 @@ use App\Model\Merchant;
 use App\Model\MerchantBalanceLog;
 use App\Model\Order;
 use App\Model\OrderAttempt;
+use App\Model\OrderNotifyLog;
 use App\Model\Product;
 use App\Model\SupplierProduct;
 use App\Network\HttpClient;
+use App\Service\Order\MerchantNotifyService;
 use App\Service\Order\OrderDispatcher;
+use App\Service\Order\OrderProcessService;
+use App\Service\Order\OrderService;
+use App\Supplier\RechargeResult;
 use Hyperf\Context\ApplicationContext;
 use Hyperf\Contract\ApplicationInterface;
 use Hyperf\Di\Container;
@@ -145,7 +150,7 @@ class OrderControllerTest extends HttpTestCase
         $this->assertSame(422, $this->jsonRequest('POST', "/admin/orders/{$order->id}/reverse", $token, ['remark' => 'again'])->getStatusCode());
     }
 
-    public function testQueryAndResendNotify()
+    public function testQueryAndManualNotify()
     {
         $token = $this->loginAs($this->createAdminWithPermissions(['order.view', 'order.manage']));
         [$merchant, $product, $sp] = $this->fixture();
@@ -168,43 +173,99 @@ class OrderControllerTest extends HttpTestCase
         $this->assertSame($balance, Merchant::find($merchant->id)->balance);
         $this->assertSame(422, $this->jsonRequest('POST', "/admin/orders/{$done->id}/query", $token)->getStatusCode(), '没有处理中的提交');
 
+        // 手动回调：每次开新一轮通知
         $this->dispatcher->notifies = [];
-        $this->assertSame('pending', $this->body($this->jsonRequest('POST', "/admin/orders/{$done->id}/notify", $token))['notify_status']);
-        $this->assertSame([['order_id' => $done->id, 'attempt_no' => 1, 'delay' => 0]], $this->dispatcher->notifies);
+        $notified = $this->body($this->jsonRequest('POST', "/admin/orders/{$done->id}/notify", $token));
+        $this->assertSame('pending', $notified['notify_status']);
+        $this->assertNotNull($notified['manual_notified_at']);
+        $this->jsonRequest('POST', "/admin/orders/{$done->id}/notify", $token);
+        $this->assertSame([
+            ['order_id' => $done->id, 'attempt_no' => 1, 'delay' => 0, 'round' => 1],
+            ['order_id' => $done->id, 'attempt_no' => 1, 'delay' => 0, 'round' => 2],
+        ], $this->dispatcher->notifies);
+        $this->assertSame(422, $this->jsonRequest('POST', "/admin/orders/{$abnormal->id}/notify", $token)->getStatusCode(), '没有结果的订单不能回调');
     }
 
-    public function testResubmitFailedOrderCreatesANewOrder()
+    public function testManualOnlyOrderNeedsManualNotifyAndLaterUpstreamResultsAreHeld()
     {
         $token = $this->loginAs($this->createAdminWithPermissions(['order.view', 'order.manage']));
         [$merchant, $product, $sp] = $this->fixture();
-        $this->openProduct($merchant, $product, ['cmcc' => '99.50']);
-        $mobile = $this->createSegment('cmcc', '广东');
-        $failed = $this->createOrder($merchant, $product, $sp, Order::STATUS_FAILED);
-        $failed->update(['mobile' => $mobile]);
+        $order = $this->createOrder($merchant, $product, $sp, Order::STATUS_ABNORMAL);
+        $order->update(['manual_only' => true]);
+        $this->assertStringContainsString('人工处理单', $this->body($this->jsonRequest('GET', "/admin/orders/{$order->id}", $token))['warnings'][0]);
+
+        // 人工置为失败：退款，但不自动通知商户，商户查单还是处理中
+        $this->dispatcher->notifies = [];
+        $failed = $this->body($this->jsonRequest('POST', "/admin/orders/{$order->id}/fail", $token, ['remark' => '上游核实未充值']));
+        $this->assertSame('failed', $failed['status']);
+        $this->assertSame('none', $failed['notify_status']);
+        $this->assertSame([], $this->dispatcher->notifies);
+        $this->assertSame('processing', make(OrderService::class)->present(Order::find($order->id))['status']);
+        $this->assertStringContainsString('还没有回调', $failed['warnings'][0]);
+
+        // 手动回调后商户才看到失败
+        $this->body($this->jsonRequest('POST', "/admin/orders/{$order->id}/notify", $token));
+        $this->assertSame([['order_id' => $order->id, 'attempt_no' => 1, 'delay' => 0, 'round' => 1]], $this->dispatcher->notifies);
+        $this->assertSame('failed', make(OrderService::class)->present(Order::find($order->id))['status']);
+
+        // 普通订单手动回调后：上游再来的结果只记到提交上，不改订单、不推给商户；矛盾时详情标红
+        $normal = $this->createOrder($merchant, $product, $sp, Order::STATUS_FAILED);
+        $this->jsonRequest('POST', "/admin/orders/{$normal->id}/notify", $token);
+        $this->dispatcher->notifies = [];
+        $attempt = OrderAttempt::where('order_id', $normal->id)->first();
+        make(OrderProcessService::class)->applyResult($attempt->id, RechargeResult::success('UP1'));
+        $this->assertSame(OrderAttempt::STATUS_SUCCESS, OrderAttempt::find($attempt->id)->status);
+        $this->assertSame(Order::STATUS_FAILED, Order::find($normal->id)->status);
+        $this->assertSame([], $this->dispatcher->notifies);
+        $this->assertStringContainsString('核对资金', $this->body($this->jsonRequest('GET', "/admin/orders/{$normal->id}", $token))['warnings'][0]);
+
+        // 手动回调之前排队的通知（旧轮次）作废，新轮次照常发
+        make(MerchantNotifyService::class)->notify($normal->id, 1, 0);
+        $this->assertSame(0, OrderNotifyLog::where('order_id', $normal->id)->count());
+        make(MerchantNotifyService::class)->notify($normal->id, 1, 1);
+        $this->assertSame(1, OrderNotifyLog::where('order_id', $normal->id)->count());
+    }
+
+    public function testResupplyAbnormalOrder()
+    {
+        $token = $this->loginAs($this->createAdminWithPermissions(['order.view', 'order.manage']));
+        [$merchant, , $sp] = $this->fixture();
+        $other = $this->createSupplierProduct($this->createSupplier(), ['cmcc'], 100, '98.50');
+        $product = $this->createProduct([$sp->id => 1, $other->id => 2]);
+        $order = $this->createOrder($merchant, $product, $sp, Order::STATUS_ABNORMAL);
+        $order->update(['manual_only' => true]);
+
+        // 可选的供应商商品：全部候选，标出试过的
+        $options = $this->body($this->jsonRequest('GET', "/admin/orders/{$order->id}/resupply-options", $token));
+        $this->assertSame([$sp->id, $other->id], array_column($options, 'supplier_product_id'));
+        $this->assertSame([true, false], array_column($options, 'tried'));
+
+        foreach ([['supplier_product_id' => $sp->id], ['supplier_product_id' => 999999999, 'remark' => 'x']] as $bad) {
+            $this->assertSame(422, $this->jsonRequest('POST', "/admin/orders/{$order->id}/resupply", $token, $bad)->getStatusCode(), json_encode($bad));
+        }
         $done = $this->createOrder($merchant, $product, $sp, Order::STATUS_SUCCESS);
+        $this->assertSame(422, $this->jsonRequest('POST', "/admin/orders/{$done->id}/resupply", $token, ['supplier_product_id' => $sp->id, 'remark' => 'x'])->getStatusCode(), '只有异常订单能补单');
+
         $balance = Merchant::find($merchant->id)->balance;
 
-        $this->assertSame(422, $this->jsonRequest('POST', "/admin/orders/{$done->id}/resubmit", $token)->getStatusCode(), '只有失败的能重新提交');
-
-        // 新建一笔：商户订单号加 -R1，重新扣款并推提交任务，原单不变
+        // 补给试过的同一家：原提交记为人工确认未成功，订单回到处理中、不再是人工处理单，推一个指定供应商商品的提交任务
         $this->dispatcher->submits = [];
-        $response = $this->jsonRequest('POST', "/admin/orders/{$failed->id}/resubmit", $token);
-        $this->assertSame(200, $response->getStatusCode(), (string) $response->getBody());
-        $new = $this->body($response);
-        $this->assertNotSame($failed->id, $new['id']);
-        $this->assertSame($failed->merchant_order_no . '-R1', $new['merchant_order_no']);
-        $this->assertSame($mobile, $new['mobile']);
-        $this->assertSame([['order_id' => $new['id'], 'delay' => 0]], $this->dispatcher->submits);
-        $this->assertSame(bcsub($balance, '99.50', 2), Merchant::find($merchant->id)->balance);
-        $this->assertSame(Order::STATUS_FAILED, Order::find($failed->id)->status);
+        $resupplied = $this->body($this->jsonRequest('POST', "/admin/orders/{$order->id}/resupply", $token, ['supplier_product_id' => $sp->id, 'remark' => '上游确认没有这笔单']));
+        $this->assertSame('processing', $resupplied['status']);
+        $this->assertFalse($resupplied['manual_only']);
+        $this->assertSame(OrderAttempt::STATUS_FAILED, $resupplied['attempts'][0]['status']);
+        $this->assertStringContainsString('人工确认上游未成功', $resupplied['attempts'][0]['message']);
+        $this->assertSame([['order_id' => $order->id, 'delay' => 0, 'preferred' => $sp->id]], $this->dispatcher->submits);
 
-        // 新单还在处理中：同号码同面值不能再提交一笔
-        $this->assertSame(422, $this->jsonRequest('POST', "/admin/orders/{$failed->id}/resubmit", $token)->getStatusCode());
-
-        // 新单也失败后再重新提交：接着编号 -R2
-        Order::where('id', $new['id'])->update(['status' => Order::STATUS_FAILED]);
-        $again = $this->body($this->jsonRequest('POST', "/admin/orders/{$new['id']}/resubmit", $token));
-        $this->assertSame($failed->merchant_order_no . '-R2', $again['merchant_order_no']);
+        // 提交任务执行：试过的那家也会再提交一次；同一笔订单，不重复扣款，成功后正常通知商户
+        $this->dispatcher->notifies = [];
+        make(OrderProcessService::class)->submit($order->id, $sp->id);
+        $attempts = OrderAttempt::where('order_id', $order->id)->orderBy('id')->get();
+        $this->assertSame([$sp->id, $sp->id], $attempts->pluck('supplier_product_id')->all());
+        $this->assertSame($order->order_no . '02', $attempts[1]->attempt_no);
+        $this->assertSame(Order::STATUS_SUCCESS, Order::find($order->id)->status);
+        $this->assertSame([$order->id], array_column($this->dispatcher->notifies, 'order_id'));
+        $this->assertSame($balance, Merchant::find($merchant->id)->balance);
     }
 
     /**
