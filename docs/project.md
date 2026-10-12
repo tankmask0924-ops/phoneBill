@@ -326,6 +326,7 @@ app/Supplier/
     ├── OpenPlatformDriver.php    # 开放平台 API，只接话费（docs/open-api-integration.md）
     ├── ShangtengDriver.php       # 商腾科技话费 API（docs/API接口.md）
     ├── ZhongkongDriver.php       # 中控话费 API（docs/中控API接口.md）
+    ├── DayuanrenDriver.php       # 大猿人话费 API（docs/大猿人API接口.md）
     └── XxxDriver.php             # 每家供应商一个
 ```
 
@@ -340,7 +341,7 @@ app/Supplier/
 - 供应商回调地址：`/notify/supplier/{supplier_code}`。
 - 请求和响应完整记到 `order_attempts`，同时写日志渠道 `supplier`。
 - 接入新供应商：写驱动类 → 注册驱动编码 → 后台新增供应商时选驱动、填参数。
-- 供应商提供了商品查询接口时，驱动再实现 `ProvidesUpstreamProducts`：后台建 / 编辑供应商商品时可以从上游商品列表里选，自动填写编码、名称、成本价，上游给了的话还有面值和运营商；下架的不能选，本供应商下已建过的标「已添加」。实时查上游，不缓存，出错时仍可手动填编码。已实现：`open_platform`、`shangteng`（逐页取完）、`zhongkong`、`mock`。
+- 供应商提供了商品查询接口时，驱动再实现 `ProvidesUpstreamProducts`：后台建 / 编辑供应商商品时可以从上游商品列表里选，自动填写编码、名称、成本价，上游给了的话还有面值和运营商；下架的不能选，本供应商下已建过的标「已添加」。实时查上游，不缓存，出错时仍可手动填编码。已实现：`open_platform`、`shangteng`（逐页取完）、`zhongkong`、`dayuanren`、`mock`。
 
 ### 7.1 开放平台（驱动 `open_platform`）
 
@@ -394,6 +395,16 @@ app/Supplier/
 - 字段对应：`inOrderNumber` = 提交单号 `attempt_no`，`agentProductId` = 供应商商品编码，`phone` = 手机号，`num` 固定 `1`。上游没有自己的订单号，供应商订单号留空。
 - 签名：除 `sign` 外参数按名升序拼 `k=v&...`，末尾拼 `&key=秘钥`，整串 md5。回调带签名，验签通过才采用；空字段怎么算文档没说清，两种算法有一种对上就通过（见文档第 7 节）。
 - 结果判定：下单只有 `code=0`、`code=1`（订单号已存在，之前提交过）算受理，其余（含 `code=500`）都是处理中、等查单；查单 / 回调 `status=3` 成功、`4` 失败、其他处理中。待中控确认 `code=500` 一定没建单后，可以改成直接失败。
+
+### 7.4 大猿人（驱动 `dayuanren`）
+
+上游文档 `docs/大猿人API接口.md`（整理版，第 9 节是对接方式和结果判定表，第 10 节是待确认事项）：下单、查单、余额、商品列表、结果回调，全部表单 POST。上游是通用充值系统，只接话费。
+
+- 接口参数：接口域名（路径 `/yrapi.php/index/...` 写在驱动里）、商户ID（`userid`）、apikey、回调地址。
+- 字段对应：`out_trade_num` = 提交单号 `attempt_no`，`product_id` = 供应商商品编码，`mobile` = 手机号，`amount` = 面值（上游校验，配错面值的商品直接驳回）。上游 `order_number` 存为供应商订单号。
+- 签名：去掉 `sign` 按名升序拼 `k=v&...`（不做 URL 编码），末尾拼 `&apikey=`，md5 转大写。回调按收到的全部参数验签并核对 `userid`，通过后回 `success`。
+- 结果判定：下单 `errno=0` 处理中、非 0 失败（文档写明「提交失败」）、HTTP 非 200 / 无法解析处理中；查单 / 回调 `state` 1 成功、-1 / 2 失败、0 处理中、3 部分成功保持处理中到时转异常人工处理。
+- 上游产品列表：`api_open=1` 算在售；`isp` 1 移动、**2 电信、3 联通**；不给面值，管理员自己填。
 
 ## 8. 权限
 
