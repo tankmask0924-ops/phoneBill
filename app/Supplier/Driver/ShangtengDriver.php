@@ -21,6 +21,7 @@ use App\Supplier\RechargeResult;
 use App\Supplier\SupplierDriverInterface;
 use App\Supplier\UpstreamProduct;
 use Hyperf\Di\Annotation\Inject;
+use Hyperf\Logger\LoggerFactory;
 use Psr\Http\Message\ServerRequestInterface;
 use RuntimeException;
 use Throwable;
@@ -51,6 +52,9 @@ class ShangtengDriver implements SupplierDriverInterface, ProvidesUpstreamProduc
 
     #[Inject]
     protected HttpClient $http;
+
+    #[Inject]
+    protected LoggerFactory $loggerFactory;
 
     public function code(): string
     {
@@ -83,7 +87,22 @@ class ShangtengDriver implements SupplierDriverInterface, ProvidesUpstreamProduc
         if (in_array($request->faceValue, self::CHECKED_FACE_VALUES, true)) {
             $business['face_value'] = (string) $request->faceValue;
         }
-        [$sent, $response] = $this->call($request->config, '/api/Order/create', $business, 10.0);
+        // 下单耗时记到 supplier 日志（shangteng_create），排查上游慢用；不记 ApiKey
+        $context = ['attempt_no' => $request->attemptNo, 'url' => rtrim($request->config['api_url'] ?? '', '/') . '/api/Order/create', 'userid' => $request->config['user_id'] ?? ''];
+        $start = microtime(true);
+        try {
+            [$sent, $response] = $this->call($request->config, '/api/Order/create', $business, 10.0);
+        } catch (Throwable $e) {
+            $this->loggerFactory->get('supplier')->error('shangteng_create', $context + ['ms' => self::elapsedMs($start), 'error' => $e->getMessage()]);
+
+            throw $e;
+        }
+        $this->loggerFactory->get('supplier')->info('shangteng_create', $context + [
+            'ms' => self::elapsedMs($start),
+            'request' => $sent,
+            'http_status' => $response['status'],
+            'response' => mb_substr($response['body'], 0, 2000),
+        ]);
         $body = $this->decode($response['body']);
         if ($body === null) {
             // HTTP 5xx 页面、返回乱码：不知道建没建单，只能等查单确认
@@ -271,6 +290,11 @@ class ShangtengDriver implements SupplierDriverInterface, ProvidesUpstreamProduc
         ], $timeout);
 
         return [$json, $response];
+    }
+
+    private static function elapsedMs(float $start): int
+    {
+        return (int) round((microtime(true) - $start) * 1000);
     }
 
     /**
