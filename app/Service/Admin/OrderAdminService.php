@@ -206,7 +206,8 @@ class OrderAdminService extends AbstractService
     }
 
     /**
-     * 对还在处理中的提交立即查一次单。
+     * 人工查单：对还在处理中的提交立即查一次单并按结果处理（成功会把订单改为成功；失败时异常订单保持异常，等人工置为失败）。
+     * 返回详情和这次每个提交查到的结果，前端据此提示下一步。
      *
      * @return array<string, mixed>
      */
@@ -219,11 +220,12 @@ class OrderAdminService extends AbstractService
         }
         $results = [];
         foreach ($processing as $attempt) {
-            $results[$attempt->attempt_no] = $this->processService->queryAttempt($attempt)->status->value;
+            $result = $this->processService->queryAttempt($attempt);
+            $results[] = ['attempt_no' => $attempt->attempt_no, 'status' => $result->status->value, 'message' => $result->message];
         }
         $this->operationLogDao->record($operator->id, self::MODULE, 'query_order', 'order', $order->id, null, ['results' => $results], $ip);
 
-        return $this->detail($order->id);
+        return $this->detail($order->id) + ['query_results' => $results];
     }
 
     /**

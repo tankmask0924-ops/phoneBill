@@ -77,7 +77,9 @@ export const orderApi = {
   list: (params: Query) => http.get<Paged<Order>>('/admin/orders', params),
   filterOptions: () => http.get<OrderFilterOptions>('/admin/orders/filter-options'),
   detail: (id: number) => http.get<OrderDetail>(`/admin/orders/${id}`),
-  query: (id: number) => http.post<OrderDetail>(`/admin/orders/${id}/query`),
+  /** 人工查单，query_results 是这次每个处理中的提交查到的结果 */
+  query: (id: number) =>
+    http.post<OrderDetail & { query_results: { attempt_no: string; status: string; message: string | null }[] }>(`/admin/orders/${id}/query`),
   confirmSuccess: (id: number, remark: string) => http.post<OrderDetail>(`/admin/orders/${id}/success`, { remark }),
   confirmFailed: (id: number, remark: string) => http.post<OrderDetail>(`/admin/orders/${id}/fail`, { remark }),
   reverse: (id: number, remark: string) => http.post<OrderDetail>(`/admin/orders/${id}/reverse`, { remark }),

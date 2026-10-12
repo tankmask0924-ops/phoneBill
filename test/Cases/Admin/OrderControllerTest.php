@@ -155,6 +155,17 @@ class OrderControllerTest extends HttpTestCase
         // 模拟供应商查单返回成功
         $queried = $this->body($this->jsonRequest('POST', "/admin/orders/{$processing->id}/query", $token));
         $this->assertSame('success', $queried['status']);
+        $this->assertSame([['attempt_no' => $processing->order_no . '01', 'status' => 'success', 'message' => null]], $queried['query_results']);
+
+        // 异常订单查到供应商失败：提交记为失败，订单保持异常、不退款，等人工置为失败；返回里告诉前端查到的是失败
+        $failingSp = $this->createSupplierProduct($this->createSupplier(['*'], 'active', 'failed'), ['cmcc']);
+        $abnormal = $this->createOrder($merchant, $product, $failingSp, Order::STATUS_ABNORMAL);
+        $balance = Merchant::find($merchant->id)->balance;
+        $result = $this->body($this->jsonRequest('POST', "/admin/orders/{$abnormal->id}/query", $token));
+        $this->assertSame('abnormal', $result['status']);
+        $this->assertSame('failed', $result['query_results'][0]['status']);
+        $this->assertSame(OrderAttempt::STATUS_FAILED, OrderAttempt::where('order_id', $abnormal->id)->first()->status);
+        $this->assertSame($balance, Merchant::find($merchant->id)->balance);
         $this->assertSame(422, $this->jsonRequest('POST', "/admin/orders/{$done->id}/query", $token)->getStatusCode(), '没有处理中的提交');
 
         $this->dispatcher->notifies = [];

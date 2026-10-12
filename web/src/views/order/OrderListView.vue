@@ -109,8 +109,39 @@ async function askRemark(title: string, message: string): Promise<string | null>
   }
 }
 
+/** 查单后告诉管理员供应商返回了什么、订单接下来怎么处理 */
 async function query() {
-  await act(() => orderApi.query(detail.value!.id), '已查单')
+  acting.value = true
+  let result
+  try {
+    result = await orderApi.query(detail.value!.id)
+    detail.value = result
+    await list.load()
+  } finally {
+    acting.value = false
+  }
+  const lines = result.query_results.map((r) => {
+    const reason = r.message ? `（${r.message}）` : ''
+    if (r.status === 'success') {
+      return `${r.attempt_no}：供应商确认成功${reason}`
+    }
+    if (r.status === 'failed') {
+      return `${r.attempt_no}：供应商确认失败${reason}`
+    }
+    return `${r.attempt_no}：供应商还没有明确结果${reason}，订单状态不变`
+  })
+  let next = ''
+  if (result.status === 'success') {
+    next = '订单已改为成功，会通知商户。'
+  } else if (result.status === 'abnormal' && result.query_results.some((r) => r.status === 'failed')) {
+    next = '异常订单不会自动退款：请到供应商后台核实没有充值到账后，点「置为失败并退款」。'
+  } else if (result.status === 'abnormal') {
+    next = '订单仍是异常，可以稍后再查，或到供应商后台核实后人工处理。'
+  }
+  await ElMessageBox.alert([...lines, next].filter(Boolean).join('\n'), '查单结果', {
+    type: result.status === 'success' ? 'success' : 'info',
+    customStyle: { whiteSpace: 'pre-line' },
+  }).catch(() => undefined)
 }
 
 async function confirmSuccess() {
