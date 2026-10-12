@@ -128,9 +128,9 @@ npm run build        # 产物在 merchant-web/dist，部署在 /merchant/ 路径
 | GET | `/admin/products`、`/admin/products/supplier-product-options`、`/admin/product-stats`、`/admin/product-categories` | `product.view` |
 | POST/PUT | `/admin/products`、`/{id}`、`/{id}/status` | `product.manage` |
 | POST/PUT/DELETE | `/admin/product-categories`、`/{id}` | `product.manage` |
-| GET | `/admin/funding/requests`、`/requests/{id}`、`/payer-accounts`、`/merchant-options`、`/admin/receiving-accounts` | `funding.view` |
+| GET | `/admin/funding/requests`、`/requests/{id}`、`/payer-accounts`、`/merchant-options`、`/admin/receiving-accounts`、`/admin/merchants/{id}/receiving-accounts` | `funding.view` |
 | POST | `/admin/funding/requests/{id}/approve`、`/requests/{id}/reject`、`/payer-accounts/{id}/approve`、`/payer-accounts/{id}/reject` | `funding.review` |
-| POST/PUT | `/admin/receiving-accounts`、`/{id}`、`/{id}/status`、`/{id}/merchants` | `funding.config` |
+| POST/PUT | `/admin/receiving-accounts`、`/{id}`、`/{id}/status`、`/{id}/merchants`；`PUT /admin/merchants/{id}/receiving-accounts`（按商户配置） | `funding.config` |
 | GET/PUT/POST | `/admin/settings/notify`（回调域名）、`/admin/settings/storage`、`/admin/settings/storage/test` | `setting.manage` |
 | GET | `/admin/segments/lookup` | `risk.view` |
 | GET | `/admin/risk/blacklist`、`/admin/risk/maintenances`、`/admin/risk/maintenances/options` | `risk.view` |

@@ -26,6 +26,7 @@ use Hyperf\HttpMessage\Exception\HttpException;
 
 /**
  * 商户中心 - 收款配置：平台的收款账户（支付宝 / 对公），分配给商户后，商户提交加款申请时才能选。
+ * 可以按收款账户分配商户（收款配置页），也可以按商户勾选收款账户（商户列表的「收款配置」），改的是同一份分配关系。
  *
  * - 账户不多，列表不分页；停用后商户不能再选，已提交的申请不受影响（存了快照）；
  * - 不提供删除，不用了就停用。
@@ -139,6 +140,52 @@ class ReceivingAccountAdminService extends AbstractService
         $this->operationLogDao->record($operator->id, self::MODULE, 'assign_receiving_account', 'receiving_account', $account->id, ['merchant_ids' => $before], ['merchant_ids' => $ids], $ip);
 
         return $this->formatMany([$account])[0];
+    }
+
+    /**
+     * 某个商户的收款配置：全部收款账户，assigned 标出分配给这个商户的。
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function forMerchant(int $merchantId): array
+    {
+        $merchant = $this->merchantDao->find($merchantId);
+        if ($merchant === null) {
+            throw new HttpException(404, '商户不存在');
+        }
+        $assigned = $this->assignmentDao->accountIdsForMerchant($merchant->id);
+
+        return array_map(
+            static fn (array $a) => $a + ['assigned' => in_array($a['id'], $assigned, true)],
+            $this->list()
+        );
+    }
+
+    /**
+     * 按商户配置：这个商户只能看到、选用 $accountIds 这几个收款账户（整体替换）。
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function assignToMerchant(AdminUser $operator, int $merchantId, mixed $accountIds, ?string $ip): array
+    {
+        $merchant = $this->merchantDao->find($merchantId);
+        if ($merchant === null) {
+            throw new HttpException(404, '商户不存在');
+        }
+        if (! is_array($accountIds)) {
+            throw new HttpException(422, 'receiving_account_ids 必须是数组');
+        }
+        $ids = array_values(array_unique(array_map('intval', array_filter($accountIds, 'is_numeric'))));
+        if ($this->accountDao->newQuery()->whereIn('id', $ids ?: [0])->count() !== count($ids)) {
+            throw new HttpException(422, '有收款账户不存在');
+        }
+        $before = $this->assignmentDao->accountIdsForMerchant($merchant->id);
+        Db::transaction(fn () => $this->assignmentDao->replaceAccountsForMerchant($merchant->id, $ids));
+        sort($before);
+        sort($ids);
+        $this->operationLogDao->record($operator->id, self::MODULE, 'assign_merchant_receiving_accounts', 'merchant', $merchant->id, ['receiving_account_ids' => $before], ['receiving_account_ids' => $ids], $ip);
+
+        return $this->forMerchant($merchant->id);
     }
 
     private function findOrFail(int $id): ReceivingAccount

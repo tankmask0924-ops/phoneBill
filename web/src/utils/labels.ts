@@ -176,6 +176,7 @@ export const operationActionLabels: LabelMap = {
   enable_receiving_account: { label: '启用收款账户' },
   disable_receiving_account: { label: '停用收款账户' },
   assign_receiving_account: { label: '分配收款账户' },
+  assign_merchant_receiving_accounts: { label: '商户收款配置' },
   approve_payer_account: { label: '付款账号审核通过' },
   reject_payer_account: { label: '付款账号驳回' },
   approve_funding_request: { label: '加款申请通过（入账）' },

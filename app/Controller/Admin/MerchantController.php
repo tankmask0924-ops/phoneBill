@@ -21,6 +21,7 @@ use App\Network\ClientIpResolver;
 use App\Service\Admin\MerchantAdminService;
 use App\Service\Admin\MerchantProductAdminService;
 use App\Service\Admin\MerchantUserAdminService;
+use App\Service\Admin\ReceivingAccountAdminService;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpServer\Annotation\Controller;
 use Hyperf\HttpServer\Annotation\GetMapping;
@@ -42,6 +43,9 @@ class MerchantController extends AbstractController
 
     #[Inject]
     protected MerchantUserAdminService $merchantUserAdminService;
+
+    #[Inject]
+    protected ReceivingAccountAdminService $receivingAccountService;
 
     #[Inject]
     protected ClientIpResolver $clientIpResolver;
@@ -172,6 +176,30 @@ class MerchantController extends AbstractController
         $this->merchantUserAdminService->resetPassword($this->admin(), $id, $userId, $this->request->input('password'), $this->clientIp());
 
         return ['success' => true];
+    }
+
+    /**
+     * 商户的收款配置：全部收款账户，标出这个商户能用的。
+     */
+    #[Middleware(AdminAuthMiddleware::class)]
+    #[Middleware(AdminPermissionMiddleware::class)]
+    #[RequiresPermission('funding.view')]
+    #[GetMapping(path: '{id:\d+}/receiving-accounts')]
+    public function receivingAccounts(int $id): array
+    {
+        return $this->receivingAccountService->forMerchant($id);
+    }
+
+    /**
+     * 设置这个商户只能看到、选用哪几个收款账户。
+     */
+    #[Middleware(AdminAuthMiddleware::class)]
+    #[Middleware(AdminPermissionMiddleware::class)]
+    #[RequiresPermission('funding.config')]
+    #[PutMapping(path: '{id:\d+}/receiving-accounts')]
+    public function assignReceivingAccounts(int $id): array
+    {
+        return $this->receivingAccountService->assignToMerchant($this->admin(), $id, $this->request->input('receiving_account_ids'), $this->clientIp());
     }
 
     private function admin(): AdminUser

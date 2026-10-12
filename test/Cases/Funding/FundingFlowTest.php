@@ -215,6 +215,40 @@ class FundingFlowTest extends HttpTestCase
         $this->assertSame([], $this->body($this->jsonRequest('GET', '/merchant/funding-requests', $theirToken))['data']);
     }
 
+    public function testMerchantSideReceivingConfig()
+    {
+        $admin = $this->loginAs($this->createAdminWithPermissions(['funding.view', 'funding.config']));
+        $merchant = $this->createMerchant();
+        $token = $this->merchantLogin($merchant);
+        $alipay = $this->body($this->jsonRequest('POST', '/admin/receiving-accounts', $admin, ['type' => 'alipay', 'account_name' => '平台', 'account_no' => 'a@example.com']));
+        $bank = $this->body($this->jsonRequest('POST', '/admin/receiving-accounts', $admin, ['type' => 'bank', 'account_name' => '平台', 'account_no' => '62220001', 'bank_name' => '招行']));
+        $this->receivingIds = [$alipay['id'], $bank['id']];
+
+        // 按商户勾选：只给对公账户
+        $config = $this->body($this->jsonRequest('GET', "/admin/merchants/{$merchant->id}/receiving-accounts", $admin));
+        $this->assertSame([false, false], array_values(array_intersect_key(array_column($config, 'assigned', 'id'), array_flip($this->receivingIds))));
+        $saved = $this->body($this->jsonRequest('PUT', "/admin/merchants/{$merchant->id}/receiving-accounts", $admin, ['receiving_account_ids' => [$bank['id']]]));
+        $this->assertSame([$bank['id']], array_values(array_map(static fn ($a) => $a['id'], array_filter($saved, static fn ($a) => $a['assigned']))));
+        $this->assertContains($merchant->id, array_column($this->body($this->jsonRequest('GET', '/admin/receiving-accounts', $admin)), 'merchant_ids', 'id')[$bank['id']], '按账户看也能看到这个商户');
+
+        // 商户只看得到、只能选配置的账户
+        $this->assertSame([$bank['id']], array_column($this->body($this->jsonRequest('GET', '/merchant/receiving-accounts', $token)), 'id'));
+        $payer = MerchantPayerAccount::create(['merchant_id' => $merchant->id, 'type' => 'alipay', 'account_name' => '商户', 'account_no' => 'm@example.com', 'status' => 'approved']);
+        $request = ['amount' => '100', 'payer_account_id' => $payer->id, 'receiving_account_id' => $alipay['id'], 'paid_at' => date('Y-m-d H:i'), 'vouchers' => ['x']];
+        $response = $this->jsonRequest('POST', '/merchant/funding-requests', $token, $request);
+        $this->assertSame(422, $response->getStatusCode());
+        $this->assertStringContainsString('分配给你的收款账户', (string) $response->getBody());
+
+        // 清空后商户一个都看不到
+        $this->jsonRequest('PUT', "/admin/merchants/{$merchant->id}/receiving-accounts", $admin, ['receiving_account_ids' => []]);
+        $this->assertSame([], $this->body($this->jsonRequest('GET', '/merchant/receiving-accounts', $token)));
+
+        $this->assertSame(422, $this->jsonRequest('PUT', "/admin/merchants/{$merchant->id}/receiving-accounts", $admin, ['receiving_account_ids' => [999999999]])->getStatusCode());
+        $this->assertSame(404, $this->jsonRequest('GET', '/admin/merchants/999999999/receiving-accounts', $admin)->getStatusCode());
+        $viewer = $this->loginAs($this->createAdminWithPermissions(['funding.view']));
+        $this->assertSame(403, $this->jsonRequest('PUT', "/admin/merchants/{$merchant->id}/receiving-accounts", $viewer, ['receiving_account_ids' => []])->getStatusCode());
+    }
+
     public function testUploadRejectsNonImagesAndNeedsStorage()
     {
         $token = $this->merchantLogin($this->createMerchant());

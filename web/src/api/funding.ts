@@ -40,6 +40,13 @@ export const receivingAccountApi = {
   changeStatus: (id: number, status: string) => http.post<ReceivingAccount>(`/admin/receiving-accounts/${id}/status`, { status }),
   assignMerchants: (id: number, merchantIds: number[]) =>
     http.put<ReceivingAccount>(`/admin/receiving-accounts/${id}/merchants`, { merchant_ids: merchantIds }),
+  /** 按商户的收款配置：全部收款账户，assigned 标出这个商户能用的 */
+  forMerchant: (merchantId: number) =>
+    http.get<(ReceivingAccount & { assigned: boolean })[]>(`/admin/merchants/${merchantId}/receiving-accounts`),
+  assignToMerchant: (merchantId: number, accountIds: number[]) =>
+    http.put<(ReceivingAccount & { assigned: boolean })[]>(`/admin/merchants/${merchantId}/receiving-accounts`, {
+      receiving_account_ids: accountIds,
+    }),
 }
 
 /** 商户付款账号（审核）：App\Controller\Admin\FundingController */

@@ -49,6 +49,20 @@ class MerchantReceivingAccountDao extends AbstractDao
     }
 
     /**
+     * 把这个商户能用的收款账户整体替换成 $accountIds（商户中心按商户配置用）。
+     *
+     * @param list<int> $accountIds
+     */
+    public function replaceAccountsForMerchant(int $merchantId, array $accountIds): void
+    {
+        $this->newQuery()->where('merchant_id', $merchantId)->whereNotIn('receiving_account_id', $accountIds ?: [0])->delete();
+        $existing = $this->accountIdsForMerchant($merchantId);
+        foreach (array_diff($accountIds, $existing) as $accountId) {
+            MerchantReceivingAccount::create(['merchant_id' => $merchantId, 'receiving_account_id' => $accountId, 'created_at' => date('Y-m-d H:i:s')]);
+        }
+    }
+
+    /**
      * 把这个收款账户分配给的商户整体替换成 $merchantIds。
      *
      * @param list<int> $merchantIds

@@ -6,6 +6,7 @@ import { Plus, WarningFilled } from '@element-plus/icons-vue'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { type AvailableProduct, type Merchant, merchantApi, type MerchantProduct, type MerchantUser } from '@/api/merchant'
 import type { OperatorCode } from '@/api/product'
+import { type ReceivingAccount, receivingAccountApi } from '@/api/funding'
 import { labelOf, operatorLabels, supplierStatusLabels, toOptions } from '@/utils/labels'
 import { usePermissionStore } from '@/stores/permission'
 
@@ -13,9 +14,36 @@ const permission = usePermissionStore()
 const canManage = computed(() => permission.can('merchant.manage'))
 const canPrice = computed(() => permission.can('merchant.price'))
 const canBalance = computed(() => permission.can('merchant.balance'))
+const canFundingConfig = computed(() => permission.can('funding.config'))
 
 const list = usePagedList<Merchant, { keyword: string; status: string }>(merchantApi.list, { keyword: '', status: '' })
 const { rows, total, page, perPage, loading, filters } = list
+
+// ---- 收款配置：这个商户能看到、能选哪几个打款账户 ----
+const receivingVisible = ref(false)
+const receivingMerchant = ref<Merchant | null>(null)
+const receivingAccounts = ref<ReceivingAccount[]>([])
+const receivingIds = ref<number[]>([])
+const receivingSaving = ref(false)
+
+async function openReceiving(row: Merchant) {
+  receivingMerchant.value = row
+  const accounts = await receivingAccountApi.forMerchant(row.id)
+  receivingAccounts.value = accounts
+  receivingIds.value = accounts.filter((a) => a.assigned).map((a) => a.id)
+  receivingVisible.value = true
+}
+
+async function saveReceiving() {
+  receivingSaving.value = true
+  try {
+    await receivingAccountApi.assignToMerchant(receivingMerchant.value!.id, receivingIds.value)
+    ElMessage.success('已保存，商户只能看到、选用勾选的账户')
+    receivingVisible.value = false
+  } finally {
+    receivingSaving.value = false
+  }
+}
 
 // ---- 新建 / 编辑 ----
 const dialogVisible = ref(false)
@@ -309,11 +337,12 @@ onMounted(async () => {
       <el-table-column label="状态" width="80">
         <template #default="{ row }"><StatusTag :map="supplierStatusLabels" :value="row.status" /></template>
       </el-table-column>
-      <el-table-column label="操作" width="300" fixed="right">
+      <el-table-column label="操作" width="370" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" @click="openProducts(row as Merchant)">商品与价格</el-button>
           <el-button link type="primary" @click="openUsers(row as Merchant)">后台账号</el-button>
           <el-button v-if="canBalance" link type="primary" @click="openBalance(row as Merchant)">加/扣款</el-button>
+          <el-button v-if="canFundingConfig" link type="primary" @click="openReceiving(row as Merchant)">收款配置</el-button>
           <template v-if="canManage">
             <el-button link type="primary" @click="openEdit(row as Merchant)">编辑</el-button>
             <el-button link type="warning" @click="resetSecret(row as Merchant)">重置密钥</el-button>
@@ -495,6 +524,21 @@ onMounted(async () => {
       </el-table-column>
     </el-table>
   </el-drawer>
+
+  <el-dialog v-model="receivingVisible" :title="`收款配置 · ${receivingMerchant?.name ?? ''}`" width="620px">
+    <div class="receiving-tip">勾选这个商户能看到的打款账户，商户提交加款申请时只能选这些；一个都不勾，商户就不能申请加款。</div>
+    <el-empty v-if="receivingAccounts.length === 0" description="还没有收款账户，先到「商户中心 - 收款配置」新建" />
+    <el-checkbox-group v-else v-model="receivingIds" class="receiving-list">
+      <el-checkbox v-for="a in receivingAccounts" :key="a.id" :value="a.id" class="receiving-item">
+        {{ a.type_label }} · {{ a.account_name }} · {{ a.account_no }}<template v-if="a.bank_name"> · {{ a.bank_name }}</template>
+        <el-tag v-if="a.status !== 'active'" size="small" type="info" class="receiving-tag">已停用，商户看不到</el-tag>
+      </el-checkbox>
+    </el-checkbox-group>
+    <template #footer>
+      <el-button @click="receivingVisible = false">取消</el-button>
+      <el-button type="primary" :loading="receivingSaving" @click="saveReceiving">保存</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <style scoped>
@@ -549,5 +593,20 @@ onMounted(async () => {
 
 .price-label {
   width: 32px;
+}
+.receiving-tip {
+  margin-bottom: 12px;
+  color: #909399;
+  font-size: 12px;
+}
+
+.receiving-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.receiving-tag {
+  margin-left: 6px;
 }
 </style>
