@@ -202,6 +202,16 @@ class ShangtengDriverTest extends HttpTestCase
         // 没有订单号：拒绝
         $this->assertSame([400, 'fail'], $this->supplierCallback($supplier, ['status' => 2]));
 
+        // 查单没拿到明确结果（查不到、单号对不上、HTTP 5xx）：回 fail 让上游重推，订单不变
+        $this->respond(['status' => 411, 'msg' => '订单不存在']);
+        $this->assertSame([400, 'fail'], $this->supplierCallback($supplier, $this->callbackParams($attempt->attempt_no, 2)));
+        $this->respond(['status' => 200, 'data' => $this->order(2, '', 'OTHER01')]);
+        $this->assertSame([400, 'fail'], $this->supplierCallback($supplier, $this->callbackParams($attempt->attempt_no, 2)));
+        $this->http->responses = [['status' => 502, 'body' => '<html>Bad Gateway</html>']];
+        $this->assertSame([400, 'fail'], $this->supplierCallback($supplier, $this->callbackParams($attempt->attempt_no, 5)));
+        $this->assertSame(Order::STATUS_PROCESSING, Order::find($order->id)->status);
+        $this->assertSame(OrderAttempt::STATUS_PROCESSING, OrderAttempt::find($attempt->id)->status);
+
         // 回调说成功，查单还在充值中：以查单为准，订单不变
         $this->http->requests = [];
         $this->respond(['status' => 200, 'data' => $this->order(1, '', $attempt->attempt_no)]);

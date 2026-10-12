@@ -364,7 +364,7 @@ app/Supplier/
 - 接口参数：接口地址（上游域名）、用户ID（`Userid`）、ApiKey、回调地址（`https://我方域名/notify/supplier/{供应商编码}`，每单随下单请求传过去）。
 - 字段对应：`external_orderno` = 提交单号 `attempt_no`，`product_id` = 供应商商品编码，`recharge_account` = 手机号；面值是 50/100/200/300/500 时带上 `face_value` 让上游校验。下单不返回上游单号，查单 / 回调里的 `orderno` 存为供应商订单号。
 - 签名：参数值一律字符串，按参数名升序转 JSON（不转义斜杠和中文，无参数时为 `{}`），`Sign = sha1(秒级时间戳 + JSON + ApiKey)`，和 `Timestamp`、`Userid` 一起放请求头；请求体就是签名用的那段 JSON。
-- **回调没有签名**：只取 `external_orderno`，再主动查单，以查单结果为准，回 `ok`；查单出错回 `fail`（HTTP 400）让上游重推。
+- **回调没有签名**：只取 `external_orderno`，再主动查单，以查单结果为准，回 `ok`；查单出错或没拿到明确结果（查不到、单号对不上、HTTP 5xx、返回乱码）回 `fail`（HTTP 400）让上游重推，定时查单照常继续。
 - 下单返回 `status` 非 200 表示没建单（已和上游确认），直接失败；查单文档没说查不到时返回什么，**查单按保守方式处理**：
 
 | 情况 | 结果 |

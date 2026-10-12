@@ -30,7 +30,7 @@ use Throwable;
  *
  * - external_orderno 传提交单号 attempt_no，product_id 传供应商商品编码；
  * - 签名：参数按名升序转 JSON（不转义斜杠和中文），sha1(秒级时间戳 + JSON + ApiKey)，放在 Sign / Timestamp / Userid 请求头；
- * - 回调不带签名，不能信：只取订单号，结果以主动查单为准；
+ * - 回调不带签名，不能信：只取订单号，结果以主动查单为准；查单没拿到明确结果时回 fail 让上游重推；
  * - 下单返回 status 非 200 表示没建单（已和上游确认），直接失败；没拿到可解析的返回时不知道建没建单，按处理中等查单；
  * - 文档没说查不到订单时返回什么，所以查单只认明确状态，其余一律处理中，到时转异常人工处理。
  */
@@ -113,9 +113,9 @@ class ShangtengDriver implements SupplierDriverInterface, ProvidesUpstreamProduc
             return new CallbackResult(false, 'fail');
         }
         try {
-            $result = $this->queryOrder($config, $attemptNo, null);
+            $result = $this->queryOrder($config, $attemptNo, null, true);
         } catch (Throwable) {
-            // 查单失败就不应答 ok，让上游重推；定时查单也会继续
+            // 查单出错或没拿到明确结果就不应答 ok，让上游重推；定时查单也会继续
             return new CallbackResult(false, 'fail');
         }
 
@@ -181,14 +181,19 @@ class ShangtengDriver implements SupplierDriverInterface, ProvidesUpstreamProduc
      * 查单并转成结果。只有上游返回了这笔单（单号对得上）且状态明确时才算成功 / 失败，其余都是处理中。
      *
      * @param array<string, string> $config
+     * @param bool $throwIfUnclear 没拿到明确结果时抛异常而不是返回处理中（回调用，好让上游重推）
      */
-    private function queryOrder(array $config, string $attemptNo, ?string $supplierOrderNo): RechargeResult
+    private function queryOrder(array $config, string $attemptNo, ?string $supplierOrderNo, bool $throwIfUnclear = false): RechargeResult
     {
         [$sent, $response] = $this->call($config, '/api/Order/query', ['external_orderno' => $attemptNo]);
         $body = $this->decode($response['body']);
         $data = is_array($body['data'] ?? null) ? $body['data'] : [];
         $matched = is_scalar($data['external_orderno'] ?? null) && (string) $data['external_orderno'] === $attemptNo;
         if ($body === null || $body['status'] !== self::STATUS_OK || ! $matched || ! is_numeric($data['status'] ?? null)) {
+            if ($throwIfUnclear) {
+                throw new RuntimeException('查单未拿到明确结果：' . $this->describe($body, $response));
+            }
+
             return RechargeResult::processing($supplierOrderNo, '查单未拿到明确结果：' . $this->describe($body, $response), $sent, $response['body']);
         }
         $orderNo = is_scalar($data['orderno'] ?? null) && $data['orderno'] !== '' ? (string) $data['orderno'] : $supplierOrderNo;
