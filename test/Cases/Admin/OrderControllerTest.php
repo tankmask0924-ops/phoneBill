@@ -162,6 +162,40 @@ class OrderControllerTest extends HttpTestCase
         $this->assertSame([['order_id' => $done->id, 'attempt_no' => 1, 'delay' => 0]], $this->dispatcher->notifies);
     }
 
+    public function testResubmitFailedOrderCreatesANewOrder()
+    {
+        $token = $this->loginAs($this->createAdminWithPermissions(['order.view', 'order.manage']));
+        [$merchant, $product, $sp] = $this->fixture();
+        $this->openProduct($merchant, $product, ['cmcc' => '99.50']);
+        $mobile = $this->createSegment('cmcc', '广东');
+        $failed = $this->createOrder($merchant, $product, $sp, Order::STATUS_FAILED);
+        $failed->update(['mobile' => $mobile]);
+        $done = $this->createOrder($merchant, $product, $sp, Order::STATUS_SUCCESS);
+        $balance = Merchant::find($merchant->id)->balance;
+
+        $this->assertSame(422, $this->jsonRequest('POST', "/admin/orders/{$done->id}/resubmit", $token)->getStatusCode(), '只有失败的能重新提交');
+
+        // 新建一笔：商户订单号加 -R1，重新扣款并推提交任务，原单不变
+        $this->dispatcher->submits = [];
+        $response = $this->jsonRequest('POST', "/admin/orders/{$failed->id}/resubmit", $token);
+        $this->assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $new = $this->body($response);
+        $this->assertNotSame($failed->id, $new['id']);
+        $this->assertSame($failed->merchant_order_no . '-R1', $new['merchant_order_no']);
+        $this->assertSame($mobile, $new['mobile']);
+        $this->assertSame([['order_id' => $new['id'], 'delay' => 0]], $this->dispatcher->submits);
+        $this->assertSame(bcsub($balance, '99.50', 2), Merchant::find($merchant->id)->balance);
+        $this->assertSame(Order::STATUS_FAILED, Order::find($failed->id)->status);
+
+        // 新单还在处理中：同号码同面值不能再提交一笔
+        $this->assertSame(422, $this->jsonRequest('POST', "/admin/orders/{$failed->id}/resubmit", $token)->getStatusCode());
+
+        // 新单也失败后再重新提交：接着编号 -R2
+        Order::where('id', $new['id'])->update(['status' => Order::STATUS_FAILED]);
+        $again = $this->body($this->jsonRequest('POST', "/admin/orders/{$new['id']}/resubmit", $token));
+        $this->assertSame($failed->merchant_order_no . '-R2', $again['merchant_order_no']);
+    }
+
     /**
      * @return array{0: Merchant, 1: Product, 2: SupplierProduct}
      */

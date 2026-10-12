@@ -123,6 +123,15 @@ class OrderController extends AbstractController
         return $this->orderAdminService->resendNotify($this->admin(), $id, $this->clientIp());
     }
 
+    #[Middleware(AdminAuthMiddleware::class)]
+    #[Middleware(AdminPermissionMiddleware::class)]
+    #[RequiresPermission('order.manage')]
+    #[PostMapping(path: '{id:\d+}/resubmit')]
+    public function resubmit(int $id): array
+    {
+        return $this->orderAdminService->resubmit($this->admin(), $id, $this->clientIp());
+    }
+
     private function admin(): AdminUser
     {
         /* @var AdminUser */

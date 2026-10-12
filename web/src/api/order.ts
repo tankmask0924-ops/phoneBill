@@ -82,6 +82,8 @@ export const orderApi = {
   confirmFailed: (id: number, remark: string) => http.post<OrderDetail>(`/admin/orders/${id}/fail`, { remark }),
   reverse: (id: number, remark: string) => http.post<OrderDetail>(`/admin/orders/${id}/reverse`, { remark }),
   resendNotify: (id: number) => http.post<OrderDetail>(`/admin/orders/${id}/notify`),
+  /** 失败订单重新提交：新建一笔订单，返回新订单的详情 */
+  resubmit: (id: number) => http.post<OrderDetail>(`/admin/orders/${id}/resubmit`),
 }
 
 /**

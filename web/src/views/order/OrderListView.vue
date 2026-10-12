@@ -138,6 +138,30 @@ async function resendNotify() {
   await act(() => orderApi.resendNotify(detail.value!.id), '已重新推送通知')
 }
 
+async function resubmit() {
+  const d = detail.value!
+  try {
+    await ElMessageBox.confirm(
+      `将按原订单的商品、手机号（${d.mobile}）新建一笔订单，重新扣商户 ${d.sale_price} 元并提交给供应商，出结果后同样会通知商户。原订单不变。确定重新提交吗？`,
+      '重新提交',
+      { type: 'warning' },
+    )
+  } catch {
+    return
+  }
+  await act(() => orderApi.resubmit(d.id), '已新建订单并提交，详情已切换到新订单')
+}
+
+/** 只重新读取详情，看处理进度和耗时 */
+async function refreshDetail() {
+  detailLoading.value = true
+  try {
+    detail.value = await orderApi.detail(detail.value!.id)
+  } finally {
+    detailLoading.value = false
+  }
+}
+
 onMounted(async () => {
   await permission.load()
   list.load()
@@ -247,7 +271,8 @@ onMounted(async () => {
   <el-drawer v-model="detailVisible" title="订单详情" size="920px">
     <div v-loading="detailLoading || acting">
       <template v-if="detail">
-        <div v-if="canManage || canReverse" class="actions">
+        <div class="actions">
+          <el-button @click="refreshDetail">刷新</el-button>
           <el-button v-if="canManage && detail.attempts.some((a) => a.status === 'processing')" @click="query">向供应商查单</el-button>
           <template v-if="canManage && detail.status === 'abnormal'">
             <el-button type="success" @click="confirmSuccess">置为成功</el-button>
@@ -255,6 +280,7 @@ onMounted(async () => {
           </template>
           <el-button v-if="canReverse && detail.status === 'success'" type="danger" plain @click="reverse">冲正</el-button>
           <el-button v-if="canManage && ['success', 'failed'].includes(detail.status)" @click="resendNotify">重发通知</el-button>
+          <el-button v-if="canManage && detail.status === 'failed'" type="primary" plain @click="resubmit">重新提交</el-button>
         </div>
 
         <el-descriptions :column="3" border size="small">

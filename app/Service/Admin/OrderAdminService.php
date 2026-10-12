@@ -22,6 +22,7 @@ use App\Dao\SupplierDao;
 use App\Dao\SupplierProductDao;
 use App\Enum\Operator;
 use App\Enum\Province;
+use App\Exception\OpenApiException;
 use App\Model\AdminUser;
 use App\Model\MerchantBalanceLog;
 use App\Model\Order;
@@ -31,6 +32,7 @@ use App\Service\AbstractService;
 use App\Service\FiltersByDateRange;
 use App\Service\Order\OrderDispatcher;
 use App\Service\Order\OrderProcessService;
+use App\Service\Order\OrderService;
 use Carbon\CarbonInterface;
 use Hyperf\Database\Model\Builder;
 use Hyperf\Di\Annotation\Inject;
@@ -40,7 +42,9 @@ use Hyperf\HttpMessage\Exception\HttpException;
  * 订单中心：列表、详情、导出，以及人工处理（docs/project.md 4.7）。
  *
  * - 置成功 / 置失败只对异常订单；冲正只对成功订单，要单独权限；三者都必须写备注，都记操作日志；
- * - 置失败、冲正都会退款并重新通知商户。
+ * - 置失败、冲正都会退款并重新通知商户；
+ * - 重新提交只对失败订单：原单不动，按原单的商户、商品、手机号、通知地址新建一笔（商户订单号加 -R1、-R2…），
+ *   完整走一遍下单流程（重新扣款、提交供应商、出结果后通知商户），用来人工重试和测耗时。
  */
 class OrderAdminService extends AbstractService
 {
@@ -81,6 +85,9 @@ class OrderAdminService extends AbstractService
 
     #[Inject]
     protected OrderDispatcher $dispatcher;
+
+    #[Inject]
+    protected OrderService $orderService;
 
     #[Inject]
     protected AdminOperationLogDao $operationLogDao;
@@ -289,6 +296,53 @@ class OrderAdminService extends AbstractService
         $this->operationLogDao->record($operator->id, self::MODULE, 'resend_order_notify', 'order', $order->id, null, null, $ip);
 
         return $this->detail($order->id);
+    }
+
+    /**
+     * 失败订单重新提交：新建一笔订单，返回新订单的详情。
+     *
+     * @return array<string, mixed>
+     */
+    public function resubmit(AdminUser $operator, int $id, ?string $ip): array
+    {
+        $order = $this->findOrFail($id);
+        if ($order->status !== Order::STATUS_FAILED) {
+            throw new HttpException(422, '只有失败的订单可以重新提交');
+        }
+        $merchant = $this->merchantDao->find($order->merchant_id);
+        if ($merchant === null || $merchant->status !== 'active') {
+            throw new HttpException(422, '商户不存在或已停用');
+        }
+        try {
+            $new = $this->orderService->create($merchant, [
+                'product_code' => $order->product_code,
+                'mobile' => $order->mobile,
+                'merchant_order_no' => $this->retryMerchantOrderNo($order),
+                'notify_url' => $order->notify_url ?? '',
+            ]);
+        } catch (OpenApiException $e) {
+            // 余额不足、商品下架、同号码有处理中的订单等，和商户下单时的提示一样
+            throw new HttpException(422, '重新提交失败：' . $e->getMessage());
+        }
+        $this->operationLogDao->record($operator->id, self::MODULE, 'resubmit_order', 'order', $order->id, null, ['new_order_id' => $new->id, 'new_order_no' => $new->order_no], $ip);
+
+        return $this->detail($new->id);
+    }
+
+    /**
+     * 原商户订单号去掉已有的 -Rn 后缀，找下一个没用过的 -Rn；超长时截掉前面部分。
+     */
+    private function retryMerchantOrderNo(Order $order): string
+    {
+        $base = (string) preg_replace('/-R\d+$/', '', $order->merchant_order_no);
+        for ($n = 1; $n <= 999; ++$n) {
+            $suffix = "-R{$n}";
+            $candidate = substr($base, 0, 64 - strlen($suffix)) . $suffix;
+            if ($this->orderDao->findByMerchantOrderNo($order->merchant_id, $candidate) === null) {
+                return $candidate;
+            }
+        }
+        throw new HttpException(422, '这笔订单重新提交的次数太多了');
     }
 
     private function findOrFail(int $id): Order

@@ -136,7 +136,7 @@ npm run build        # 产物在 merchant-web/dist，部署在 /merchant/ 路径
 | PUT | `/admin/merchants/{id}/products/{productId}` | `merchant.price` |
 | POST | `/admin/merchants/{id}/balance` | `merchant.balance` |
 | GET | `/admin/orders`、`/filter-options`、`/export`、`/{id}` | `order.view` |
-| POST | `/admin/orders/{id}/query`、`/{id}/success`、`/{id}/fail`、`/{id}/notify` | `order.manage` |
+| POST | `/admin/orders/{id}/query`、`/{id}/success`、`/{id}/fail`、`/{id}/notify`、`/{id}/resubmit` | `order.manage` |
 | POST | `/admin/orders/{id}/reverse` | `order.reverse` |
 | GET/POST | `/open/v1/recharge`、`/order`、`/balance`、`/products` | 商户签名，见 [docs/api.md](docs/api.md) |
 | GET/POST | `/notify/supplier/{供应商编码}` | 供应商回调，由驱动验签 |
