@@ -19,6 +19,7 @@ use App\Model\OrderAttempt;
 use App\Model\Supplier;
 use App\Security\Encrypter;
 use App\Service\AbstractService;
+use App\Service\Setting\SettingService;
 use App\Supplier\CallbackResult;
 use App\Supplier\ProvidesUpstreamProducts;
 use App\Supplier\RechargeRequest;
@@ -40,8 +41,14 @@ use Throwable;
  */
 class SupplierGateway extends AbstractService
 {
+    /** 系统配置里回调域名的设置项，值为 {base_url: string} */
+    public const NOTIFY_BASE_SETTING = 'notify.base_url';
+
     #[Inject]
     protected SupplierDao $supplierDao;
+
+    #[Inject]
+    protected SettingService $settingService;
 
     #[Inject]
     protected SupplierProductDao $supplierProductDao;
@@ -67,7 +74,7 @@ class SupplierGateway extends AbstractService
 
     public function parseCallback(Supplier $supplier, ServerRequestInterface $request): CallbackResult
     {
-        $result = $this->driver($supplier)->parseCallback($request, $this->decryptConfig($supplier));
+        $result = $this->driver($supplier)->parseCallback($request, $this->driverConfig($supplier));
         $this->logger()->info('callback', [
             'supplier' => $supplier->code,
             'verified' => $result->verified,
@@ -99,14 +106,38 @@ class SupplierGateway extends AbstractService
         if (! $driver instanceof ProvidesUpstreamProducts) {
             throw new RuntimeException("供应商 {$supplier->code} 的驱动不支持查询商品");
         }
-        $products = $driver->upstreamProducts($this->decryptConfig($supplier));
+        $products = $driver->upstreamProducts($this->driverConfig($supplier));
         $this->logger()->info('upstream_products', ['supplier' => $supplier->code, 'count' => count($products)]);
 
         return $products;
     }
 
     /**
-     * 解密后的完整接口参数（含密钥），不要返回给前端。
+     * 自动生成的回调地址：系统配置里的回调域名 + /notify/supplier/{供应商编码}；没配回调域名时返回 null。
+     */
+    public function notifyUrl(Supplier $supplier): ?string
+    {
+        $base = $this->settingService->get(self::NOTIFY_BASE_SETTING)['base_url'] ?? '';
+
+        return is_string($base) && $base !== '' ? rtrim($base, '/') . '/notify/supplier/' . $supplier->code : null;
+    }
+
+    /**
+     * 交给驱动的接口参数：存储的参数 + 自动生成的回调地址 notify_url。
+     * 没配回调域名时沿用以前手填存下的 notify_url，避免上线后、填域名前回调地址为空。
+     *
+     * @return array<string, string>
+     */
+    public function driverConfig(Supplier $supplier): array
+    {
+        $config = $this->decryptConfig($supplier);
+        $config['notify_url'] = $this->notifyUrl($supplier) ?? (string) ($config['notify_url'] ?? '');
+
+        return $config;
+    }
+
+    /**
+     * 存储的接口参数（解密后，含密钥，不要返回给前端），不含自动生成的回调地址；对接供应商用 driverConfig()。
      *
      * @return array<string, string>
      */
@@ -134,7 +165,7 @@ class SupplierGateway extends AbstractService
             $order->operator,
             $order->province,
             $supplierProduct->external_code,
-            $this->decryptConfig($supplier),
+            $this->driverConfig($supplier),
             $attempt->supplier_order_no,
         );
 

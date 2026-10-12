@@ -29,6 +29,10 @@ export interface Supplier {
   code: string
   driver: string
   driver_name: string
+  /** 回调地址：系统配置的回调域名 + /notify/supplier/{编码}；没配回调域名时是以前手填的，可能为空 */
+  notify_url: string | null
+  /** 回调地址是否按回调域名自动生成 */
+  notify_url_generated: boolean
   /** 非密钥参数；密钥不回显，已填过的列在 configured_secrets 里 */
   config: Record<string, string>
   configured_secrets: string[]

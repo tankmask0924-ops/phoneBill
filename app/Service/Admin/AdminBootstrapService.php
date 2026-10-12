@@ -49,7 +49,7 @@ class AdminBootstrapService extends AbstractService
         ['code' => 'role.view', 'module' => 'system', 'name' => '角色权限查看', 'type' => 'action'],
         ['code' => 'role.manage', 'module' => 'system', 'name' => '角色权限管理', 'type' => 'action'],
         ['code' => 'operation_log.view', 'module' => 'system', 'name' => '操作日志查看', 'type' => 'action'],
-        ['code' => 'setting.manage', 'module' => 'system', 'name' => '系统配置（图片存储）', 'type' => 'action'],
+        ['code' => 'setting.manage', 'module' => 'system', 'name' => '系统配置（回调域名、图片存储）', 'type' => 'action'],
         ['code' => 'supplier.view', 'module' => 'product', 'name' => '供应商查看', 'type' => 'action'],
         ['code' => 'supplier.manage', 'module' => 'product', 'name' => '供应商管理', 'type' => 'action'],
         ['code' => 'supplier_product.view', 'module' => 'product', 'name' => '供应商商品查看', 'type' => 'action'],

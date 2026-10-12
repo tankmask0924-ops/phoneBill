@@ -177,7 +177,7 @@ POST 表单，发到下单时传的 `notify_url`。收到后响应文本 `succes
 
 ## 9. 我们的对接方式（驱动 `dayuanren`）
 
-- 接口参数：接口域名（`https://上游域名`，路径 `/yrapi.php/index/...` 写在驱动里）、商户ID（`userid`）、apikey、回调地址（`https://我方域名/notify/supplier/{供应商编码}`，每单随下单请求传过去）。
+- 接口参数：接口域名（`https://上游域名`，路径 `/yrapi.php/index/...` 写在驱动里）、商户ID（`userid`）、apikey；回调地址按系统配置的回调域名自动生成（`回调域名/notify/supplier/{供应商编码}`），每单随下单请求传过去。
 - 字段对应：`out_trade_num` = 提交单号 `attempt_no`，`product_id` = 供应商商品编码，`mobile` = 手机号，`amount` = 订单面值（让上游校验，商品配错面值时直接驳回）。上游的 `order_number` 存为供应商订单号。
 - 签名按第 2 节：`urldecode(http_build_query(升序参数)) . '&apikey=' . apikey`，md5 转大写。回调按收到的全部参数（去掉 `sign`）验签，并核对 `userid`，通过后回 `success`。
 - 建供应商商品时可以从上游产品列表里选：在售 = `api_open` 为 1；运营商按 `isp` 换算（1 移动、2 电信、3 联通，虚拟不对应）；接口不给面值，要管理员自己填。

@@ -31,7 +31,7 @@ use Hyperf\HttpMessage\Exception\HttpException;
 /**
  * 商品中心 - 供应商：名称、编码、对接驱动与接口参数、启用停用（覆盖省份在供应商商品上）。
  *
- * - 编码用在供应商回调地址里，建好后不能改；
+ * - 编码用在供应商回调地址里，建好后不能改；回调地址按系统配置里的回调域名自动生成（见 SupplierGateway::notifyUrl()），不用填；
  * - 接口参数整体加密存储；密钥类参数（驱动声明为 secret）接口不回显，编辑时留空表示不修改；
  * - 不提供删除，不用了就停用，历史订单还要查得到。
  */
@@ -313,6 +313,10 @@ class SupplierAdminService extends AbstractService
             }
             $config[$field['key']] = mb_substr($value, 0, 1000);
         }
+        // 以前手填的回调地址留着，没配回调域名时还用它（见 SupplierGateway::driverConfig()）
+        if (($existing['notify_url'] ?? '') !== '') {
+            $config['notify_url'] = $existing['notify_url'];
+        }
 
         return $config;
     }
@@ -339,10 +343,15 @@ class SupplierAdminService extends AbstractService
             }
         }
 
+        $notifyUrl = $this->supplierGateway->notifyUrl($supplier);
+
         return [
             'id' => $supplier->id,
             'name' => $supplier->name,
             'code' => $supplier->code,
+            // 自动生成的回调地址；没配回调域名时是以前手填的（可能为空），notify_url_generated 为 false
+            'notify_url' => $notifyUrl ?? ($config['notify_url'] ?? null),
+            'notify_url_generated' => $notifyUrl !== null,
             'driver' => $supplier->driver,
             'driver_name' => $driver?->name() ?? $supplier->driver,
             'config' => $visible,

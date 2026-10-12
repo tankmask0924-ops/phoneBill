@@ -18,6 +18,7 @@ use App\Middleware\AdminAuthMiddleware;
 use App\Middleware\AdminPermissionMiddleware;
 use App\Model\AdminUser;
 use App\Network\ClientIpResolver;
+use App\Service\Admin\NotifySettingAdminService;
 use App\Service\Admin\StorageSettingAdminService;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpServer\Annotation\Controller;
@@ -27,13 +28,16 @@ use Hyperf\HttpServer\Annotation\PostMapping;
 use Hyperf\HttpServer\Annotation\PutMapping;
 
 /**
- * 系统设置 - 存储配置（腾讯云 COS），规则见 StorageSettingAdminService。
+ * 系统配置：回调域名（NotifySettingAdminService）、图片存储（腾讯云 COS，StorageSettingAdminService）。
  */
 #[Controller(prefix: '/admin/settings')]
 class SettingController extends AbstractController
 {
     #[Inject]
     protected StorageSettingAdminService $storageSettingService;
+
+    #[Inject]
+    protected NotifySettingAdminService $notifySettingService;
 
     #[Inject]
     protected ClientIpResolver $clientIpResolver;
@@ -63,6 +67,24 @@ class SettingController extends AbstractController
     public function testStorage(): array
     {
         return $this->storageSettingService->test();
+    }
+
+    #[Middleware(AdminAuthMiddleware::class)]
+    #[Middleware(AdminPermissionMiddleware::class)]
+    #[RequiresPermission('setting.manage')]
+    #[GetMapping(path: 'notify')]
+    public function notify(): array
+    {
+        return $this->notifySettingService->get();
+    }
+
+    #[Middleware(AdminAuthMiddleware::class)]
+    #[Middleware(AdminPermissionMiddleware::class)]
+    #[RequiresPermission('setting.manage')]
+    #[PutMapping(path: 'notify')]
+    public function saveNotify(): array
+    {
+        return $this->notifySettingService->save($this->admin(), $this->request->input('base_url'), $this->clientIp());
     }
 
     private function admin(): AdminUser

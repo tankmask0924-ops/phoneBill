@@ -62,7 +62,6 @@ class OpenPlatformDriver implements SupplierDriverInterface, ProvidesUpstreamPro
             ['key' => 'api_url', 'label' => '接口地址', 'type' => 'text', 'required' => true, 'placeholder' => 'https://平台域名/open-api'],
             ['key' => 'app_key', 'label' => 'AppKey', 'type' => 'text', 'required' => true],
             ['key' => 'app_secret', 'label' => 'AppSecret', 'type' => 'secret', 'required' => true],
-            ['key' => 'notify_url', 'label' => '回调地址', 'type' => 'text', 'required' => true, 'placeholder' => 'https://我方域名/notify/supplier/供应商编码'],
         ];
     }
 

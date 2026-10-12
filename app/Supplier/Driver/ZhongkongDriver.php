@@ -85,7 +85,6 @@ class ZhongkongDriver implements SupplierDriverInterface, ProvidesUpstreamProduc
                     ['value' => 'unix', 'label' => '秒级时间戳（1791518400）'],
                 ],
             ],
-            ['key' => 'notify_url', 'label' => '回调地址', 'type' => 'text', 'required' => true, 'placeholder' => 'https://我方域名/notify/supplier/供应商编码'],
         ];
     }
 

@@ -72,7 +72,6 @@ class ShangtengDriver implements SupplierDriverInterface, ProvidesUpstreamProduc
             ['key' => 'api_url', 'label' => '接口地址', 'type' => 'text', 'required' => true, 'placeholder' => 'https://上游域名'],
             ['key' => 'user_id', 'label' => '用户ID（Userid）', 'type' => 'text', 'required' => true],
             ['key' => 'api_key', 'label' => 'ApiKey', 'type' => 'secret', 'required' => true],
-            ['key' => 'notify_url', 'label' => '回调地址', 'type' => 'text', 'required' => true, 'placeholder' => 'https://我方域名/notify/supplier/供应商编码'],
         ];
     }
 

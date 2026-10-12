@@ -108,6 +108,15 @@ async function save() {
   }
 }
 
+async function copy(text: string) {
+  try {
+    await navigator.clipboard.writeText(text)
+    ElMessage.success('已复制')
+  } catch {
+    ElMessage.warning('复制失败，请手动选中复制')
+  }
+}
+
 async function toggleStatus(row: Supplier) {
   const next = row.status === 'active' ? 'disabled' : 'active'
   try {
@@ -156,6 +165,18 @@ onMounted(async () => {
       <el-table-column prop="name" label="名称" min-width="140" />
       <el-table-column prop="code" label="编码" min-width="120" />
       <el-table-column prop="driver_name" label="对接驱动" min-width="150" />
+      <el-table-column label="回调地址" min-width="260">
+        <template #default="{ row }">
+          <template v-if="row.notify_url">
+            <span class="mono">{{ row.notify_url }}</span>
+            <el-button link type="primary" class="copy" @click="copy(row.notify_url)">复制</el-button>
+          </template>
+          <span v-else class="warn">未生成</span>
+          <el-tooltip v-if="!row.notify_url_generated" content="还没在「系统管理 - 系统配置」填回调域名，暂用以前手填的地址" placement="top">
+            <el-tag size="small" type="warning" class="copy">待配置</el-tag>
+          </el-tooltip>
+        </template>
+      </el-table-column>
       <el-table-column prop="product_count" label="商品数" width="80" align="center" />
       <el-table-column label="状态" width="80">
         <template #default="{ row }"><StatusTag :map="supplierStatusLabels" :value="row.status" /></template>
@@ -191,6 +212,9 @@ onMounted(async () => {
       </el-form-item>
       <el-form-item label="编码" prop="code">
         <el-input v-model="form.code" :disabled="!!editing" placeholder="用在供应商回调地址里，建好后不能改" />
+        <div class="tip">
+          回调地址自动生成：回调域名/notify/supplier/{{ form.code || '编码' }}（回调域名在「系统管理 - 系统配置」设置），保存后在列表里复制给供应商
+        </div>
       </el-form-item>
       <el-form-item label="对接驱动" prop="driver">
         <el-select v-model="form.driver" style="width: 100%" @change="onDriverChange">
@@ -237,6 +261,19 @@ onMounted(async () => {
 .pagination {
   justify-content: flex-end;
   margin-top: 16px;
+}
+
+.mono {
+  font-family: monospace;
+  font-size: 12px;
+}
+
+.copy {
+  margin-left: 6px;
+}
+
+.warn {
+  color: #e6a23c;
 }
 
 .tip {

@@ -54,7 +54,7 @@ export const menus: MenuItem[] = [
       { path: '/system/admin-users', title: '管理员账号', icon: UserFilled, permission: 'admin_user.view' },
       { path: '/system/roles', title: '角色权限', icon: Key, permission: 'role.view' },
       { path: '/system/operation-logs', title: '操作日志', icon: Document, permission: 'operation_log.view' },
-      { path: '/system/storage', title: '存储配置', icon: Picture, permission: 'setting.manage' },
+      { path: '/system/storage', title: '系统配置', icon: Picture, permission: 'setting.manage' },
     ],
   },
 ]

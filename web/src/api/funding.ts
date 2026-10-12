@@ -107,4 +107,7 @@ export const settingApi = {
   saveStorage: (data: Omit<StorageSetting, 'secret_key_set'> & { secret_key: string }) =>
     http.put<StorageSetting>('/admin/settings/storage', data),
   testStorage: () => http.post<{ success: boolean; message: string }>('/admin/settings/storage/test'),
+  /** 回调域名：供应商回调地址 = 回调域名 + /notify/supplier/{供应商编码} */
+  notify: () => http.get<{ base_url: string }>('/admin/settings/notify'),
+  saveNotify: (baseUrl: string) => http.put<{ base_url: string }>('/admin/settings/notify', { base_url: baseUrl }),
 }

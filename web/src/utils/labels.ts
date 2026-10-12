@@ -181,6 +181,7 @@ export const operationActionLabels: LabelMap = {
   approve_funding_request: { label: '加款申请通过（入账）' },
   reject_funding_request: { label: '加款申请驳回' },
   update_storage_setting: { label: '修改存储配置' },
+  update_notify_setting: { label: '修改回调域名' },
   create_merchant_user: { label: '开通商户后台账号' },
   enable_merchant_user: { label: '启用商户后台账号' },
   disable_merchant_user: { label: '禁用商户后台账号' },

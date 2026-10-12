@@ -13,7 +13,10 @@ declare(strict_types=1);
 namespace HyperfTest\Cases\Admin;
 
 use App\Model\Supplier;
+use App\Model\SystemSetting;
+use App\Security\Encrypter;
 use App\Service\Admin\SupplierAdminService;
+use App\Service\Supplier\SupplierGateway;
 use HyperfTest\HttpTestCase;
 
 use function Hyperf\Support\make;
@@ -74,6 +77,46 @@ class SupplierControllerTest extends HttpTestCase
         $meta = $this->body($this->jsonRequest('GET', '/admin/suppliers/meta', $token));
         $this->assertContains('mock', array_column($meta['drivers'], 'code'));
         $this->assertCount(31, $meta['provinces']);
+    }
+
+    public function testNotifyUrlIsGeneratedFromSystemSetting()
+    {
+        $original = SystemSetting::where('key', SupplierGateway::NOTIFY_BASE_SETTING)->first()?->value;
+        SystemSetting::where('key', SupplierGateway::NOTIFY_BASE_SETTING)->delete();
+        try {
+            $token = $this->loginAs($this->createAdminWithPermissions(['supplier.view', 'supplier.manage', 'setting.manage']));
+            $gateway = make(SupplierGateway::class);
+            $supplier = $this->createSupplier();
+
+            // 没配回调域名：沿用以前手填存下的回调地址
+            $supplier->update(['config' => make(Encrypter::class)->encrypt(json_encode(['result' => 'success', 'notify_url' => 'http://old.test/notify/supplier/x']))]);
+            $this->assertSame('http://old.test/notify/supplier/x', $gateway->driverConfig(Supplier::find($supplier->id))['notify_url']);
+            $row = $this->body($this->jsonRequest('GET', '/admin/suppliers?keyword=' . $supplier->code, $token))['data'][0];
+            $this->assertFalse($row['notify_url_generated']);
+
+            // 配了回调域名：按域名 + 编码生成，不带路径、末尾斜杠去掉
+            foreach (['', 'ftp://x.test', 'https://x.test/path', 'not a url'] as $bad) {
+                $this->assertSame(422, $this->jsonRequest('PUT', '/admin/settings/notify', $token, ['base_url' => $bad])->getStatusCode(), $bad);
+            }
+            $saved = $this->body($this->jsonRequest('PUT', '/admin/settings/notify', $token, ['base_url' => 'https://pay.example.com/']));
+            $this->assertSame(['base_url' => 'https://pay.example.com'], $saved);
+            $expected = "https://pay.example.com/notify/supplier/{$supplier->code}";
+            $this->assertSame($expected, $gateway->driverConfig(Supplier::find($supplier->id))['notify_url']);
+            $row = $this->body($this->jsonRequest('GET', '/admin/suppliers?keyword=' . $supplier->code, $token))['data'][0];
+            $this->assertSame($expected, $row['notify_url']);
+            $this->assertTrue($row['notify_url_generated']);
+
+            // 驱动的参数表单里不再有回调地址
+            $meta = $this->body($this->jsonRequest('GET', '/admin/suppliers/meta', $token));
+            foreach ($meta['drivers'] as $driver) {
+                $this->assertNotContains('notify_url', array_column($driver['config_schema'], 'key'), $driver['code']);
+            }
+        } finally {
+            SystemSetting::where('key', SupplierGateway::NOTIFY_BASE_SETTING)->delete();
+            if ($original !== null) {
+                SystemSetting::create(['key' => SupplierGateway::NOTIFY_BASE_SETTING, 'value' => $original]);
+            }
+        }
     }
 
     public function testValidation()

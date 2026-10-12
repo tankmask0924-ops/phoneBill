@@ -67,7 +67,6 @@ class DayuanrenDriver implements SupplierDriverInterface, ProvidesUpstreamProduc
             ['key' => 'api_url', 'label' => '接口域名', 'type' => 'text', 'required' => true, 'placeholder' => 'https://上游域名'],
             ['key' => 'userid', 'label' => '商户ID（userid）', 'type' => 'text', 'required' => true],
             ['key' => 'apikey', 'label' => 'apikey', 'type' => 'secret', 'required' => true],
-            ['key' => 'notify_url', 'label' => '回调地址', 'type' => 'text', 'required' => true, 'placeholder' => 'https://我方域名/notify/supplier/供应商编码'],
         ];
     }
 

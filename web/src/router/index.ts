@@ -60,7 +60,7 @@ const router = createRouter({
           path: 'system/storage',
           name: 'storage-setting',
           component: () => import('@/views/system/StorageSettingView.vue'),
-          meta: { title: '存储配置' },
+          meta: { title: '系统配置' },
         },
         {
           path: 'product/suppliers',
