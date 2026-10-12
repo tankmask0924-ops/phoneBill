@@ -13,7 +13,7 @@ import {
   productCategoryApi,
   type SupplierProduct,
 } from '@/api/product'
-import { labelOf, operatorLabels, shelfStatusLabels, toOptions } from '@/utils/labels'
+import { labelOf, operatorLabels, provincesLabel, shelfStatusLabels, toOptions } from '@/utils/labels'
 import { usePermissionStore } from '@/stores/permission'
 
 const permission = usePermissionStore()
@@ -55,10 +55,41 @@ const form = reactive({
 /** 同面值的供应商商品，绑定时从这里选 */
 const options = ref<SupplierProduct[]>([])
 const optionsLoading = ref(false)
-const picking = ref<number | undefined>()
 const unboundOptions = computed(() =>
   options.value.filter((o) => !form.routes.some((r) => r.supplier_product_id === o.id)),
 )
+
+// 绑定时三级选择：先选供应商，再选运营商，最后选商品（选中即加入下表）
+const pickSupplier = ref<number | undefined>()
+const pickOperator = ref<OperatorCode | undefined>()
+const pickProduct = ref<number | undefined>()
+const supplierChoices = computed(() => {
+  const seen = new Map<number, { id: number; name: string; disabled: boolean }>()
+  for (const o of unboundOptions.value) {
+    if (!seen.has(o.supplier_id)) {
+      seen.set(o.supplier_id, { id: o.supplier_id, name: o.supplier_name ?? `#${o.supplier_id}`, disabled: o.supplier_status !== 'active' })
+    }
+  }
+  return [...seen.values()]
+})
+const operatorChoices = computed(() => {
+  const set = new Set(unboundOptions.value.filter((o) => o.supplier_id === pickSupplier.value).flatMap((o) => o.operators))
+  return operatorOrder.filter((op) => set.has(op))
+})
+const productChoices = computed(() =>
+  unboundOptions.value.filter(
+    (o) => o.supplier_id === pickSupplier.value && pickOperator.value !== undefined && o.operators.includes(pickOperator.value),
+  ),
+)
+
+function onPickSupplier() {
+  pickOperator.value = operatorChoices.value.length === 1 ? operatorChoices.value[0] : undefined
+  pickProduct.value = undefined
+}
+
+function onPickOperator() {
+  pickProduct.value = undefined
+}
 
 /** 覆盖的运营商：绑定的供应商商品支持的运营商合起来 */
 const covered = computed(() => {
@@ -74,7 +105,9 @@ const rules = computed<FormRules>(() => ({
 
 async function loadOptions() {
   options.value = []
-  picking.value = undefined
+  pickSupplier.value = undefined
+  pickOperator.value = undefined
+  pickProduct.value = undefined
   if (!form.face_value) {
     return
   }
@@ -94,23 +127,25 @@ function onFaceValueChange() {
 }
 
 function addRoute() {
-  const option = options.value.find((o) => o.id === picking.value)
+  const option = options.value.find((o) => o.id === pickProduct.value)
   if (!option) {
     return
   }
   const maxPriority = Math.max(0, ...form.routes.map((r) => r.priority))
   form.routes.push({ supplier_product_id: option.id, priority: maxPriority + 1, supplier_product: option })
-  picking.value = undefined
+  // 保留供应商、运营商，方便接着加同一家的其他商品
+  pickProduct.value = undefined
 }
 
 function removeRoute(index: number) {
   form.routes.splice(index, 1)
 }
 
+/** 第三级商品选项：把选商品要看的信息写清楚 */
 function optionLabel(o: SupplierProduct): string {
-  const ops = o.operators.map((op) => labelOf(operatorLabels, op)).join('/')
+  const ops = o.operators.map((op) => labelOf(operatorLabels, op)).join('、')
   const off = o.supplier_status !== 'active' ? '（供应商已停用）' : o.status !== 'active' ? '（已下架）' : ''
-  return `${o.supplier_name} · ${o.name} · ${ops} · 成本 ${o.cost_price}${off}`
+  return `商品名称：${o.name} — 成本价：${o.cost_price} 元 — 面值：${o.face_value} 元 — 运营商：${ops} — 省份：${provincesLabel(o.provinces)}${off}`
 }
 
 function openCreate() {
@@ -337,18 +372,38 @@ onMounted(async () => {
 
       <el-form-item label="供应商商品">
         <div class="routes">
-          <el-select
-            v-if="canManage"
-            v-model="picking"
-            :loading="optionsLoading"
-            :disabled="!form.face_value"
-            :placeholder="form.face_value ? '选择要绑定的供应商商品，选中即加入下表' : '先填写面值'"
-            filterable
-            class="pick"
-            @change="addRoute"
-          >
-            <el-option v-for="o in unboundOptions" :key="o.id" :label="optionLabel(o)" :value="o.id" />
-          </el-select>
+          <div v-if="canManage" class="pick">
+            <el-select
+              v-model="pickSupplier"
+              :loading="optionsLoading"
+              :disabled="!form.face_value"
+              :placeholder="form.face_value ? '① 选择供应商' : '先填写面值'"
+              filterable
+              class="pick-supplier"
+              @change="onPickSupplier"
+            >
+              <el-option
+                v-for="s in supplierChoices"
+                :key="s.id"
+                :label="s.disabled ? `${s.name}（已停用）` : s.name"
+                :value="s.id"
+              />
+            </el-select>
+            <el-select v-model="pickOperator" :disabled="!pickSupplier" placeholder="② 运营商" class="pick-operator" @change="onPickOperator">
+              <el-option v-for="op in operatorChoices" :key="op" :label="labelOf(operatorLabels, op)" :value="op" />
+            </el-select>
+            <el-select
+              v-model="pickProduct"
+              :disabled="!pickOperator"
+              placeholder="③ 选择商品，选中即加入下表"
+              no-data-text="这家没有这个运营商的同面值商品了"
+              filterable
+              class="pick-product"
+              @change="addRoute"
+            >
+              <el-option v-for="o in productChoices" :key="o.id" :label="optionLabel(o)" :value="o.id" />
+            </el-select>
+          </div>
           <el-table :data="form.routes" border size="small" empty-text="还没有绑定，商户下单会被拒绝">
             <el-table-column label="供应商" min-width="110">
               <template #default="{ row }">
@@ -366,6 +421,9 @@ onMounted(async () => {
               <template #default="{ row }">
                 {{ row.supplier_product.operators.map((op: string) => labelOf(operatorLabels, op)).join('、') }}
               </template>
+            </el-table-column>
+            <el-table-column label="省份" min-width="90">
+              <template #default="{ row }">{{ provincesLabel(row.supplier_product.provinces) }}</template>
             </el-table-column>
             <el-table-column label="成本价" width="80" align="right">
               <template #default="{ row }">{{ row.supplier_product.cost_price }}</template>
@@ -449,8 +507,25 @@ onMounted(async () => {
 }
 
 .pick {
+  display: flex;
+  gap: 8px;
   width: 100%;
   margin-bottom: 8px;
+}
+
+.pick-supplier {
+  width: 180px;
+  flex: none;
+}
+
+.pick-operator {
+  width: 110px;
+  flex: none;
+}
+
+.pick-product {
+  flex: 1;
+  min-width: 0;
 }
 
 .prices {

@@ -79,6 +79,7 @@ class ProductControllerTest extends HttpTestCase
 
         $options = $this->body($this->jsonRequest('GET', '/admin/products/supplier-product-options?face_value=100', $token));
         $this->assertContains($telecom->id, array_column($options, 'id'));
+        $this->assertSame(['*'], array_column($options, 'provinces', 'id')[$telecom->id], '绑定选项带覆盖省份，前端展示用');
         $this->assertNotContains($this->createSupplierProduct($supplier, ['cmcc'], 50)->id, array_column(
             $this->body($this->jsonRequest('GET', '/admin/products/supplier-product-options?face_value=100', $token)),
             'id'
