@@ -74,7 +74,8 @@ const collapsed = ref(false)
       </el-header>
 
       <el-main class="main">
-        <router-view />
+        <!-- 订单、异常订单共用一个页面组件：按路径重建，否则切换时沿用上一个页面的筛选条件、也不会重新查询 -->
+        <router-view :key="$route.path" />
       </el-main>
     </el-container>
   </el-container>
