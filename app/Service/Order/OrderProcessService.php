@@ -184,7 +184,7 @@ class OrderProcessService extends AbstractService
                     }
                     break;
                 }
-                $orderUpdated = Db::transaction(function () use ($attempt, $extra, $now) {
+                $orderUpdated = Db::transaction(function () use ($order, $attempt, $extra, $now) {
                     if (! $this->attemptDao->transition($attempt->id, OrderAttempt::STATUS_PROCESSING, OrderAttempt::STATUS_SUCCESS, $extra + ['finished_at' => $now])) {
                         return false;
                     }
@@ -193,6 +193,7 @@ class OrderProcessService extends AbstractService
                         'supplier_id' => $attempt->supplier_id,
                         'supplier_product_id' => $attempt->supplier_product_id,
                         'cost_price' => $attempt->cost_price,
+                        'profit' => self::profit($order, $attempt),
                         'finished_at' => $now,
                         'notify_status' => Order::NOTIFY_PENDING,
                     ]);
@@ -243,6 +244,8 @@ class OrderProcessService extends AbstractService
         $notify = $current !== null && ! $current->manual_only;
         $done = Db::transaction(function () use ($order, $from, $reason, $notify) {
             $changed = $this->orderDao->transition($order->id, $from, Order::STATUS_FAILED, [
+                // 成本保留便于对账，利润清掉（冲正的单不算利润）
+                'profit' => null,
                 'fail_reason' => mb_substr($reason, 0, 255),
                 'finished_at' => date('Y-m-d H:i:s'),
                 'notify_status' => $notify ? Order::NOTIFY_PENDING : Order::NOTIFY_NONE,
@@ -280,6 +283,7 @@ class OrderProcessService extends AbstractService
                 'supplier_id' => $attempt->supplier_id,
                 'supplier_product_id' => $attempt->supplier_product_id,
                 'cost_price' => $attempt->cost_price,
+                'profit' => self::profit($order, $attempt),
                 'finished_at' => $now,
                 'notify_status' => $notify ? Order::NOTIFY_PENDING : Order::NOTIFY_NONE,
             ]);
@@ -402,6 +406,14 @@ class OrderProcessService extends AbstractService
         }
 
         return count($ids);
+    }
+
+    /**
+     * 利润 = 扣款 - 这次提交的成本。
+     */
+    private static function profit(?Order $order, OrderAttempt $attempt): ?string
+    {
+        return $order === null || $attempt->cost_price === null ? null : bcsub($order->sale_price, $attempt->cost_price, 2);
     }
 
     /**

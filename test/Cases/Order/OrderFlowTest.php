@@ -94,6 +94,7 @@ class OrderFlowTest extends HttpTestCase
         $order = Order::find($order->id);
         $this->assertSame(Order::STATUS_SUCCESS, $order->status);
         $this->assertSame('98.80', $order->cost_price);
+        $this->assertSame('0.70', $order->profit, '利润 = 扣款 99.50 - 成本 98.80');
         $this->assertSame([['order_id' => $order->id, 'attempt_no' => 1, 'delay' => 0]], $this->dispatcher->notifies);
 
         make(MerchantNotifyService::class)->notify($order->id, 1);

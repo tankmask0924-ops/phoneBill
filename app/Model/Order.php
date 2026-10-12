@@ -30,6 +30,7 @@ use Carbon\Carbon;
  * @property int $face_value
  * @property string $sale_price
  * @property null|string $cost_price
+ * @property null|string $profit 利润 = 扣款 - 成本，成功时写入，失败（含冲正）为空
  * @property null|int $supplier_id
  * @property null|int $supplier_product_id
  * @property string $status
@@ -85,6 +86,7 @@ class Order extends Model
         'face_value',
         'sale_price',
         'cost_price',
+        'profit',
         'supplier_id',
         'supplier_product_id',
         'status',

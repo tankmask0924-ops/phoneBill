@@ -21,6 +21,8 @@ export interface Order {
   face_value: number
   sale_price: string
   cost_price: string | null
+  /** 利润 = 扣款 - 成本，成功时写入；失败（含冲正）为空 */
+  profit: string | null
   supplier_id: number | null
   supplier_name: string | null
   /** pending / processing / abnormal / success / failed */

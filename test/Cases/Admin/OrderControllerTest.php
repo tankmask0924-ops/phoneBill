@@ -115,6 +115,7 @@ class OrderControllerTest extends HttpTestCase
         $ok = $this->body($this->jsonRequest('POST', "/admin/orders/{$toSuccess->id}/success", $token, ['remark' => '供应商后台确认到账']));
         $this->assertSame('success', $ok['status']);
         $this->assertSame('98.00', $ok['cost_price']);
+        $this->assertSame('1.50', $ok['profit'], '人工置成功也写利润');
         $this->assertSame('success', $ok['attempts'][0]['status']);
         $this->assertSame($balance, Merchant::find($merchant->id)->balance, '置成功不动余额');
 
@@ -138,6 +139,7 @@ class OrderControllerTest extends HttpTestCase
     {
         [$merchant, $product, $sp] = $this->fixture();
         $order = $this->createOrder($merchant, $product, $sp, Order::STATUS_SUCCESS);
+        $order->update(['profit' => '1.50']);
         $manager = $this->loginAs($this->createAdminWithPermissions(['order.view', 'order.manage']));
         $this->assertSame(403, $this->jsonRequest('POST', "/admin/orders/{$order->id}/reverse", $manager, ['remark' => 'x'])->getStatusCode());
 
@@ -146,6 +148,8 @@ class OrderControllerTest extends HttpTestCase
         $reversed = $this->body($this->jsonRequest('POST', "/admin/orders/{$order->id}/reverse", $token, ['remark' => '运营商撤销']));
         $this->assertSame('failed', $reversed['status']);
         $this->assertStringContainsString('冲正：运营商撤销', $reversed['fail_reason']);
+        $this->assertNull($reversed['profit'], '冲正后不算利润');
+        $this->assertSame('98.00', $reversed['cost_price'], '成本留着对账');
         $this->assertSame(bcadd($balance, '99.50', 2), Merchant::find($merchant->id)->balance);
         $this->assertSame(422, $this->jsonRequest('POST', "/admin/orders/{$order->id}/reverse", $token, ['remark' => 'again'])->getStatusCode());
     }

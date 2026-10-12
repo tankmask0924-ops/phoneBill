@@ -302,6 +302,15 @@ onMounted(async () => {
       <el-table-column label="面值 / 扣款" width="120" align="right">
         <template #default="{ row }">{{ row.face_value }} / {{ row.sale_price }}</template>
       </el-table-column>
+      <el-table-column label="成本 / 利润" width="130" align="right">
+        <template #default="{ row }">
+          <template v-if="row.cost_price">
+            {{ row.cost_price }} /
+            <span :class="row.profit && row.profit.startsWith('-') ? 'loss' : 'gain'">{{ row.profit ?? '-' }}</span>
+          </template>
+          <span v-else class="muted">-</span>
+        </template>
+      </el-table-column>
       <el-table-column label="供应商" min-width="110">
         <template #default="{ row }">{{ row.supplier_name ?? '-' }}</template>
       </el-table-column>
@@ -364,7 +373,10 @@ onMounted(async () => {
           </el-descriptions-item>
           <el-descriptions-item label="面值">{{ detail.face_value }} 元</el-descriptions-item>
           <el-descriptions-item label="扣款">{{ detail.sale_price }} 元</el-descriptions-item>
-          <el-descriptions-item label="成本">{{ detail.cost_price ?? '-' }}</el-descriptions-item>
+          <el-descriptions-item label="成本 / 利润">
+            {{ detail.cost_price ?? '-' }} /
+            <span :class="detail.profit && detail.profit.startsWith('-') ? 'loss' : 'gain'">{{ detail.profit ?? '-' }}</span>
+          </el-descriptions-item>
           <el-descriptions-item label="下单时间">{{ detail.created_at }}</el-descriptions-item>
           <el-descriptions-item label="完成时间">{{ detail.finished_at ?? '-' }}</el-descriptions-item>
           <el-descriptions-item label="耗时">{{ formatDuration(detail.duration) }}</el-descriptions-item>
@@ -487,6 +499,14 @@ onMounted(async () => {
 
 .manual-tag {
   margin-left: 4px;
+}
+
+.gain {
+  color: #67c23a;
+}
+
+.loss {
+  color: #f56c6c;
 }
 
 .actions .el-button + .el-button {

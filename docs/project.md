@@ -257,6 +257,7 @@ flowchart LR
 ### 4.7 订单中心
 
 - **订单列表**：按商户、平台/商户订单号、手机号、商品、运营商、省份、状态、供应商、时间筛选；支持导出。
+- **成本和利润**：订单成功时（自动成功、人工置成功）把那次提交的成本写入 `cost_price`，并写 `profit = 扣款 - 成本`；失败（含冲正）把 `profit` 清空、成本保留便于对账。上线迁移时回填已有成功订单的利润。列表、详情、CSV 导出都显示成本和利润，亏损标红。
 - **订单详情**：基本信息、扣款与成本、每一次供应商尝试的请求和响应、通知商户的记录。
 - **耗时**：订单显示下单受理到出结果的耗时，每次供应商提交显示提交到出结果（回调或查单）的耗时；由时间字段相减得出，导出也带上。
 - **人工操作**（记操作日志）：手动查单（弹窗显示供应商返回了什么和下一步）、处理异常订单（置成功 / 失败）、冲正、手动回调、手动补单。详情页有「刷新」按钮，详情顶部标红显示需要处理的提醒（上游结果和订单矛盾、人工处理单待回调等）。
@@ -347,7 +348,7 @@ erDiagram
 | `merchant_funding_requests` | 加款申请 | `merchant_id`、`amount`、付款账号和收款账户的 id 与快照、`paid_at`、`remark`、`vouchers`（对象 key 列表）、`status`、`review_remark`、`reviewed_by`、`reviewed_at`、`balance_log_id` |
 | `system_settings` | 系统设置 | `key`（唯一）、`value`（JSON，整段加密） |
 | **订单** | | |
-| `orders` | 订单 | `order_no`（唯一）、`merchant_id`、`merchant_order_no`、`product_id`、`product_name`、`mobile`、`operator`、`province`、`face_value`、`sale_price`、`cost_price`、`supplier_id`、`supplier_product_id`、`status`、`fail_reason`、`notify_url`、`notify_status`、`manual_only`（人工处理单）、`manual_notified_at`（最近一次手动回调）、`notify_round`（通知轮次）、`finished_at`；唯一 `(merchant_id, merchant_order_no)` |
+| `orders` | 订单 | `order_no`（唯一）、`merchant_id`、`merchant_order_no`、`product_id`、`product_name`、`mobile`、`operator`、`province`、`face_value`、`sale_price`、`cost_price`、`profit`（利润）、`supplier_id`、`supplier_product_id`、`status`、`fail_reason`、`notify_url`、`notify_status`、`manual_only`（人工处理单）、`manual_notified_at`（最近一次手动回调）、`notify_round`（通知轮次）、`finished_at`；唯一 `(merchant_id, merchant_order_no)` |
 | `order_attempts` | 每次提交给供应商的记录 | `order_id`、`supplier_id`、`supplier_product_id`、`supplier_order_no`、`cost_price`、`status`、`request`、`response`、`submitted_at`、`finished_at` |
 | `order_notify_logs` | 通知商户的记录 | `order_id`、`attempt_no`、`http_status`、`response`、`next_retry_at` |
 
