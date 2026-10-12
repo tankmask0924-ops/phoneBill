@@ -5,7 +5,15 @@ import { usePagedList } from '@/utils/paged'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Download } from '@element-plus/icons-vue'
 import { computed, onMounted, ref } from 'vue'
-import { downloadOrders, type Order, orderApi, type OrderDetail, type OrderFilterOptions, type ResupplyOption } from '@/api/order'
+import {
+  downloadOrders,
+  type Order,
+  orderApi,
+  type OrderDetail,
+  type OrderFilterOptions,
+  type OrderSummary,
+  type ResupplyOption,
+} from '@/api/order'
 import {
   attemptStatusLabels,
   balanceTypeLabels,
@@ -45,8 +53,15 @@ function toParams(params: Record<string, unknown>): Record<string, unknown> {
   return result
 }
 
+/** 当前筛选条件下全部订单的汇总，跟列表一起返回 */
+const summary = ref<OrderSummary | null>(null)
+
 const list = usePagedList<Order, Filters>(
-  (params) => orderApi.list(toParams(params)),
+  (params) =>
+    orderApi.list(toParams(params)).then((result) => {
+      summary.value = result.summary
+      return result
+    }),
   // 异常订单页不限时间：异常订单不管多久都要处理
   { keyword: '', mobile: '', merchant_id: '', supplier_id: '', status: '', operator: '', province: '', dates: props.abnormal ? null : recentDays() },
   20,
@@ -289,6 +304,34 @@ onMounted(async () => {
       </el-form-item>
     </el-form>
 
+    <div v-if="!props.abnormal && summary" class="summary">
+      <div class="summary-item">
+        <div class="summary-label">订单数</div>
+        <div class="summary-value">{{ summary.order_count }}</div>
+        <div class="summary-sub">成功 {{ summary.success_count }} · 失败 {{ summary.failed_count }} · 处理中 {{ summary.processing_count }}</div>
+      </div>
+      <div class="summary-item">
+        <div class="summary-label">成功率</div>
+        <div class="summary-value">{{ summary.success_rate === null ? '-' : `${summary.success_rate}%` }}</div>
+        <div class="summary-sub">成功 /（成功 + 失败）</div>
+      </div>
+      <div class="summary-item">
+        <div class="summary-label">成本（元）</div>
+        <div class="summary-value">{{ summary.cost }}</div>
+        <div class="summary-sub">成功订单扣款 {{ summary.amount }}</div>
+      </div>
+      <div class="summary-item">
+        <div class="summary-label">利润（元）</div>
+        <div class="summary-value" :class="summary.profit.startsWith('-') ? 'loss' : 'gain'">{{ summary.profit }}</div>
+        <div class="summary-sub">成功订单的扣款 − 成本</div>
+      </div>
+      <div class="summary-item">
+        <div class="summary-label">平均耗时</div>
+        <div class="summary-value">{{ formatDuration(summary.avg_duration) }}</div>
+        <div class="summary-sub">成功订单：下单到成功</div>
+      </div>
+    </div>
+
     <el-table v-loading="loading" :data="rows" border>
       <el-table-column prop="order_no" label="平台订单号" width="210" />
       <el-table-column prop="merchant_name" label="商户" min-width="110" />
@@ -503,6 +546,32 @@ onMounted(async () => {
 
 .gain {
   color: #67c23a;
+}
+
+.summary {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.summary-item {
+  padding: 12px 16px;
+  background: #f5f7fa;
+  border-radius: 4px;
+}
+
+.summary-label,
+.summary-sub {
+  color: #909399;
+  font-size: 12px;
+}
+
+.summary-value {
+  margin: 4px 0;
+  font-size: 22px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 .loss {

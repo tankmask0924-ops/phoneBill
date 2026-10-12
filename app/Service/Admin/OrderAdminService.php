@@ -32,6 +32,7 @@ use App\Service\FiltersByDateRange;
 use App\Service\Order\OrderDispatcher;
 use App\Service\Order\OrderProcessService;
 use App\Service\Product\ProductRouteService;
+use App\Service\Product\ProductStatsService;
 use App\Support\RedisLock;
 use Carbon\CarbonInterface;
 use Hyperf\Database\Model\Builder;
@@ -120,10 +121,10 @@ class OrderAdminService extends AbstractService
         $perPage = min(self::MAX_PER_PAGE, max(1, (int) ($query['per_page'] ?? 20)));
         $builder = $this->filtered($query);
 
-        $total = (clone $builder)->count();
+        $summary = $this->summary($builder);
         $orders = $builder->orderByDesc('id')->forPage($page, $perPage)->get()->all();
 
-        return ['data' => $this->formatMany($orders), 'total' => $total, 'page' => $page, 'per_page' => $perPage];
+        return ['data' => $this->formatMany($orders), 'total' => $summary['order_count'], 'page' => $page, 'per_page' => $perPage, 'summary' => $summary];
     }
 
     /**
@@ -377,6 +378,40 @@ class OrderAdminService extends AbstractService
         ], $ip);
 
         return $this->detail($order->id);
+    }
+
+    /**
+     * 当前筛选条件下全部订单（不只是这一页）的汇总：成功率 = 成功 /（成功 + 失败），成本、利润、扣款合计和平均耗时只算成功的订单。
+     *
+     * @return array{order_count: int, success_count: int, failed_count: int, processing_count: int, success_rate: null|string, amount: string, cost: string, profit: string, avg_duration: null|int}
+     */
+    private function summary(Builder $builder): array
+    {
+        $row = (clone $builder)->selectRaw(
+            "count(*) as order_count,
+            coalesce(sum(status = 'success'), 0) as success_count,
+            coalesce(sum(status = 'failed'), 0) as failed_count,
+            coalesce(sum(case when status = 'success' then sale_price end), 0) as amount,
+            coalesce(sum(case when status = 'success' then cost_price end), 0) as cost,
+            coalesce(sum(case when status = 'success' then profit end), 0) as profit,
+            avg(case when status = 'success' and finished_at is not null then timestampdiff(second, created_at, finished_at) end) as avg_duration"
+        )->toBase()->first();
+        $orders = (int) $row->order_count;
+        $success = (int) $row->success_count;
+        $failed = (int) $row->failed_count;
+
+        return [
+            'order_count' => $orders,
+            'success_count' => $success,
+            'failed_count' => $failed,
+            // 充值中、等待中、异常
+            'processing_count' => $orders - $success - $failed,
+            'success_rate' => ProductStatsService::rate($success, $failed),
+            'amount' => bcadd((string) $row->amount, '0', 2),
+            'cost' => bcadd((string) $row->cost, '0', 2),
+            'profit' => bcadd((string) $row->profit, '0', 2),
+            'avg_duration' => $row->avg_duration === null ? null : (int) round((float) $row->avg_duration),
+        ];
     }
 
     private function findOrFail(int $id): Order

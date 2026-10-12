@@ -41,6 +41,21 @@ export interface Order {
   duration: number | null
 }
 
+/** 订单列表汇总：成功率 = 成功 /（成功 + 失败）；扣款、成本、利润、平均耗时只算成功的订单 */
+export interface OrderSummary {
+  order_count: number
+  success_count: number
+  failed_count: number
+  /** 充值中、等待中、异常 */
+  processing_count: number
+  success_rate: string | null
+  amount: string
+  cost: string
+  profit: string
+  /** 秒 */
+  avg_duration: number | null
+}
+
 export interface OrderAttempt {
   id: number
   attempt_no: string
@@ -93,7 +108,8 @@ export interface OrderFilterOptions {
 }
 
 export const orderApi = {
-  list: (params: Query) => http.get<Paged<Order>>('/admin/orders', params),
+  /** summary 是当前筛选条件下全部订单（不只这一页）的汇总 */
+  list: (params: Query) => http.get<Paged<Order> & { summary: OrderSummary }>('/admin/orders', params),
   filterOptions: () => http.get<OrderFilterOptions>('/admin/orders/filter-options'),
   detail: (id: number) => http.get<OrderDetail>(`/admin/orders/${id}`),
   /** 人工查单，query_results 是这次每个处理中的提交查到的结果 */

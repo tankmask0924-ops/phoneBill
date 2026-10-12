@@ -100,6 +100,44 @@ class OrderControllerTest extends HttpTestCase
         $this->assertSame(403, $this->jsonRequest('POST', "/admin/orders/{$abnormal->id}/success", $token, ['remark' => 'x'])->getStatusCode());
     }
 
+    public function testListSummaryCoversAllMatchingOrders()
+    {
+        $token = $this->loginAs($this->createAdminWithPermissions(['order.view']));
+        [$merchant, $product, $sp] = $this->fixture();
+        $now = time();
+        foreach ([10 => '1.50', 20 => '1.30'] as $seconds => $profit) {
+            $order = $this->createOrder($merchant, $product, $sp, Order::STATUS_SUCCESS);
+            Order::where('id', $order->id)->update([
+                'profit' => $profit,
+                'created_at' => date('Y-m-d H:i:s', $now - $seconds),
+                'finished_at' => date('Y-m-d H:i:s', $now),
+            ]);
+        }
+        $this->createOrder($merchant, $product, $sp, Order::STATUS_FAILED);
+        $this->createOrder($merchant, $product, $sp, Order::STATUS_PROCESSING);
+
+        // 每页 1 条，汇总仍然是全部 4 单
+        $list = $this->body($this->jsonRequest('GET', "/admin/orders?merchant_id={$merchant->id}&per_page=1", $token));
+        $this->assertCount(1, $list['data']);
+        $this->assertSame(4, $list['total']);
+        $this->assertSame([
+            'order_count' => 4,
+            'success_count' => 2,
+            'failed_count' => 1,
+            'processing_count' => 1,
+            'success_rate' => '66.66',
+            'amount' => '199.00',
+            'cost' => '196.00',
+            'profit' => '2.80',
+            'avg_duration' => 15,
+        ], $list['summary']);
+
+        // 跟着筛选条件走；筛不出订单时都是 0，成功率、耗时为空
+        $this->assertSame(1, $this->body($this->jsonRequest('GET', "/admin/orders?merchant_id={$merchant->id}&status=failed", $token))['summary']['failed_count']);
+        $empty = $this->body($this->jsonRequest('GET', '/admin/orders?merchant_id=999999999', $token))['summary'];
+        $this->assertSame(['order_count' => 0, 'success_rate' => null, 'profit' => '0.00', 'avg_duration' => null], array_intersect_key($empty, array_flip(['order_count', 'success_rate', 'profit', 'avg_duration'])));
+    }
+
     public function testConfirmAbnormalOrders()
     {
         $token = $this->loginAs($this->createAdminWithPermissions(['order.view', 'order.manage']));
