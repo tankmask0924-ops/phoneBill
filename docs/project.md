@@ -175,9 +175,9 @@ stateDiagram-v2
 |---|---|---|
 | 商品中心 | 供应商、供应商商品、商品分类、平台商品、商品统计 | 一 / 四（商品统计） |
 | 风控 | 号段查询、号码黑名单、通道维护 | 一（号段查询） / 二 |
-| 商户中心 | 商户、商户商品与价格、资金流水 | 二 |
+| 商户中心 | 商户、商户商品与价格、资金流水、加款申请（含付款账号审核）、收款配置 | 二 |
 | 订单中心 | 订单列表、异常订单 | 二 |
-| 系统管理 | 管理员、角色权限、操作日志（已有） | — |
+| 系统管理 | 管理员、角色权限、操作日志（已有）、存储配置 | — |
 
 ### 4.2 供应商
 
@@ -222,6 +222,27 @@ stateDiagram-v2
 - **余额调整**：加款/扣款，必须填备注，记录操作人。
 - **资金流水**：所有商户的余额变动，显示关联订单的手机号；可按平台订单号（不限日期）、商户、类型、时间筛选。
 
+### 4.6.1 加款申请与收款配置
+
+商户打款给平台后在商户后台提交加款申请，平台核对到账后审核入账，替代线下沟通后人工「余额调整」。
+
+```mermaid
+flowchart LR
+    A["平台：建收款账户<br/>分配给商户"] --> C
+    B["商户：添加付款账号"] --> B2["平台：审核付款账号"] --> C["商户：打款后提交申请<br/>选付款账号、收款账户<br/>填金额、打款时间、备注、上传凭证"]
+    C --> D{"平台审核"}
+    D -->|通过| E["按申请金额加款<br/>写资金流水"]
+    D -->|驳回（写原因）| F["商户看到原因，重新提交"]
+```
+
+- **账户类型**：收款账户、付款账号都只支持**支付宝**和**对公账户**。对公账号只能是 6~32 位数字（空格自动去掉），开户行必填；支付宝填实名和账号（手机号或邮箱）。
+- **收款配置**（`funding.config`）：平台的收款账户，新增、编辑、启用 / 停用（不提供删除），按账户「分配商户」（多选）。商户只能看到、选到分配给自己且启用的账户。
+- **付款账号**：商户自己添加，新增和修改后都是**待审核**，审核通过才能用来提交申请；平台审核（`funding.review`）通过或驳回（驳回要写原因，商户能看到）。审核按状态做条件更新，审的一定是商户最后提交的内容。商户可以删除付款账号，每个商户最多 20 个。
+- **加款申请**：金额（最多两位小数）、付款账号（审核通过的）、收款账户（分配的）、打款时间（不能晚于现在）、打款备注（选填）、凭证图片 1~5 张（JPG / PNG / WebP，每张 ≤ 5MB）。付款账号和收款账户存**快照**，之后被修改、删除、停用都不影响这笔申请。
+- **审核**（`funding.review`）：**只能按申请金额入账**，金额不对就驳回让商户重新提交；通过时在同一个事务里改状态、加余额、写一条「加款」资金流水（备注「加款申请 #ID 审核通过」，记操作人），状态按条件更新，重复点或两人同时审都只会入账一次；驳回必须写原因。待审核的列表不限日期。
+- **凭证存储**：腾讯云 COS，在「系统管理 - 存储配置」填 SecretId / SecretKey / 地域 / 存储桶 / 路径前缀（`setting.manage`），可以「测试连接」（上传再删除一个测试文件）。存储桶设为私有，只存对象 key，查看时生成 10 分钟有效的签名链接。COS 签名按官方文档自己实现（`App\Storage\CosClient`），没有引入 SDK。凭证 key 按商户分目录，提交申请时只认自己目录下的。
+- 商户的操作（付款账号增删改、提交申请）记到 `merchant` 日志渠道；平台的操作记操作日志。
+
 ### 4.7 订单中心
 
 - **订单列表**：按商户、平台/商户订单号、手机号、商品、运营商、省份、状态、供应商、时间筛选；支持导出。
@@ -241,6 +262,8 @@ stateDiagram-v2
 | 订单记录 | 平台订单号、商户订单号、手机号、商品、运营商、扣款金额、状态、下单/完成时间；可筛选、看详情 |
 | 资金流水 | 类型（加款 / 下单扣款 / 失败退款 / 人工调整）、金额、变动后余额、关联订单号、手机号、时间；可按平台订单号或商户订单号筛选（不限日期） |
 | 账户 | 修改密码；查看 AppKey、回调地址、已开通的商品和价格、接入文档；修改 IP 白名单、重置 AppSecret |
+| 加款申请 | 提交加款申请（选收款账户、付款账号，填金额、打款时间、备注，上传凭证），查看审核结果和驳回原因（见 4.6.1） |
+| 付款账号 | 添加、修改（改完重新审核）、删除付款账号，查看审核状态和驳回原因 |
 
 - 登录体系与平台后台完全分开：独立账号表、独立 JWT 密钥 `MERCHANT_JWT_SECRET`、路由前缀 `/merchant`。
 - 所有查询在 Service 层强制按当前登录商户过滤，不信任前端传来的商户 ID。
@@ -305,6 +328,11 @@ erDiagram
 | `merchant_products` | 商户开通的商品 | `merchant_id`、`product_id`、`status`；唯一 `(merchant_id, product_id)` |
 | `merchant_product_prices` | 商户各运营商价格 | `merchant_product_id`、`operator`、`price`；唯一 `(merchant_product_id, operator)` |
 | `merchant_balance_logs` | 资金流水 | `merchant_id`、`type`、`amount`（有正负）、`balance_after`、`order_id`、`remark`、`admin_id` |
+| `receiving_accounts` | 平台收款账户 | `type`（`alipay` / `bank`）、`account_name`、`account_no`、`bank_name`、`status`、`remark` |
+| `merchant_receiving_accounts` | 收款账户分配给商户 | `merchant_id`、`receiving_account_id`；唯一 `(merchant_id, receiving_account_id)` |
+| `merchant_payer_accounts` | 商户付款账号 | `merchant_id`、`type`、`account_name`、`account_no`、`bank_name`、`status`（`pending` / `approved` / `rejected`）、`reject_reason`、`reviewed_by`、`reviewed_at` |
+| `merchant_funding_requests` | 加款申请 | `merchant_id`、`amount`、付款账号和收款账户的 id 与快照、`paid_at`、`remark`、`vouchers`（对象 key 列表）、`status`、`review_remark`、`reviewed_by`、`reviewed_at`、`balance_log_id` |
+| `system_settings` | 系统设置 | `key`（唯一）、`value`（JSON，整段加密） |
 | **订单** | | |
 | `orders` | 订单 | `order_no`（唯一）、`merchant_id`、`merchant_order_no`、`product_id`、`product_name`、`mobile`、`operator`、`province`、`face_value`、`sale_price`、`cost_price`、`supplier_id`、`supplier_product_id`、`status`、`fail_reason`、`notify_url`、`notify_status`、`finished_at`；唯一 `(merchant_id, merchant_order_no)` |
 | `order_attempts` | 每次提交给供应商的记录 | `order_id`、`supplier_id`、`supplier_product_id`、`supplier_order_no`、`cost_price`、`status`、`request`、`response`、`submitted_at`、`finished_at` |
@@ -419,6 +447,9 @@ app/Supplier/
 | 商户 | `merchant.view` | `merchant.manage` |
 | 商户商品与价格 | `merchant.view` | `merchant.price` |
 | 商户余额调整 | — | `merchant.balance` |
+| 加款申请（含付款账号审核） | `funding.view` | `funding.review`（审核通过即入账） |
+| 收款配置 | `funding.view` | `funding.config` |
+| 存储配置 | — | `setting.manage` |
 | 订单 | `order.view` | `order.manage`（查单、处理异常、重发通知、重新提交） |
 | 冲正 | — | `order.reverse` |
 

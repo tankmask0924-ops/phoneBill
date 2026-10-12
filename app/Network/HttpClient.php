@@ -78,4 +78,18 @@ class HttpClient
 
         return ['status' => $response->getStatusCode(), 'body' => (string) $response->getBody()];
     }
+
+    /**
+     * 任意方法、原样请求体（对象存储上传 / 删除用），异常约定同 postJson。
+     *
+     * @param array<string, string> $headers
+     * @return array{status: int, body: string}
+     */
+    public function send(string $method, string $url, array $headers, string $body = '', float $timeoutSeconds = 10.0): array
+    {
+        $response = $this->clientFactory->create(['timeout' => $timeoutSeconds, 'connect_timeout' => 3.0, 'http_errors' => false])
+            ->request($method, $url, ['body' => $body, 'headers' => $headers]);
+
+        return ['status' => $response->getStatusCode(), 'body' => (string) $response->getBody()];
+    }
 }

@@ -43,3 +43,16 @@ export const balanceTypeLabels: LabelMap = {
   order_pay: { label: '下单扣款' },
   order_refund: { label: '失败退款', type: 'success' },
 }
+
+/** 加款申请、付款账号的审核状态 */
+export const fundingStatusLabels: LabelMap = {
+  pending: { label: '待审核', type: 'warning' },
+  approved: { label: '已通过', type: 'success' },
+  rejected: { label: '已驳回', type: 'danger' },
+}
+
+/** 付款账号、收款账户类型 */
+export const paymentAccountTypeLabels: LabelMap = {
+  alipay: { label: '支付宝' },
+  bank: { label: '对公账户' },
+}

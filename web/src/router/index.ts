@@ -45,6 +45,24 @@ const router = createRouter({
           meta: { title: '异常订单' },
         },
         {
+          path: 'merchant/funding-requests',
+          name: 'funding-requests',
+          component: () => import('@/views/merchant/FundingRequestView.vue'),
+          meta: { title: '加款申请' },
+        },
+        {
+          path: 'merchant/receiving-accounts',
+          name: 'receiving-accounts',
+          component: () => import('@/views/merchant/ReceivingAccountView.vue'),
+          meta: { title: '收款配置' },
+        },
+        {
+          path: 'system/storage',
+          name: 'storage-setting',
+          component: () => import('@/views/system/StorageSettingView.vue'),
+          meta: { title: '存储配置' },
+        },
+        {
           path: 'product/suppliers',
           name: 'suppliers',
           component: () => import('@/views/product/SupplierListView.vue'),

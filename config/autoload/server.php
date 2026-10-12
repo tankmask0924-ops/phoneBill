@@ -41,6 +41,8 @@ return [
         Constant::OPTION_MAX_REQUEST => 100000,
         Constant::OPTION_SOCKET_BUFFER_SIZE => 2 * 1024 * 1024,
         Constant::OPTION_BUFFER_OUTPUT_SIZE => 2 * 1024 * 1024,
+        // 商户上传打款凭证（单张最多 5MB），默认 2MB 不够
+        Constant::OPTION_PACKAGE_MAX_LENGTH => 8 * 1024 * 1024,
     ],
     'callbacks' => [
         Event::ON_WORKER_START => [Hyperf\Framework\Bootstrap\WorkerStartCallback::class, 'onWorkerStart'],

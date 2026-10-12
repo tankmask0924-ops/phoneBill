@@ -99,6 +99,19 @@ export function provincesLabel(provinces: string[]): string {
   return provinces.includes('*') ? '全国' : provinces.join('、')
 }
 
+/** 加款申请、商户付款账号的审核状态 */
+export const fundingStatusLabels: LabelMap = {
+  pending: { label: '待审核', type: 'warning' },
+  approved: { label: '已通过', type: 'success' },
+  rejected: { label: '已驳回', type: 'danger' },
+}
+
+/** 收款账户、付款账号类型，见 App\Enum\PaymentAccountType */
+export const paymentAccountTypeLabels: LabelMap = {
+  alipay: { label: '支付宝' },
+  bank: { label: '对公账户' },
+}
+
 /** 权限 / 操作日志的模块，见 AdminBootstrapService::KNOWN_PERMISSIONS 的 module 和权限编码前缀 */
 export const moduleLabels: LabelMap = {
   system: { label: '系统设置' },
@@ -106,6 +119,8 @@ export const moduleLabels: LabelMap = {
   risk: { label: '风控' },
   merchant: { label: '商户中心' },
   order: { label: '订单中心' },
+  funding: { label: '加款' },
+  setting: { label: '系统配置' },
   admin_user: { label: '管理员账号' },
   role: { label: '角色权限' },
 }
@@ -154,6 +169,16 @@ export const operationActionLabels: LabelMap = {
   reverse_order: { label: '订单冲正' },
   resend_order_notify: { label: '重发商户通知' },
   resubmit_order: { label: '失败订单重新提交' },
+  create_receiving_account: { label: '新建收款账户' },
+  update_receiving_account: { label: '修改收款账户' },
+  enable_receiving_account: { label: '启用收款账户' },
+  disable_receiving_account: { label: '停用收款账户' },
+  assign_receiving_account: { label: '分配收款账户' },
+  approve_payer_account: { label: '付款账号审核通过' },
+  reject_payer_account: { label: '付款账号驳回' },
+  approve_funding_request: { label: '加款申请通过（入账）' },
+  reject_funding_request: { label: '加款申请驳回' },
+  update_storage_setting: { label: '修改存储配置' },
   create_merchant_user: { label: '开通商户后台账号' },
   enable_merchant_user: { label: '启用商户后台账号' },
   disable_merchant_user: { label: '禁用商户后台账号' },

@@ -128,6 +128,10 @@ npm run build        # 产物在 merchant-web/dist，部署在 /merchant/ 路径
 | GET | `/admin/products`、`/admin/products/supplier-product-options`、`/admin/product-stats`、`/admin/product-categories` | `product.view` |
 | POST/PUT | `/admin/products`、`/{id}`、`/{id}/status` | `product.manage` |
 | POST/PUT/DELETE | `/admin/product-categories`、`/{id}` | `product.manage` |
+| GET | `/admin/funding/requests`、`/requests/{id}`、`/payer-accounts`、`/merchant-options`、`/admin/receiving-accounts` | `funding.view` |
+| POST | `/admin/funding/requests/{id}/approve`、`/requests/{id}/reject`、`/payer-accounts/{id}/approve`、`/payer-accounts/{id}/reject` | `funding.review` |
+| POST/PUT | `/admin/receiving-accounts`、`/{id}`、`/{id}/status`、`/{id}/merchants` | `funding.config` |
+| GET/PUT/POST | `/admin/settings/storage`、`/admin/settings/storage/test` | `setting.manage` |
 | GET | `/admin/segments/lookup` | `risk.view` |
 | GET | `/admin/risk/blacklist`、`/admin/risk/maintenances`、`/admin/risk/maintenances/options` | `risk.view` |
 | POST/DELETE | `/admin/risk/blacklist`、`/admin/risk/blacklist/{id}`、`/admin/risk/maintenances`、`/{id}/finish` | `risk.manage` |
@@ -146,6 +150,7 @@ npm run build        # 产物在 merchant-web/dist，部署在 /merchant/ 路径
 | GET/PUT | `/merchant/auth/me`、`/merchant/auth/password` | 商户登录 |
 | GET | `/merchant/dashboard`、`/orders`、`/orders/{id}`、`/balance-logs`、`/account` | 商户登录，只能看自己的数据 |
 | PUT/POST | `/merchant/account/ip-whitelist`、`/merchant/account/reset-secret` | 商户登录，要再输一次登录密码 |
+| GET/POST/PUT/DELETE | `/merchant/payer-accounts`、`/{id}`；`/merchant/receiving-accounts`；`/merchant/funding-vouchers`（上传凭证）；`/merchant/funding-requests`、`/{id}` | 商户登录，只能看、改自己的 |
 
 ## 部署要点
 

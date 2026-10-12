@@ -1,4 +1,4 @@
-import { Box, CircleClose, DataLine, Document, Folder, Goods, HomeFilled, Key, List, Lock, Money, OfficeBuilding, Search, Setting, Shop, ShoppingBag, Tickets, Tools, UserFilled, Warning } from '@element-plus/icons-vue'
+import { Box, CircleClose, CreditCard, DataLine, Document, Folder, Goods, HomeFilled, Key, List, Lock, Money, OfficeBuilding, Picture, Search, Setting, Shop, ShoppingBag, Tickets, Tools, UserFilled, Wallet, Warning } from '@element-plus/icons-vue'
 import type { MenuItem } from '@/types'
 
 /** permission 对应后端 #[RequiresPermission] 的查看权限，没有权限的菜单不显示 */
@@ -32,6 +32,8 @@ export const menus: MenuItem[] = [
     children: [
       { path: '/merchant/merchants', title: '商户', icon: Tickets, permission: 'merchant.view' },
       { path: '/merchant/balance-logs', title: '资金流水', icon: Money, permission: 'merchant.view' },
+      { path: '/merchant/funding-requests', title: '加款申请', icon: Wallet, permission: 'funding.view' },
+      { path: '/merchant/receiving-accounts', title: '收款配置', icon: CreditCard, permission: 'funding.view' },
     ],
   },
   {
@@ -52,6 +54,7 @@ export const menus: MenuItem[] = [
       { path: '/system/admin-users', title: '管理员账号', icon: UserFilled, permission: 'admin_user.view' },
       { path: '/system/roles', title: '角色权限', icon: Key, permission: 'role.view' },
       { path: '/system/operation-logs', title: '操作日志', icon: Document, permission: 'operation_log.view' },
+      { path: '/system/storage', title: '存储配置', icon: Picture, permission: 'setting.manage' },
     ],
   },
 ]

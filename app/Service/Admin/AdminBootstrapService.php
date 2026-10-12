@@ -49,6 +49,7 @@ class AdminBootstrapService extends AbstractService
         ['code' => 'role.view', 'module' => 'system', 'name' => '角色权限查看', 'type' => 'action'],
         ['code' => 'role.manage', 'module' => 'system', 'name' => '角色权限管理', 'type' => 'action'],
         ['code' => 'operation_log.view', 'module' => 'system', 'name' => '操作日志查看', 'type' => 'action'],
+        ['code' => 'setting.manage', 'module' => 'system', 'name' => '系统配置（图片存储）', 'type' => 'action'],
         ['code' => 'supplier.view', 'module' => 'product', 'name' => '供应商查看', 'type' => 'action'],
         ['code' => 'supplier.manage', 'module' => 'product', 'name' => '供应商管理', 'type' => 'action'],
         ['code' => 'supplier_product.view', 'module' => 'product', 'name' => '供应商商品查看', 'type' => 'action'],
@@ -61,6 +62,9 @@ class AdminBootstrapService extends AbstractService
         ['code' => 'merchant.manage', 'module' => 'merchant', 'name' => '商户管理（资料、密钥、启停）', 'type' => 'action'],
         ['code' => 'merchant.price', 'module' => 'merchant', 'name' => '商户商品与价格', 'type' => 'action'],
         ['code' => 'merchant.balance', 'module' => 'merchant', 'name' => '商户加款扣款', 'type' => 'action'],
+        ['code' => 'funding.view', 'module' => 'merchant', 'name' => '加款申请查看（含付款账号、收款配置）', 'type' => 'action'],
+        ['code' => 'funding.review', 'module' => 'merchant', 'name' => '加款申请审核（入账）、付款账号审核', 'type' => 'action'],
+        ['code' => 'funding.config', 'module' => 'merchant', 'name' => '收款配置（收款账户、分配给商户）', 'type' => 'action'],
         ['code' => 'order.view', 'module' => 'order', 'name' => '订单查看（含导出）', 'type' => 'action'],
         ['code' => 'order.manage', 'module' => 'order', 'name' => '订单处理（查单、异常订单置成功/失败、重发通知）', 'type' => 'action'],
         ['code' => 'order.reverse', 'module' => 'order', 'name' => '订单冲正（成功改失败并退款）', 'type' => 'action'],
@@ -84,7 +88,7 @@ class AdminBootstrapService extends AbstractService
         ],
         '财务' => [
             'remark' => '资金与对账',
-            'permissions' => ['operation_log.view', 'merchant.view', 'merchant.balance', 'order.view'],
+            'permissions' => ['operation_log.view', 'merchant.view', 'merchant.balance', 'order.view', 'funding.view', 'funding.review', 'funding.config'],
         ],
     ];
 
