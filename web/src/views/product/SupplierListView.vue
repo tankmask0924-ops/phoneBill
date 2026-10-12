@@ -2,8 +2,8 @@
 import StatusTag from '@/components/StatusTag.vue'
 import { usePagedList } from '@/utils/paged'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
-import { Plus } from '@element-plus/icons-vue'
-import { computed, onMounted, reactive, ref } from 'vue'
+import { Plus, Refresh } from '@element-plus/icons-vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { type Supplier, supplierApi, type SupplierDriver } from '@/api/product'
 import { supplierStatusLabels, toOptions } from '@/utils/labels'
 import { usePermissionStore } from '@/stores/permission'
@@ -18,6 +18,32 @@ const list = usePagedList<Supplier, { keyword: string; status: string }>(supplie
 const { rows, total, page, perPage, loading, filters } = list
 
 const drivers = ref<SupplierDriver[]>([])
+
+// ---- 余额：列表加载后逐个实时查，同时最多 3 个 ----
+type BalanceState = { loading: boolean; supported?: boolean; balance?: string | null; error?: string | null }
+const balances = reactive<Record<number, BalanceState>>({})
+const balanceLoading = ref(false)
+
+async function loadBalances() {
+  const ids = rows.value.map((r) => r.id)
+  ids.forEach((id) => (balances[id] = { loading: true }))
+  balanceLoading.value = true
+  let next = 0
+  const worker = async () => {
+    while (next < ids.length) {
+      const id = ids[next++]
+      try {
+        balances[id] = { loading: false, ...(await supplierApi.balance(id)) }
+      } catch {
+        balances[id] = { loading: false, error: '查询失败' }
+      }
+    }
+  }
+  await Promise.all([worker(), worker(), worker()])
+  balanceLoading.value = false
+}
+
+watch(rows, loadBalances)
 
 const dialogVisible = ref(false)
 const editing = ref<Supplier | null>(null)
@@ -157,7 +183,10 @@ onMounted(async () => {
           <el-button type="primary" native-type="submit">查询</el-button>
         </el-form-item>
       </el-form>
-      <el-button v-if="canManage" type="primary" :icon="Plus" @click="openCreate">新建供应商</el-button>
+      <div>
+        <el-button :icon="Refresh" :loading="balanceLoading" @click="loadBalances">刷新余额</el-button>
+        <el-button v-if="canManage" type="primary" :icon="Plus" @click="openCreate">新建供应商</el-button>
+      </div>
     </div>
 
     <el-table v-loading="loading" :data="rows" border>
@@ -175,6 +204,16 @@ onMounted(async () => {
           <el-tooltip v-if="!row.notify_url_generated" content="还没在「系统管理 - 系统配置」填回调域名，暂用以前手填的地址" placement="top">
             <el-tag size="small" type="warning" class="copy">待配置</el-tag>
           </el-tooltip>
+        </template>
+      </el-table-column>
+      <el-table-column label="余额（元）" width="130" align="right">
+        <template #default="{ row }">
+          <span v-if="!balances[row.id] || balances[row.id].loading" class="muted">查询中…</span>
+          <el-tooltip v-else-if="balances[row.id].error" :content="balances[row.id].error ?? ''" placement="top">
+            <span class="error">查询失败</span>
+          </el-tooltip>
+          <span v-else-if="!balances[row.id].supported" class="muted">不支持</span>
+          <b v-else>{{ balances[row.id].balance }}</b>
         </template>
       </el-table-column>
       <el-table-column prop="product_count" label="商品数" width="80" align="center" />
@@ -274,6 +313,15 @@ onMounted(async () => {
 
 .warn {
   color: #e6a23c;
+}
+
+.muted {
+  color: #909399;
+}
+
+.error {
+  color: #f56c6c;
+  cursor: help;
 }
 
 .tip {

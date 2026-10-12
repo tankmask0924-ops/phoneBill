@@ -121,7 +121,7 @@ npm run build        # 产物在 merchant-web/dist，部署在 /merchant/ 路径
 | GET | `/admin/roles`、`/admin/roles/permissions` | `role.view` |
 | POST/PUT/DELETE | `/admin/roles`、`/admin/roles/{id}` | `role.manage` |
 | GET | `/admin/operation-logs` | `operation_log.view` |
-| GET | `/admin/suppliers`、`/admin/suppliers/meta` | `supplier.view` |
+| GET | `/admin/suppliers`、`/admin/suppliers/meta`、`/admin/suppliers/{id}/balance`（实时余额） | `supplier.view` |
 | POST/PUT | `/admin/suppliers`、`/{id}`、`/{id}/status` | `supplier.manage` |
 | GET | `/admin/supplier-products`、`/admin/supplier-products/supplier-options` | `supplier_product.view` |
 | POST/PUT | `/admin/supplier-products`、`/{id}`、`/{id}/status` | `supplier_product.manage` |

@@ -56,6 +56,18 @@ class SupplierController extends AbstractController
         return $this->supplierAdminService->meta();
     }
 
+    /**
+     * 实时查供应商余额。
+     */
+    #[Middleware(AdminAuthMiddleware::class)]
+    #[Middleware(AdminPermissionMiddleware::class)]
+    #[RequiresPermission('supplier.view')]
+    #[GetMapping(path: '{id:\d+}/balance')]
+    public function balance(int $id): array
+    {
+        return $this->supplierAdminService->balance($id);
+    }
+
     #[Middleware(AdminAuthMiddleware::class)]
     #[Middleware(AdminPermissionMiddleware::class)]
     #[RequiresPermission('supplier.manage')]

@@ -244,6 +244,16 @@ class SupplierAdminService extends AbstractService
     }
 
     /**
+     * 实时查供应商那边的余额（列表打开时逐个查），见 SupplierGateway::balance()。
+     *
+     * @return array{supported: bool, balance: null|string, error: null|string}
+     */
+    public function balance(int $id): array
+    {
+        return $this->supplierGateway->balance($this->findOrFail($id));
+    }
+
+    /**
      * 解密后的完整接口参数（含密钥），只给对接供应商时用，不要返回给前端。
      *
      * @return array<string, string>

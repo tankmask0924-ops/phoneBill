@@ -57,6 +57,9 @@ export const supplierApi = {
   create: (data: SupplierForm) => http.post<Supplier>('/admin/suppliers', data),
   update: (id: number, data: Partial<SupplierForm>) => http.put<Supplier>(`/admin/suppliers/${id}`, data),
   changeStatus: (id: number, status: string) => http.post<Supplier>(`/admin/suppliers/${id}/status`, { status }),
+  /** 实时查余额；查询出错不报错，放在 error 里 */
+  balance: (id: number) =>
+    http.get<{ supported: boolean; balance: string | null; error: string | null }>(`/admin/suppliers/${id}/balance`),
 }
 
 /** 供应商商品：App\Controller\Admin\SupplierProductController */

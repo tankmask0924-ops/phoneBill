@@ -141,6 +141,25 @@ class SupplierControllerTest extends HttpTestCase
         $this->assertSame(404, $this->jsonRequest('PUT', '/admin/suppliers/999999999', $token, ['name' => 'x'])->getStatusCode());
     }
 
+    public function testBalance()
+    {
+        $token = $this->loginAs($this->createAdminWithPermissions(['supplier.view']));
+        $supplier = $this->createSupplier();
+
+        $this->assertSame(['supported' => true, 'balance' => '99999.00', 'error' => null], $this->body($this->jsonRequest('GET', "/admin/suppliers/{$supplier->id}/balance", $token)));
+
+        // 上游出错、驱动没登记：不报 500，错误放在 error 里
+        $this->setMockResult($supplier, 'timeout');
+        $failed = $this->body($this->jsonRequest('GET', "/admin/suppliers/{$supplier->id}/balance", $token));
+        $this->assertNull($failed['balance']);
+        $this->assertStringContainsString('模拟超时', $failed['error']);
+        $supplier->update(['driver' => 'no_such_driver']);
+        $this->assertNotNull($this->body($this->jsonRequest('GET', "/admin/suppliers/{$supplier->id}/balance", $token))['error']);
+
+        $this->assertSame(404, $this->jsonRequest('GET', '/admin/suppliers/999999999/balance', $token)->getStatusCode());
+        $this->assertSame(403, $this->jsonRequest('GET', "/admin/suppliers/{$supplier->id}/balance", $this->loginAs($this->createAdminWithPermissions(['order.view'])))->getStatusCode());
+    }
+
     public function testChangeStatusAndPermissions()
     {
         $supplier = $this->createSupplier();

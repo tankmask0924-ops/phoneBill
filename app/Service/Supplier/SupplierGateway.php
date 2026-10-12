@@ -88,6 +88,24 @@ class SupplierGateway extends AbstractService
     }
 
     /**
+     * 查我们在供应商那边的余额。驱动不支持返回 supported=false；查询出错不抛异常，放在 error 里。
+     *
+     * @return array{supported: bool, balance: null|string, error: null|string}
+     */
+    public function balance(Supplier $supplier): array
+    {
+        try {
+            $balance = $this->driver($supplier)->balance($this->driverConfig($supplier));
+            $result = ['supported' => $balance !== null, 'balance' => $balance, 'error' => null];
+        } catch (Throwable $e) {
+            $result = ['supported' => true, 'balance' => null, 'error' => mb_substr($e->getMessage(), 0, 255)];
+        }
+        $this->logger()->info('balance', ['supplier' => $supplier->code] + $result);
+
+        return $result;
+    }
+
+    /**
      * 驱动是否提供查询上游商品。
      */
     public function supportsUpstreamProducts(Supplier $supplier): bool
