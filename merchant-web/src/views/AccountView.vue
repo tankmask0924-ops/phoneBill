@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { ElMessage } from 'element-plus'
 import { onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { type Account, portalApi } from '@/api/portal'
-import { labelOf, operatorLabels } from '@/utils/labels'
 
+const router = useRouter()
 const account = ref<Account | null>(null)
 
 // ---- 修改 IP 白名单 ----
@@ -98,19 +99,9 @@ onMounted(async () => {
       <div class="tip">修改通知地址请联系平台。接口说明请向平台索取《商户接入文档》。</div>
     </el-card>
 
-    <el-card v-if="account" shadow="never" header="可下单的商品" class="products">
-      <el-table :data="account.products" border empty-text="还没有开通商品，请联系平台">
-        <el-table-column prop="product_code" label="商品编码" width="160" />
-        <el-table-column prop="name" label="名称" min-width="140" />
-        <el-table-column label="面值" width="100" align="right">
-          <template #default="{ row }">{{ row.face_value }} 元</template>
-        </el-table-column>
-        <el-table-column label="你的价格（元）" min-width="260">
-          <template #default="{ row }">
-            <span v-for="(price, op) in row.prices" :key="op" class="price">{{ labelOf(operatorLabels, op as string) }} {{ price }}</span>
-          </template>
-        </el-table-column>
-      </el-table>
+    <el-card v-if="account" shadow="never" class="products">
+      开通的商品、价格和近 7 天成功率见
+      <el-button link type="primary" @click="router.push('/products')">可下单商品</el-button>
     </el-card>
 
     <el-dialog v-model="ipVisible" title="修改 IP 白名单" width="480px">
@@ -178,10 +169,6 @@ onMounted(async () => {
   margin-top: 16px;
 }
 
-.price {
-  margin-right: 16px;
-  white-space: nowrap;
-}
 
 .secret-form {
   margin-top: 16px;

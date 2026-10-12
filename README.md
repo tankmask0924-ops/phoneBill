@@ -148,7 +148,7 @@ npm run build        # 产物在 merchant-web/dist，部署在 /merchant/ 路径
 | POST | `/admin/merchants/{id}/users`、`/{id}/users/{userId}/status`、`/{id}/users/{userId}/password` | `merchant.manage` |
 | POST | `/merchant/auth/login` | 公开（商户后台） |
 | GET/PUT | `/merchant/auth/me`、`/merchant/auth/password` | 商户登录 |
-| GET | `/merchant/dashboard`、`/orders`、`/orders/{id}`、`/balance-logs`、`/account` | 商户登录，只能看自己的数据 |
+| GET | `/merchant/dashboard`、`/orders`、`/orders/{id}`、`/balance-logs`、`/products`（可下单商品和近 7 天统计）、`/account` | 商户登录，只能看自己的数据 |
 | PUT/POST | `/merchant/account/ip-whitelist`、`/merchant/account/reset-secret` | 商户登录，要再输一次登录密码 |
 | GET/POST/PUT/DELETE | `/merchant/payer-accounts`、`/{id}`；`/merchant/receiving-accounts`；`/merchant/funding-vouchers`（上传凭证）；`/merchant/funding-requests`、`/{id}` | 商户登录，只能看、改自己的 |
 

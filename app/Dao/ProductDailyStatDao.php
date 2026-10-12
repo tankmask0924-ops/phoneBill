@@ -35,6 +35,36 @@ class ProductDailyStatDao extends AbstractDao
     }
 
     /**
+     * 一段日期内按「商品 + 运营商」汇总。
+     *
+     * @param list<int> $productIds
+     * @return array<int, array<string, array{order_count: int, success_count: int, failed_count: int, total_duration: int}>> product_id => operator => 合计
+     */
+    public function rangeTotalsByOperator(array $productIds, string $from, string $to): array
+    {
+        if ($productIds === []) {
+            return [];
+        }
+        $rows = $this->newQuery()
+            ->whereBetween('stat_date', [$from, $to])
+            ->whereIn('product_id', $productIds)
+            ->groupBy('product_id', 'operator')
+            ->selectRaw('product_id, operator, sum(order_count) as order_count, sum(success_count) as success_count, sum(failed_count) as failed_count, sum(total_duration) as total_duration')
+            ->get();
+        $result = [];
+        foreach ($rows as $row) {
+            $result[(int) $row->product_id][(string) $row->operator] = [
+                'order_count' => (int) $row->order_count,
+                'success_count' => (int) $row->success_count,
+                'failed_count' => (int) $row->failed_count,
+                'total_duration' => (int) $row->total_duration,
+            ];
+        }
+
+        return $result;
+    }
+
+    /**
      * 每个商品某一天各运营商合起来的数字。
      *
      * @param list<int> $productIds

@@ -189,7 +189,7 @@ class MerchantPortalService extends AbstractService
     }
 
     /**
-     * 接入信息：AppKey、通知地址、IP 白名单、能买的商品和价格。AppSecret 不在这里出现。
+     * 接入信息：AppKey、通知地址、IP 白名单（能买的商品见 products()）。AppSecret 不在这里出现。
      *
      * @return array<string, mixed>
      */
@@ -201,8 +201,17 @@ class MerchantPortalService extends AbstractService
             'app_key' => $merchant->app_key,
             'notify_url' => $merchant->notify_url,
             'ip_whitelist' => $merchant->ipWhitelist(),
-            'products' => $this->catalogService->openedProducts($merchant),
         ];
+    }
+
+    /**
+     * 可下单商品：价格 + 平台整体近 7 天的成功率、平均耗时。
+     *
+     * @return array{from: string, to: string, products: list<array<string, mixed>>}
+     */
+    public function products(Merchant $merchant): array
+    {
+        return $this->catalogService->openedProductsWithStats($merchant);
     }
 
     /**

@@ -17,6 +17,7 @@ use App\Model\MerchantBalanceLog;
 use App\Model\MerchantUser;
 use App\Model\Order;
 use App\Model\Product;
+use App\Model\ProductDailyStat;
 use App\Security\Encrypter;
 use HyperfTest\Cases\Admin\CreatesAdmins;
 use HyperfTest\Cases\Admin\CreatesCatalog;
@@ -141,7 +142,36 @@ class MerchantPortalTest extends HttpTestCase
         $account = $this->body($this->jsonRequest('GET', '/merchant/account', $token));
         $this->assertSame($mine->app_key, $account['app_key']);
         $this->assertArrayNotHasKey('app_secret', $account);
-        $this->assertSame([$product->code], array_column($account['products'], 'product_code'));
+        $this->assertArrayNotHasKey('products', $account, '商品挪到「可下单商品」');
+    }
+
+    public function testProductsWithRecentStats()
+    {
+        [$mine, $product] = $this->merchantWithProduct();
+        [, $notMine] = $this->merchantWithProduct();
+        $token = $this->merchantLogin($this->createMerchantUser($mine)->username, self::PASSWORD);
+        $stat = static fn (string $date, int $orders, int $success, int $failed, int $duration) => ProductDailyStat::create([
+            'stat_date' => $date, 'product_id' => $product->id, 'operator' => 'cmcc', 'order_count' => $orders, 'success_count' => $success,
+            'failed_count' => $failed, 'unfinished_count' => 0, 'total_duration' => $duration, 'computed_at' => date('Y-m-d H:i:s'),
+        ]);
+        try {
+            // 近 7 天（不含今天）的两天合起来算：成功 8+1，失败 2+0，耗时 (80+20)/9；8 天前的不算
+            $stat(date('Y-m-d', strtotime('-1 day')), 10, 8, 2, 80);
+            $stat(date('Y-m-d', strtotime('-7 days')), 1, 1, 0, 20);
+            $stat(date('Y-m-d', strtotime('-8 days')), 100, 0, 100, 0);
+
+            $body = $this->body($this->jsonRequest('GET', '/merchant/products', $token));
+            $this->assertSame(date('Y-m-d', strtotime('-7 days')), $body['from']);
+            $this->assertSame(date('Y-m-d', strtotime('-1 day')), $body['to']);
+            $this->assertSame([$product->code], array_column($body['products'], 'product_code'), '只看到自己开通的');
+            $this->assertNotContains($notMine->code, array_column($body['products'], 'product_code'));
+            $this->assertSame(
+                [['operator' => 'cmcc', 'price' => '99.50', 'order_count' => 11, 'success_rate' => '81.81', 'avg_duration' => 11]],
+                $body['products'][0]['operators']
+            );
+        } finally {
+            ProductDailyStat::where('product_id', $product->id)->delete();
+        }
     }
 
     public function testMerchantManagesIpWhitelistAndSecret()

@@ -58,7 +58,22 @@ export interface Account {
   app_key: string
   notify_url: string | null
   ip_whitelist: string[]
-  products: { product_code: string; name: string; face_value: number; prices: Record<string, string> }[]
+}
+
+/** 可下单商品：按运营商的价格和平台整体近 7 天的统计 */
+export interface CatalogProduct {
+  product_code: string
+  name: string
+  face_value: number
+  operators: {
+    operator: string
+    price: string
+    order_count: number
+    /** 成功 /（成功 + 失败）的百分比，没有出结果的单时为 null */
+    success_rate: string | null
+    /** 成功订单平均耗时（秒） */
+    avg_duration: number | null
+  }[]
 }
 
 /** 付款账号、收款账户类型：只支持支付宝、对公 */
@@ -144,6 +159,8 @@ export const portalApi = {
   order: (id: number) => http.get<OrderDetail>(`/merchant/orders/${id}`),
   balanceLogs: (params: Query) => http.get<Paged<BalanceLog>>('/merchant/balance-logs', params),
   account: () => http.get<Account>('/merchant/account'),
+  /** from / to 是统计的日期范围（近 7 天，不含今天） */
+  products: () => http.get<{ from: string; to: string; products: CatalogProduct[] }>('/merchant/products'),
   /** 改 IP 白名单、重置密钥都要再输一次登录密码 */
   updateIpWhitelist: (password: string, ipWhitelist: string) =>
     http.put<{ ip_whitelist: string[] }>('/merchant/account/ip-whitelist', { password, ip_whitelist: ipWhitelist }),

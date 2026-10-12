@@ -67,6 +67,12 @@ class PortalController extends AbstractController
         return $this->portalService->balanceLogs($this->merchant(), $this->request->all());
     }
 
+    #[GetMapping(path: 'products')]
+    public function products(): array
+    {
+        return $this->portalService->products($this->merchant());
+    }
+
     #[GetMapping(path: 'account')]
     public function account(): array
     {
