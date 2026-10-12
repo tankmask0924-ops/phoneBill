@@ -17,9 +17,12 @@ use App\Model\MerchantBalanceLog;
 use App\Model\MerchantUser;
 use App\Model\Order;
 use App\Model\Product;
+use App\Security\Encrypter;
 use HyperfTest\Cases\Admin\CreatesAdmins;
 use HyperfTest\Cases\Admin\CreatesCatalog;
 use HyperfTest\HttpTestCase;
+
+use function Hyperf\Support\make;
 
 /**
  * 商户后台：平台开账号、商户登录、只能看到自己的数据、不暴露成本和供应商、登录态和管理端互不通用。
@@ -129,7 +132,6 @@ class MerchantPortalTest extends HttpTestCase
         $this->assertSame([$myOrder->id], array_column($adminLogs['data'], 'order_id'));
         $this->assertSame($myOrder->mobile, $adminLogs['data'][0]['mobile']);
 
-
         $dashboard = $this->body($this->jsonRequest('GET', '/merchant/dashboard', $token));
         $this->assertSame(Merchant::find($mine->id)->balance, $dashboard['balance']);
         $this->assertSame(2, $dashboard['today']['order_count']);
@@ -140,6 +142,29 @@ class MerchantPortalTest extends HttpTestCase
         $this->assertSame($mine->app_key, $account['app_key']);
         $this->assertArrayNotHasKey('app_secret', $account);
         $this->assertSame([$product->code], array_column($account['products'], 'product_code'));
+    }
+
+    public function testMerchantManagesIpWhitelistAndSecret()
+    {
+        $merchant = $this->createMerchant();
+        $token = $this->merchantLogin($this->createMerchantUser($merchant)->username, self::PASSWORD);
+
+        // 要再输一次登录密码；IP 不合法不保存
+        $this->assertSame(422, $this->jsonRequest('PUT', '/merchant/account/ip-whitelist', $token, ['password' => 'wrong', 'ip_whitelist' => '1.2.3.4'])->getStatusCode());
+        $this->assertSame(422, $this->jsonRequest('PUT', '/merchant/account/ip-whitelist', $token, ['password' => self::PASSWORD, 'ip_whitelist' => '1.2.3.999'])->getStatusCode());
+        $this->assertNull(Merchant::find($merchant->id)->ip_whitelist);
+
+        $saved = $this->body($this->jsonRequest('PUT', '/merchant/account/ip-whitelist', $token, ['password' => self::PASSWORD, 'ip_whitelist' => "1.2.3.4\n10.0.0.0/8"]));
+        $this->assertSame(['1.2.3.4', '10.0.0.0/8'], $saved['ip_whitelist']);
+        $this->assertSame(['1.2.3.4', '10.0.0.0/8'], $this->body($this->jsonRequest('GET', '/merchant/account', $token))['ip_whitelist']);
+        $this->assertSame([], $this->body($this->jsonRequest('PUT', '/merchant/account/ip-whitelist', $token, ['password' => self::PASSWORD, 'ip_whitelist' => '']))['ip_whitelist'], '留空表示不限制');
+
+        $this->assertSame(422, $this->jsonRequest('POST', '/merchant/account/reset-secret', $token, ['password' => 'wrong'])->getStatusCode());
+        $this->assertSame(self::MERCHANT_SECRET, make(Encrypter::class)->decrypt(Merchant::find($merchant->id)->app_secret), '密码不对不重置');
+        $reset = $this->body($this->jsonRequest('POST', '/merchant/account/reset-secret', $token, ['password' => self::PASSWORD]));
+        $this->assertSame($merchant->app_key, $reset['app_key']);
+        $this->assertSame(64, strlen($reset['app_secret']));
+        $this->assertSame($reset['app_secret'], make(Encrypter::class)->decrypt(Merchant::find($merchant->id)->app_secret));
     }
 
     public function testLoginIsThrottledAfterRepeatedFailures()

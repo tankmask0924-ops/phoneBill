@@ -145,6 +145,7 @@ npm run build        # 产物在 merchant-web/dist，部署在 /merchant/ 路径
 | POST | `/merchant/auth/login` | 公开（商户后台） |
 | GET/PUT | `/merchant/auth/me`、`/merchant/auth/password` | 商户登录 |
 | GET | `/merchant/dashboard`、`/orders`、`/orders/{id}`、`/balance-logs`、`/account` | 商户登录，只能看自己的数据 |
+| PUT/POST | `/merchant/account/ip-whitelist`、`/merchant/account/reset-secret` | 商户登录，要再输一次登录密码 |
 
 ## 部署要点
 

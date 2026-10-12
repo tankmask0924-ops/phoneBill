@@ -19,9 +19,9 @@ use App\Exception\InsufficientBalanceException;
 use App\Model\AdminUser;
 use App\Model\Merchant;
 use App\Model\MerchantBalanceLog;
-use App\Network\IpAddress;
 use App\Security\Encrypter;
 use App\Service\AbstractService;
+use App\Service\Merchant\MerchantAccessService;
 use App\Service\Merchant\MerchantBalanceService;
 use Hyperf\DbConnection\Db;
 use Hyperf\Di\Annotation\Inject;
@@ -56,6 +56,9 @@ class MerchantAdminService extends AbstractService
 
     #[Inject]
     protected Encrypter $encrypter;
+
+    #[Inject]
+    protected MerchantAccessService $accessService;
 
     /**
      * @param array<string, mixed> $query keyword / status
@@ -113,7 +116,7 @@ class MerchantAdminService extends AbstractService
     public function create(AdminUser $operator, array $data, ?string $ip): array
     {
         $attrs = $this->validateProfile($data, null);
-        $secret = $this->newSecret();
+        $secret = $this->accessService->newSecret();
         $merchant = $this->merchantDao->create($attrs + [
             'app_key' => bin2hex(random_bytes(16)),
             'app_secret' => $this->encrypter->encrypt($secret),
@@ -178,7 +181,7 @@ class MerchantAdminService extends AbstractService
     public function resetSecret(AdminUser $operator, int $id, ?string $ip): array
     {
         $merchant = $this->findOrFail($id);
-        $secret = $this->newSecret();
+        $secret = $this->accessService->newSecret();
         $this->merchantDao->update($merchant->id, ['app_secret' => $this->encrypter->encrypt($secret)]);
         // 不记密钥本身
         $this->operationLogDao->record($operator->id, self::MODULE, 'reset_merchant_secret', 'merchant', $merchant->id, null, ['name' => $merchant->name], $ip);
@@ -232,11 +235,6 @@ class MerchantAdminService extends AbstractService
         return $merchant;
     }
 
-    private function newSecret(): string
-    {
-        return bin2hex(random_bytes(32));
-    }
-
     /**
      * 新建时全部字段都校验；编辑时只校验传了的字段。
      *
@@ -267,7 +265,7 @@ class MerchantAdminService extends AbstractService
             $attrs['notify_url'] = $this->notifyUrl($data['notify_url'] ?? null);
         }
         if ($merchant === null || array_key_exists('ip_whitelist', $data)) {
-            $attrs['ip_whitelist'] = $this->ipWhitelist($data['ip_whitelist'] ?? null);
+            $attrs['ip_whitelist'] = $this->accessService->ipWhitelist($data['ip_whitelist'] ?? null);
         }
         if ($merchant === null || array_key_exists('remark', $data)) {
             $attrs['remark'] = $this->remark($data['remark'] ?? null);
@@ -287,42 +285,6 @@ class MerchantAdminService extends AbstractService
         }
 
         return $url;
-    }
-
-    /**
-     * 支持数组或逗号 / 换行分隔的字符串，每项是 IP 或 CIDR。
-     */
-    private function ipWhitelist(mixed $value): ?string
-    {
-        $items = is_array($value) ? $value : preg_split('/[\s,，]+/u', is_string($value) ? $value : '');
-        $result = [];
-        foreach ($items as $item) {
-            $item = trim(is_string($item) ? $item : '');
-            if ($item === '') {
-                continue;
-            }
-            if (! $this->isValidIpOrCidr($item)) {
-                throw new HttpException(422, "IP 白名单里的「{$item}」不是合法的 IP 或网段");
-            }
-            $result[] = $item;
-        }
-        $joined = implode(',', array_values(array_unique($result)));
-        if (mb_strlen($joined) > 1000) {
-            throw new HttpException(422, 'IP 白名单太长，请合并成网段');
-        }
-
-        return $joined === '' ? null : $joined;
-    }
-
-    private function isValidIpOrCidr(string $item): bool
-    {
-        if (! str_contains($item, '/')) {
-            return IpAddress::toBinary($item) !== null;
-        }
-        [$network, $prefix] = explode('/', $item, 2);
-        $binary = IpAddress::toBinary($network);
-
-        return $binary !== null && ctype_digit($prefix) && (int) $prefix <= strlen($binary) * 8;
     }
 
     /**

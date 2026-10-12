@@ -67,4 +67,9 @@ export const portalApi = {
   order: (id: number) => http.get<OrderDetail>(`/merchant/orders/${id}`),
   balanceLogs: (params: Query) => http.get<Paged<BalanceLog>>('/merchant/balance-logs', params),
   account: () => http.get<Account>('/merchant/account'),
+  /** 改 IP 白名单、重置密钥都要再输一次登录密码 */
+  updateIpWhitelist: (password: string, ipWhitelist: string) =>
+    http.put<{ ip_whitelist: string[] }>('/merchant/account/ip-whitelist', { password, ip_whitelist: ipWhitelist }),
+  resetSecret: (password: string) =>
+    http.post<{ app_key: string; app_secret: string }>('/merchant/account/reset-secret', { password }),
 }
