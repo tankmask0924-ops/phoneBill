@@ -22,4 +22,19 @@ class ProductDao extends AbstractDao
     {
         return Product::find($id);
     }
+
+    /**
+     * @param list<int> $categoryIds
+     * @return array<int, int> 分类 id => 平台商品数
+     */
+    public function countByCategory(array $categoryIds): array
+    {
+        if ($categoryIds === []) {
+            return [];
+        }
+
+        return $this->newQuery()->whereIn('category_id', $categoryIds)->groupBy('category_id')
+            ->selectRaw('category_id, count(*) as total')->pluck('total', 'category_id')
+            ->map(static fn ($n) => (int) $n)->all();
+    }
 }

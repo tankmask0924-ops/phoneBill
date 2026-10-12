@@ -173,7 +173,7 @@ stateDiagram-v2
 
 | 菜单组 | 页面 | 阶段 |
 |---|---|---|
-| 商品中心 | 供应商、供应商商品、平台商品、商品统计 | 一 / 四（商品统计） |
+| 商品中心 | 供应商、供应商商品、商品分类、平台商品、商品统计 | 一 / 四（商品统计） |
 | 风控 | 号段查询、号码黑名单、通道维护 | 一（号段查询） / 二 |
 | 商户中心 | 商户、商户商品与价格、资金流水 | 二 |
 | 订单中心 | 订单列表、异常订单 | 二 |
@@ -193,7 +193,8 @@ stateDiagram-v2
 
 ### 4.4 平台商品
 
-- 字段：商品编码（商户下单用）、名称、面值、状态。
+- 字段：商品分类、商品编码（商户下单用）、名称、面值、状态。
+- 商品分类：在「商品中心 - 商品分类」里维护（名称唯一、排序、备注），只给平台商品用，供应商商品不分类。新建、编辑平台商品时必须选；上线前建的老商品没有分类，列表显示「未分类」，编辑时补上。还有平台商品在用的分类不能删除。列表可按分类筛选。权限跟平台商品一样（`product.view` / `product.manage`）。
 - 默认售价：按运营商分别填写。
 - 绑定供应商商品：只能选面值相同的，可以多选（跨运营商、跨供应商），每个设优先级（数字越小越先用）。
 - 编辑页自动汇总「覆盖运营商」（由绑定的供应商商品得出），方便发现漏配的运营商。
@@ -288,7 +289,8 @@ erDiagram
 | `supplier_provinces` | 供应商覆盖的省份 | `supplier_id`、`province`（`*` 表示全国） |
 | `supplier_products` | 供应商商品 | `supplier_id`、`name`、`face_value`、`cost_price`、`external_code`、`status` |
 | `supplier_product_operators` | 供应商商品支持的运营商 | `supplier_product_id`、`operator` |
-| `products` | 平台商品 | `code`（唯一）、`name`、`face_value`、`status` |
+| `product_categories` | 商品分类（只给平台商品用） | `name`（唯一）、`sort`、`remark` |
+| `products` | 平台商品 | `category_id`、`code`（唯一）、`name`、`face_value`、`status` |
 | `product_prices` | 平台商品各运营商默认售价 | `product_id`、`operator`、`default_price`；唯一 `(product_id, operator)` |
 | `product_routes` | 平台商品绑定的供应商商品 | `product_id`、`supplier_product_id`、`priority`；唯一 `(product_id, supplier_product_id)` |
 | **号码与风控** | | |

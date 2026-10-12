@@ -13,6 +13,7 @@ declare(strict_types=1);
 namespace App\Service\Admin;
 
 use App\Dao\AdminOperationLogDao;
+use App\Dao\ProductCategoryDao;
 use App\Dao\ProductDailyStatDao;
 use App\Dao\ProductDao;
 use App\Dao\ProductPriceDao;
@@ -34,6 +35,7 @@ use Hyperf\HttpMessage\Exception\HttpException;
  * - 绑定多个同面值的供应商商品，各带优先级；覆盖哪些运营商由绑定的供应商商品决定；
  * - 默认售价按运营商设置，只能给已覆盖的运营商设，只用来在给商户开通商品时带出初始价格；
  * - 商品编码是商户下单时传的，面值决定能绑哪些供应商商品，这两项建好后都不能改；
+ * - 必须选商品分类（ProductCategoryAdminService），老商品没有分类的显示为未分类，编辑时补上；
  * - 不提供删除，不卖了就下架。
  */
 class ProductAdminService extends AbstractService
@@ -56,6 +58,12 @@ class ProductAdminService extends AbstractService
     protected ProductPriceDao $productPriceDao;
 
     #[Inject]
+    protected ProductCategoryDao $categoryDao;
+
+    #[Inject]
+    protected ProductCategoryAdminService $categoryAdminService;
+
+    #[Inject]
     protected ProductRouteDao $productRouteDao;
 
     #[Inject]
@@ -71,7 +79,7 @@ class ProductAdminService extends AbstractService
     protected MerchantPriceService $priceService;
 
     /**
-     * @param array<string, mixed> $query keyword / face_value / status
+     * @param array<string, mixed> $query keyword / category_id / face_value / status
      * @return array{data: list<array<string, mixed>>, total: int, page: int, per_page: int}
      */
     public function list(array $query): array
@@ -83,6 +91,9 @@ class ProductAdminService extends AbstractService
         $keyword = trim((string) ($query['keyword'] ?? ''));
         if ($keyword !== '') {
             $builder->where(fn ($q) => $q->where('name', 'like', "%{$keyword}%")->orWhere('code', 'like', "%{$keyword}%"));
+        }
+        if (isset($query['category_id']) && is_numeric($query['category_id'])) {
+            $builder->where('category_id', (int) $query['category_id']);
         }
         if (isset($query['face_value']) && is_numeric($query['face_value'])) {
             $builder->where('face_value', (int) $query['face_value']);
@@ -111,7 +122,7 @@ class ProductAdminService extends AbstractService
     }
 
     /**
-     * @param array<string, mixed> $data code / name / face_value / remark / routes / prices
+     * @param array<string, mixed> $data category_id / code / name / face_value / remark / routes / prices
      * @return array<string, mixed>
      */
     public function create(AdminUser $operator, array $data, ?string $ip): array
@@ -123,13 +134,15 @@ class ProductAdminService extends AbstractService
         if ($this->productDao->newQuery()->where('code', $code)->exists()) {
             throw new HttpException(422, "商品编码「{$code}」已存在");
         }
+        $categoryId = $this->categoryAdminService->assertExists($data['category_id'] ?? null);
         $faceValue = $this->faceValue($data['face_value'] ?? null);
         $name = $this->requiredString($data['name'] ?? null, '商品名称', 64);
         [$routes, $covered] = $this->validateRoutes($data['routes'] ?? [], $faceValue);
         $prices = $this->validatePrices($data['prices'] ?? [], $covered);
 
-        $result = Db::transaction(function () use ($operator, $code, $name, $faceValue, $routes, $prices, $data, $ip) {
+        $result = Db::transaction(function () use ($operator, $categoryId, $code, $name, $faceValue, $routes, $prices, $data, $ip) {
             $product = $this->productDao->create([
+                'category_id' => $categoryId,
                 'code' => $code,
                 'name' => $name,
                 'face_value' => $faceValue,
@@ -169,6 +182,9 @@ class ProductAdminService extends AbstractService
         $result = Db::transaction(function () use ($operator, $product, $data, $ip) {
             $before = $this->formatMany([$product])[0];
             $attrs = [];
+            if (array_key_exists('category_id', $data)) {
+                $attrs['category_id'] = $this->categoryAdminService->assertExists($data['category_id']);
+            }
             if (array_key_exists('name', $data)) {
                 $attrs['name'] = $this->requiredString($data['name'], '商品名称', 64);
             }
@@ -332,8 +348,9 @@ class ProductAdminService extends AbstractService
         }
         $described = $this->supplierProductAdminService->describe(array_values(array_unique($supplierProductIds)));
         $yesterday = $this->statDao->dayTotals($ids, date('Y-m-d', strtotime('-1 day')));
+        $categoryNames = $this->categoryDao->namesFor(array_values(array_unique(array_filter(array_map(static fn (Product $p) => $p->category_id, $products)))));
 
-        return array_map(function (Product $p) use ($routesByProduct, $pricesByProduct, $described, $yesterday) {
+        return array_map(function (Product $p) use ($routesByProduct, $pricesByProduct, $described, $yesterday, $categoryNames) {
             $routes = array_map(static fn (ProductRoute $r) => [
                 'supplier_product_id' => $r->supplier_product_id,
                 'priority' => $r->priority,
@@ -347,6 +364,8 @@ class ProductAdminService extends AbstractService
 
             return [
                 'id' => $p->id,
+                'category_id' => $p->category_id,
+                'category_name' => $p->category_id === null ? null : ($categoryNames[$p->category_id] ?? null),
                 'code' => $p->code,
                 'name' => $p->name,
                 'face_value' => $p->face_value,

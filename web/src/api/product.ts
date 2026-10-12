@@ -117,6 +117,32 @@ export const supplierProductApi = {
   changeStatus: (id: number, status: string) => http.post<SupplierProduct>(`/admin/supplier-products/${id}/status`, { status }),
 }
 
+/** 商品分类：App\Controller\Admin\ProductCategoryController，只给平台商品用 */
+export interface ProductCategory {
+  id: number
+  name: string
+  /** 越小越靠前 */
+  sort: number
+  remark: string | null
+  /** 用这个分类的平台商品数，大于 0 时不能删除 */
+  product_count: number
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface ProductCategoryForm {
+  name: string
+  sort: number
+  remark: string
+}
+
+export const productCategoryApi = {
+  list: () => http.get<ProductCategory[]>('/admin/product-categories'),
+  create: (data: ProductCategoryForm) => http.post<ProductCategory>('/admin/product-categories', data),
+  update: (id: number, data: ProductCategoryForm) => http.put<ProductCategory>(`/admin/product-categories/${id}`, data),
+  remove: (id: number) => http.delete<{ success: boolean }>(`/admin/product-categories/${id}`),
+}
+
 /** 平台商品：App\Controller\Admin\ProductController */
 export interface ProductRoute {
   supplier_product_id: number
@@ -126,6 +152,9 @@ export interface ProductRoute {
 
 export interface Product {
   id: number
+  /** 老商品可能没有分类，编辑时补上 */
+  category_id: number | null
+  category_name: string | null
   code: string
   name: string
   face_value: number
@@ -145,6 +174,7 @@ export interface Product {
 }
 
 export interface ProductForm {
+  category_id?: number
   code?: string
   name: string
   face_value?: number

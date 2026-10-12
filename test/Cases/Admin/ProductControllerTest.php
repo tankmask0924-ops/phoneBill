@@ -40,9 +40,11 @@ class ProductControllerTest extends HttpTestCase
         $supplier = $this->createSupplier();
         $mobileUnicom = $this->createSupplierProduct($supplier, ['cmcc', 'cucc'], 100, '99.00');
         $telecom = $this->createSupplierProduct($supplier, ['ctcc'], 100, '98.90');
+        $category = $this->createCategory();
         $code = $this->uniq('P');
 
         $created = $this->jsonRequest('POST', '/admin/products', $token, [
+            'category_id' => $category->id,
             'code' => $code,
             'name' => '新话费100',
             'face_value' => 100,
@@ -55,6 +57,8 @@ class ProductControllerTest extends HttpTestCase
         $body = $this->body($created);
         $this->assertSame(200, $created->getStatusCode(), (string) $created->getBody());
         $this->productIds[] = $body['id'];
+        $this->assertSame($category->id, $body['category_id']);
+        $this->assertSame($category->name, $body['category_name']);
         $this->assertSame(['cmcc', 'cucc', 'ctcc'], $body['operators']);
         $this->assertSame(['cmcc' => '99.50', 'ctcc' => '98.50'], $body['prices']);
         $this->assertSame([$telecom->id, $mobileUnicom->id], array_column($body['routes'], 'supplier_product_id'), '按优先级排');
@@ -87,9 +91,11 @@ class ProductControllerTest extends HttpTestCase
         $mobile = $this->createSupplierProduct($supplier, ['cmcc'], 100);
         $fifty = $this->createSupplierProduct($supplier, ['cmcc'], 50);
         $existing = $this->createProduct([$mobile->id => 1]);
-        $valid = ['code' => $this->uniq('P'), 'name' => 'x', 'face_value' => 100, 'routes' => [['supplier_product_id' => $mobile->id]], 'prices' => []];
+        $valid = ['category_id' => $this->createCategory()->id, 'code' => $this->uniq('P'), 'name' => 'x', 'face_value' => 100, 'routes' => [['supplier_product_id' => $mobile->id]], 'prices' => []];
 
         foreach ([
+            ['category_id' => null],
+            ['category_id' => 999999999],
             ['code' => 'bad code'],
             ['code' => $existing->code],
             ['routes' => [['supplier_product_id' => $fifty->id]]],
@@ -105,6 +111,7 @@ class ProductControllerTest extends HttpTestCase
 
         $this->assertSame(422, $this->jsonRequest('PUT', "/admin/products/{$existing->id}", $token, ['code' => 'changed'])->getStatusCode());
         $this->assertSame(422, $this->jsonRequest('PUT', "/admin/products/{$existing->id}", $token, ['face_value' => 50])->getStatusCode());
+        $this->assertSame(422, $this->jsonRequest('PUT', "/admin/products/{$existing->id}", $token, ['category_id' => 999999999])->getStatusCode());
         $this->assertSame('disabled', $this->body($this->jsonRequest('POST', "/admin/products/{$existing->id}/status", $token, ['status' => 'disabled']))['status']);
     }
 

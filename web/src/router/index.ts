@@ -57,6 +57,12 @@ const router = createRouter({
           meta: { title: '供应商商品' },
         },
         {
+          path: 'product/categories',
+          name: 'product-categories',
+          component: () => import('@/views/product/ProductCategoryListView.vue'),
+          meta: { title: '商品分类' },
+        },
+        {
           path: 'product/products',
           name: 'products',
           component: () => import('@/views/product/ProductListView.vue'),

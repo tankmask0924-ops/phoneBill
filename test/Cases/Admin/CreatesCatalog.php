@@ -24,6 +24,7 @@ use App\Model\Order;
 use App\Model\OrderAttempt;
 use App\Model\OrderNotifyLog;
 use App\Model\Product;
+use App\Model\ProductCategory;
 use App\Model\ProductPrice;
 use App\Model\ProductRoute;
 use App\Model\Supplier;
@@ -48,6 +49,8 @@ trait CreatesCatalog
     private array $supplierProductIds = [];
 
     private array $productIds = [];
+
+    private array $categoryIds = [];
 
     private array $segmentIds = [];
 
@@ -74,6 +77,7 @@ trait CreatesCatalog
         ProductRoute::whereIn('supplier_product_id', $this->supplierProductIds)->delete();
         ProductPrice::whereIn('product_id', $this->productIds)->delete();
         Product::destroy($this->productIds);
+        ProductCategory::destroy($this->categoryIds);
         SupplierProductOperator::whereIn('supplier_product_id', $this->supplierProductIds)->delete();
         SupplierProduct::destroy($this->supplierProductIds);
         ChannelMaintenance::whereIn('supplier_id', $this->supplierIds)->delete();
@@ -150,6 +154,14 @@ trait CreatesCatalog
         }
 
         return $product;
+    }
+
+    private function createCategory(string $name = '', int $sort = 0): ProductCategory
+    {
+        $category = ProductCategory::create(['name' => $name === '' ? $this->uniq('分类') : $name, 'sort' => $sort]);
+        $this->categoryIds[] = $category->id;
+
+        return $category;
     }
 
     private function createMerchant(string $balance = '0.00', string $status = 'active', ?string $ipWhitelist = null): Merchant

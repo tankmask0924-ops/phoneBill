@@ -5,21 +5,32 @@ import { usePagedList } from '@/utils/paged'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { Plus, WarningFilled } from '@element-plus/icons-vue'
 import { computed, onMounted, reactive, ref } from 'vue'
-import { type OperatorCode, type Product, productApi, type SupplierProduct } from '@/api/product'
+import {
+  type OperatorCode,
+  type Product,
+  type ProductCategory,
+  productApi,
+  productCategoryApi,
+  type SupplierProduct,
+} from '@/api/product'
 import { labelOf, operatorLabels, shelfStatusLabels, toOptions } from '@/utils/labels'
 import { usePermissionStore } from '@/stores/permission'
 
 const permission = usePermissionStore()
 const canManage = computed(() => permission.can('product.manage'))
 
-const list = usePagedList<Product, { keyword: string; face_value: string; status: string }>(productApi.list, {
+const list = usePagedList<Product, { keyword: string; category_id: string; face_value: string; status: string }>(productApi.list, {
   keyword: '',
+  category_id: '',
   face_value: '',
   status: '',
 })
 const { rows, total, page, perPage, loading, filters } = list
 
 const operatorOrder = Object.keys(operatorLabels) as OperatorCode[]
+
+/** 商品分类，筛选和表单里选 */
+const categories = ref<ProductCategory[]>([])
 
 interface RouteRow {
   supplier_product_id: number
@@ -32,6 +43,7 @@ const editing = ref<Product | null>(null)
 const saving = ref(false)
 const formRef = ref<FormInstance>()
 const form = reactive({
+  category_id: undefined as number | undefined,
   code: '',
   name: '',
   face_value: undefined as number | undefined,
@@ -61,6 +73,7 @@ const rules = computed<FormRules>(() => ({
         { required: true, message: '请输入商品编码', trigger: 'blur' },
         { pattern: /^[A-Za-z0-9_-]{1,32}$/, message: '1~32 位字母、数字、_ 或 -', trigger: 'blur' },
       ],
+  category_id: [{ required: true, message: '请选择商品分类', trigger: 'change' }],
   name: [{ required: true, message: '请输入商品名称', trigger: 'blur' }],
   face_value: [{ required: true, message: '请输入面值', trigger: 'blur' }],
 }))
@@ -108,7 +121,7 @@ function optionLabel(o: SupplierProduct): string {
 
 function openCreate() {
   editing.value = null
-  Object.assign(form, { code: '', name: '', face_value: undefined, remark: '', routes: [], prices: {} })
+  Object.assign(form, { category_id: undefined, code: '', name: '', face_value: undefined, remark: '', routes: [], prices: {} })
   options.value = []
   dialogVisible.value = true
 }
@@ -116,6 +129,7 @@ function openCreate() {
 function openEdit(row: Product) {
   editing.value = row
   Object.assign(form, {
+    category_id: row.category_id ?? undefined,
     code: row.code,
     name: row.name,
     face_value: row.face_value,
@@ -146,6 +160,7 @@ async function save() {
     }
   }
   const data = {
+    category_id: form.category_id,
     name: form.name,
     remark: form.remark,
     routes: form.routes.map((r) => ({ supplier_product_id: r.supplier_product_id, priority: r.priority })),
@@ -187,6 +202,7 @@ async function toggleStatus(row: Product) {
 onMounted(async () => {
   await permission.load()
   list.load()
+  categories.value = await productCategoryApi.list()
 })
 </script>
 
@@ -196,6 +212,11 @@ onMounted(async () => {
       <el-form inline @submit.prevent="list.search">
         <el-form-item>
           <el-input v-model="filters.keyword" placeholder="名称 / 商品编码" clearable style="width: 180px" />
+        </el-form-item>
+        <el-form-item>
+          <el-select v-model="filters.category_id" placeholder="全部分类" clearable style="width: 130px">
+            <el-option v-for="c in categories" :key="c.id" :label="c.name" :value="String(c.id)" />
+          </el-select>
         </el-form-item>
         <el-form-item>
           <el-input v-model="filters.face_value" placeholder="面值" clearable style="width: 90px" />
@@ -214,6 +235,12 @@ onMounted(async () => {
 
     <el-table v-loading="loading" :data="rows" border>
       <el-table-column prop="id" label="ID" width="70" />
+      <el-table-column label="分类" min-width="100">
+        <template #default="{ row }">
+          <span v-if="row.category_name">{{ row.category_name }}</span>
+          <span v-else class="muted">未分类</span>
+        </template>
+      </el-table-column>
       <el-table-column prop="code" label="商品编码" min-width="110" />
       <el-table-column label="名称" min-width="140">
         <template #default="{ row }">
@@ -296,6 +323,12 @@ onMounted(async () => {
           </el-form-item>
         </el-col>
       </el-row>
+      <el-form-item label="商品分类" prop="category_id">
+        <el-select v-model="form.category_id" placeholder="选择商品分类" style="width: 240px">
+          <el-option v-for="c in categories" :key="c.id" :label="c.name" :value="c.id" />
+        </el-select>
+        <span v-if="categories.length === 0" class="tip">还没有分类，先到「商品分类」里添加</span>
+      </el-form-item>
       <el-form-item label="面值（元）" prop="face_value">
         <el-input-number
           v-model="form.face_value"
