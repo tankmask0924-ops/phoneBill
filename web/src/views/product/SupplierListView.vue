@@ -5,21 +5,19 @@ import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'elem
 import { Plus } from '@element-plus/icons-vue'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { type Supplier, supplierApi, type SupplierDriver } from '@/api/product'
-import { provincesLabel, supplierStatusLabels, toOptions } from '@/utils/labels'
+import { supplierStatusLabels, toOptions } from '@/utils/labels'
 import { usePermissionStore } from '@/stores/permission'
 
 const permission = usePermissionStore()
 const canManage = computed(() => permission.can('supplier.manage'))
 
-const list = usePagedList<Supplier, { keyword: string; status: string; province: string }>(supplierApi.list, {
+const list = usePagedList<Supplier, { keyword: string; status: string }>(supplierApi.list, {
   keyword: '',
   status: '',
-  province: '',
 })
 const { rows, total, page, perPage, loading, filters } = list
 
 const drivers = ref<SupplierDriver[]>([])
-const provinces = ref<string[]>([])
 
 const dialogVisible = ref(false)
 const editing = ref<Supplier | null>(null)
@@ -30,8 +28,6 @@ const form = reactive({
   code: '',
   driver: '',
   config: {} as Record<string, string>,
-  nationwide: true,
-  provinces: [] as string[],
   remark: '',
 })
 const currentDriver = computed(() => drivers.value.find((d) => d.code === form.driver))
@@ -64,20 +60,17 @@ function onDriverChange() {
 
 function openCreate() {
   editing.value = null
-  Object.assign(form, { name: '', code: '', driver: drivers.value[0]?.code ?? '', nationwide: true, provinces: [], remark: '' })
+  Object.assign(form, { name: '', code: '', driver: drivers.value[0]?.code ?? '', remark: '' })
   onDriverChange()
   dialogVisible.value = true
 }
 
 function openEdit(row: Supplier) {
   editing.value = row
-  const nationwide = row.provinces.includes('*')
   Object.assign(form, {
     name: row.name,
     code: row.code,
     driver: row.driver,
-    nationwide,
-    provinces: nationwide ? [] : [...row.provinces],
     remark: row.remark ?? '',
   })
   onDriverChange()
@@ -94,15 +87,10 @@ async function save() {
       return
     }
   }
-  if (!form.nationwide && form.provinces.length === 0) {
-    ElMessage.error('请选择覆盖的省份，或勾选「全国」')
-    return
-  }
   const data = {
     name: form.name,
     driver: form.driver,
     config: { ...form.config },
-    provinces: form.nationwide ? ['*'] : form.provinces,
     remark: form.remark,
   }
   saving.value = true
@@ -141,7 +129,6 @@ onMounted(async () => {
   list.load()
   const meta = await supplierApi.meta()
   drivers.value = meta.drivers
-  provinces.value = meta.provinces
 })
 </script>
 
@@ -151,11 +138,6 @@ onMounted(async () => {
       <el-form inline @submit.prevent="list.search">
         <el-form-item>
           <el-input v-model="filters.keyword" placeholder="名称 / 编码" clearable style="width: 180px" />
-        </el-form-item>
-        <el-form-item>
-          <el-select v-model="filters.province" placeholder="覆盖省份" clearable filterable style="width: 130px">
-            <el-option v-for="p in provinces" :key="p" :label="p" :value="p" />
-          </el-select>
         </el-form-item>
         <el-form-item>
           <el-select v-model="filters.status" placeholder="全部状态" clearable style="width: 110px">
@@ -174,9 +156,6 @@ onMounted(async () => {
       <el-table-column prop="name" label="名称" min-width="140" />
       <el-table-column prop="code" label="编码" min-width="120" />
       <el-table-column prop="driver_name" label="对接驱动" min-width="150" />
-      <el-table-column label="覆盖省份" min-width="180">
-        <template #default="{ row }">{{ provincesLabel(row.provinces) }}</template>
-      </el-table-column>
       <el-table-column prop="product_count" label="商品数" width="80" align="center" />
       <el-table-column label="状态" width="80">
         <template #default="{ row }"><StatusTag :map="supplierStatusLabels" :value="row.status" /></template>
@@ -212,15 +191,6 @@ onMounted(async () => {
       </el-form-item>
       <el-form-item label="编码" prop="code">
         <el-input v-model="form.code" :disabled="!!editing" placeholder="用在供应商回调地址里，建好后不能改" />
-      </el-form-item>
-      <el-form-item label="覆盖省份" required>
-        <div class="provinces">
-          <el-checkbox v-model="form.nationwide">全国</el-checkbox>
-          <el-checkbox-group v-if="!form.nationwide" v-model="form.provinces">
-            <el-checkbox v-for="p in provinces" :key="p" :value="p" class="province">{{ p }}</el-checkbox>
-          </el-checkbox-group>
-          <div class="tip">只有这些省份的号码会走这个供应商</div>
-        </div>
       </el-form-item>
       <el-form-item label="对接驱动" prop="driver">
         <el-select v-model="form.driver" style="width: 100%" @change="onDriverChange">
@@ -267,15 +237,6 @@ onMounted(async () => {
 .pagination {
   justify-content: flex-end;
   margin-top: 16px;
-}
-
-.provinces {
-  width: 100%;
-}
-
-.province {
-  width: 72px;
-  margin-right: 8px;
 }
 
 .tip {

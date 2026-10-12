@@ -15,7 +15,6 @@ namespace App\Service\Admin;
 use App\Dao\AdminOperationLogDao;
 use App\Dao\SupplierDao;
 use App\Dao\SupplierProductDao;
-use App\Dao\SupplierProvinceDao;
 use App\Enum\Province;
 use App\Model\AdminUser;
 use App\Model\Supplier;
@@ -30,7 +29,7 @@ use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpMessage\Exception\HttpException;
 
 /**
- * 商品中心 - 供应商：名称、编码、对接驱动与接口参数、覆盖省份、启用停用。
+ * 商品中心 - 供应商：名称、编码、对接驱动与接口参数、启用停用（覆盖省份在供应商商品上）。
  *
  * - 编码用在供应商回调地址里，建好后不能改；
  * - 接口参数整体加密存储；密钥类参数（驱动声明为 secret）接口不回显，编辑时留空表示不修改；
@@ -46,9 +45,6 @@ class SupplierAdminService extends AbstractService
 
     #[Inject]
     protected SupplierDao $supplierDao;
-
-    #[Inject]
-    protected SupplierProvinceDao $supplierProvinceDao;
 
     #[Inject]
     protected SupplierProductDao $supplierProductDao;
@@ -69,7 +65,7 @@ class SupplierAdminService extends AbstractService
     protected SupplierGateway $supplierGateway;
 
     /**
-     * 表单要用的选项：可选的对接驱动（含参数定义）、省份。
+     * 表单要用的选项：可选的对接驱动（含参数定义）、省份（给供应商商品用）。
      *
      * @return array{drivers: list<array<string, mixed>>, provinces: list<string>}
      */
@@ -86,7 +82,7 @@ class SupplierAdminService extends AbstractService
     }
 
     /**
-     * @param array<string, mixed> $query keyword / status / province
+     * @param array<string, mixed> $query keyword / status
      * @return array{data: list<array<string, mixed>>, total: int, page: int, per_page: int}
      */
     public function list(array $query): array
@@ -102,14 +98,10 @@ class SupplierAdminService extends AbstractService
         if (in_array($query['status'] ?? null, ['active', 'disabled'], true)) {
             $builder->where('status', $query['status']);
         }
-        if (is_string($query['province'] ?? null) && Province::isValid($query['province'])) {
-            $builder->whereIn('id', fn ($q) => $q->select('supplier_id')->from('supplier_provinces')->whereIn('province', [$query['province'], Province::ALL]));
-        }
 
         $total = (clone $builder)->count();
         $suppliers = $builder->orderBy('id')->forPage($page, $perPage)->get();
         $ids = $suppliers->pluck('id')->all();
-        $provinces = $this->supplierProvinceDao->provincesFor($ids);
         $productCounts = $this->supplierProductDao->newQuery()
             ->whereIn('supplier_id', $ids)
             ->selectRaw('supplier_id, count(*) as n')
@@ -117,7 +109,7 @@ class SupplierAdminService extends AbstractService
             ->pluck('n', 'supplier_id');
 
         return [
-            'data' => $suppliers->map(fn (Supplier $s) => $this->format($s, $provinces[$s->id] ?? []) + [
+            'data' => $suppliers->map(fn (Supplier $s) => $this->format($s) + [
                 'product_count' => (int) ($productCounts[$s->id] ?? 0),
             ])->values()->all(),
             'total' => $total,
@@ -144,7 +136,7 @@ class SupplierAdminService extends AbstractService
     }
 
     /**
-     * @param array<string, mixed> $data name / code / driver / config / provinces / remark
+     * @param array<string, mixed> $data name / code / driver / config / remark
      * @return array<string, mixed>
      */
     public function create(AdminUser $operator, array $data, ?string $ip): array
@@ -159,9 +151,8 @@ class SupplierAdminService extends AbstractService
         }
         $driver = $this->driver($data['driver'] ?? null);
         $config = $this->validateConfig($driver, $data['config'] ?? [], []);
-        $provinces = $this->provinces($data['provinces'] ?? null);
 
-        return Db::transaction(function () use ($operator, $name, $code, $driver, $config, $provinces, $data, $ip) {
+        return Db::transaction(function () use ($operator, $name, $code, $driver, $config, $data, $ip) {
             $supplier = $this->supplierDao->create([
                 'name' => $name,
                 'code' => $code,
@@ -170,8 +161,7 @@ class SupplierAdminService extends AbstractService
                 'status' => 'active',
                 'remark' => $this->remark($data['remark'] ?? null),
             ]);
-            $this->supplierProvinceDao->replaceForSupplier($supplier->id, $provinces);
-            $after = $this->format($supplier, $provinces);
+            $after = $this->format($supplier);
             $this->operationLogDao->record($operator->id, self::MODULE, 'create_supplier', 'supplier', $supplier->id, null, $after, $ip);
 
             return $after;
@@ -192,7 +182,7 @@ class SupplierAdminService extends AbstractService
         }
 
         $result = Db::transaction(function () use ($operator, $supplier, $data, $ip) {
-            $before = $this->format($supplier, $this->supplierProvinceDao->provincesFor([$supplier->id])[$supplier->id] ?? []);
+            $before = $this->format($supplier);
             $attrs = [];
 
             if (array_key_exists('name', $data)) {
@@ -209,20 +199,17 @@ class SupplierAdminService extends AbstractService
             if (array_key_exists('remark', $data)) {
                 $attrs['remark'] = $this->remark($data['remark']);
             }
-            if (array_key_exists('provinces', $data)) {
-                $this->supplierProvinceDao->replaceForSupplier($supplier->id, $this->provinces($data['provinces']));
-            }
             if ($attrs !== []) {
                 $this->supplierDao->update($supplier->id, $attrs);
             }
 
             $supplier = $this->findOrFail($supplier->id);
-            $after = $this->format($supplier, $this->supplierProvinceDao->provincesFor([$supplier->id])[$supplier->id] ?? []);
+            $after = $this->format($supplier);
             $this->operationLogDao->record($operator->id, self::MODULE, 'update_supplier', 'supplier', $supplier->id, $before, $after, $ip);
 
             return $after;
         });
-        // 覆盖省份可能变了，事务提交后清选路缓存
+        // 驱动、参数可能变了，事务提交后清选路缓存
         $this->routeService->flushConfig();
 
         return $result;
@@ -253,7 +240,7 @@ class SupplierAdminService extends AbstractService
             $supplier = $this->findOrFail($supplier->id);
         }
 
-        return $this->format($supplier, $this->supplierProvinceDao->provincesFor([$supplier->id])[$supplier->id] ?? []);
+        return $this->format($supplier);
     }
 
     /**
@@ -331,32 +318,11 @@ class SupplierAdminService extends AbstractService
     }
 
     /**
-     * @return list<string> 选了「全国」时只保留 *
-     */
-    private function provinces(mixed $provinces): array
-    {
-        if (! is_array($provinces) || $provinces === []) {
-            throw new HttpException(422, '请选择覆盖的省份');
-        }
-        if (in_array(Province::ALL, $provinces, true)) {
-            return [Province::ALL];
-        }
-        foreach ($provinces as $province) {
-            if (! is_string($province) || ! Province::isValid($province)) {
-                throw new HttpException(422, '未知的省份：' . (is_string($province) ? $province : gettype($province)));
-            }
-        }
-
-        return array_values(array_intersect(Province::NAMES, $provinces));
-    }
-
-    /**
      * 密钥类参数不回显，只在 configured_secrets 里告诉前端哪些已经填过。
      *
-     * @param list<string> $provinces
      * @return array<string, mixed>
      */
-    private function format(Supplier $supplier, array $provinces): array
+    private function format(Supplier $supplier): array
     {
         $driver = $this->driverRegistry->find($supplier->driver);
         $config = $this->decryptConfig($supplier);
@@ -381,7 +347,6 @@ class SupplierAdminService extends AbstractService
             'driver_name' => $driver?->name() ?? $supplier->driver,
             'config' => $visible,
             'configured_secrets' => $configuredSecrets,
-            'provinces' => $provinces,
             'status' => $supplier->status,
             'remark' => $supplier->remark,
             'created_at' => $supplier->created_at?->toDateTimeString(),

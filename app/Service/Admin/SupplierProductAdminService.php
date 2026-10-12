@@ -17,7 +17,9 @@ use App\Dao\ProductRouteDao;
 use App\Dao\SupplierDao;
 use App\Dao\SupplierProductDao;
 use App\Dao\SupplierProductOperatorDao;
+use App\Dao\SupplierProductProvinceDao;
 use App\Enum\Operator;
+use App\Enum\Province;
 use App\Model\AdminUser;
 use App\Model\SupplierProduct;
 use App\Service\AbstractService;
@@ -30,8 +32,9 @@ use Hyperf\HttpMessage\Exception\HttpException;
 use Throwable;
 
 /**
- * 商品中心 - 供应商商品：面值、成本价、支持的运营商、供应商侧商品编码、上下架。
+ * 商品中心 - 供应商商品：面值、成本价、支持的运营商、覆盖的省份、供应商侧商品编码、上下架。
  *
+ * - 覆盖省份必填（可选「全国」），号码所在省份在里面才会选到这个商品；
  * - 所属供应商建好后不能改；
  * - 已经被平台商品绑定的，面值不能改（平台商品只能绑同面值的供应商商品）；
  * - 不提供删除，不用了就下架。
@@ -51,6 +54,9 @@ class SupplierProductAdminService extends AbstractService
     protected SupplierProductOperatorDao $operatorDao;
 
     #[Inject]
+    protected SupplierProductProvinceDao $provinceDao;
+
+    #[Inject]
     protected SupplierDao $supplierDao;
 
     #[Inject]
@@ -66,7 +72,7 @@ class SupplierProductAdminService extends AbstractService
     protected SupplierGateway $supplierGateway;
 
     /**
-     * @param array<string, mixed> $query keyword / supplier_id / operator / face_value / status
+     * @param array<string, mixed> $query keyword / supplier_id / operator / province / face_value / status
      * @return array{data: list<array<string, mixed>>, total: int, page: int, per_page: int}
      */
     public function list(array $query): array
@@ -89,6 +95,10 @@ class SupplierProductAdminService extends AbstractService
         }
         if (is_string($query['operator'] ?? null) && Operator::tryFrom($query['operator']) !== null) {
             $builder->whereIn('id', fn ($q) => $q->select('supplier_product_id')->from('supplier_product_operators')->where('operator', $query['operator']));
+        }
+        // 按省份筛：覆盖了这个省份的（含「全国」）
+        if (is_string($query['province'] ?? null) && Province::isValid($query['province'])) {
+            $builder->whereIn('id', fn ($q) => $q->select('supplier_product_id')->from('supplier_product_provinces')->whereIn('province', [$query['province'], Province::ALL]));
         }
 
         $total = (clone $builder)->count();
@@ -128,7 +138,7 @@ class SupplierProductAdminService extends AbstractService
     }
 
     /**
-     * @param array<string, mixed> $data supplier_id / name / face_value / cost_price / external_code / operators / remark
+     * @param array<string, mixed> $data supplier_id / name / face_value / cost_price / external_code / operators / provinces / remark
      * @return array<string, mixed>
      */
     public function create(AdminUser $operator, array $data, ?string $ip): array
@@ -147,10 +157,12 @@ class SupplierProductAdminService extends AbstractService
             'remark' => $this->remark($data['remark'] ?? null),
         ];
         $operators = $this->operators($data['operators'] ?? null);
+        $provinces = $this->provinces($data['provinces'] ?? null);
 
-        return Db::transaction(function () use ($operator, $attrs, $operators, $ip) {
+        return Db::transaction(function () use ($operator, $attrs, $operators, $provinces, $ip) {
             $product = $this->supplierProductDao->create($attrs);
             $this->operatorDao->replaceForSupplierProduct($product->id, $operators);
+            $this->provinceDao->replaceForSupplierProduct($product->id, $provinces);
             $after = $this->formatMany([$product])[0];
             $this->operationLogDao->record($operator->id, self::MODULE, 'create_supplier_product', 'supplier_product', $product->id, null, $after, $ip);
 
@@ -194,6 +206,9 @@ class SupplierProductAdminService extends AbstractService
             if (array_key_exists('operators', $data)) {
                 $this->operatorDao->replaceForSupplierProduct($product->id, $this->operators($data['operators']));
             }
+            if (array_key_exists('provinces', $data)) {
+                $this->provinceDao->replaceForSupplierProduct($product->id, $this->provinces($data['provinces']));
+            }
             if ($attrs !== []) {
                 $this->supplierProductDao->update($product->id, $attrs);
             }
@@ -203,7 +218,7 @@ class SupplierProductAdminService extends AbstractService
 
             return $after;
         });
-        // 运营商、成本（影响排序）可能变了，事务提交后清选路缓存
+        // 运营商、省份、成本（影响排序）可能变了，事务提交后清选路缓存
         $this->routeService->flushConfig();
 
         return $result;
@@ -285,6 +300,7 @@ class SupplierProductAdminService extends AbstractService
     {
         $ids = array_map(static fn (SupplierProduct $p) => $p->id, $products);
         $operators = $this->operatorDao->operatorsFor($ids);
+        $provinces = $this->provinceDao->provincesFor($ids);
         $suppliers = $this->supplierDao->newQuery()
             ->whereIn('id', array_unique(array_map(static fn (SupplierProduct $p) => $p->supplier_id, $products)))
             ->get(['id', 'name', 'status'])
@@ -295,7 +311,7 @@ class SupplierProductAdminService extends AbstractService
             ->groupBy('supplier_product_id')
             ->pluck('n', 'supplier_product_id');
 
-        return array_map(fn (SupplierProduct $p) => [
+        return array_map(static fn (SupplierProduct $p) => [
             'id' => $p->id,
             'supplier_id' => $p->supplier_id,
             'supplier_name' => $suppliers->get($p->supplier_id)?->name,
@@ -305,6 +321,8 @@ class SupplierProductAdminService extends AbstractService
             'cost_price' => $p->cost_price,
             'external_code' => $p->external_code,
             'operators' => $operators[$p->id] ?? [],
+            // 覆盖的省份，['*'] 表示全国
+            'provinces' => $provinces[$p->id] ?? [],
             'status' => $p->status,
             'remark' => $p->remark,
             'bound_product_count' => (int) ($boundCounts[$p->id] ?? 0),

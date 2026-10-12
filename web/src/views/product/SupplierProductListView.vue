@@ -11,7 +11,7 @@ import {
   type UpstreamProduct,
   supplierProductApi,
 } from '@/api/product'
-import { labelOf, operatorLabels, shelfStatusLabels, toOptions } from '@/utils/labels'
+import { labelOf, operatorLabels, provincesLabel, shelfStatusLabels, toOptions } from '@/utils/labels'
 import { usePermissionStore } from '@/stores/permission'
 
 const permission = usePermissionStore()
@@ -19,11 +19,12 @@ const canManage = computed(() => permission.can('supplier_product.manage'))
 
 const list = usePagedList<
   SupplierProduct,
-  { keyword: string; supplier_id: number | ''; operator: string; face_value: string; status: string }
->(supplierProductApi.list, { keyword: '', supplier_id: '', operator: '', face_value: '', status: '' })
+  { keyword: string; supplier_id: number | ''; operator: string; province: string; face_value: string; status: string }
+>(supplierProductApi.list, { keyword: '', supplier_id: '', operator: '', province: '', face_value: '', status: '' })
 const { rows, total, page, perPage, loading, filters } = list
 
 const suppliers = ref<SupplierOption[]>([])
+const provinces = ref<string[]>([])
 
 const dialogVisible = ref(false)
 const editing = ref<SupplierProduct | null>(null)
@@ -36,6 +37,8 @@ const form = reactive({
   cost_price: '',
   external_code: '',
   operators: [] as OperatorCode[],
+  nationwide: true,
+  provinces: [] as string[],
   remark: '',
 })
 // 已经被平台商品绑定的，面值不能改
@@ -125,6 +128,8 @@ function openCreate() {
     cost_price: '',
     external_code: '',
     operators: [],
+    nationwide: true,
+    provinces: [],
     remark: '',
   })
   dialogVisible.value = true
@@ -139,6 +144,8 @@ function openEdit(row: SupplierProduct) {
     cost_price: row.cost_price,
     external_code: row.external_code,
     operators: [...row.operators],
+    nationwide: row.provinces.includes('*'),
+    provinces: row.provinces.includes('*') ? [] : [...row.provinces],
     remark: row.remark ?? '',
   })
   dialogVisible.value = true
@@ -148,12 +155,17 @@ async function save() {
   if (!(await formRef.value?.validate().catch(() => false))) {
     return
   }
+  if (!form.nationwide && form.provinces.length === 0) {
+    ElMessage.error('请选择覆盖的省份，或勾选「全国」')
+    return
+  }
   const data = {
     name: form.name,
     face_value: form.face_value as number,
     cost_price: form.cost_price,
     external_code: form.external_code,
     operators: form.operators,
+    provinces: form.nationwide ? ['*'] : form.provinces,
     remark: form.remark,
   }
   saving.value = true
@@ -190,7 +202,10 @@ async function toggleStatus(row: SupplierProduct) {
 onMounted(async () => {
   await permission.load()
   list.load()
-  suppliers.value = await supplierProductApi.supplierOptions()
+  ;[suppliers.value, provinces.value] = await Promise.all([
+    supplierProductApi.supplierOptions(),
+    supplierProductApi.meta().then((m) => m.provinces),
+  ])
 })
 </script>
 
@@ -209,6 +224,11 @@ onMounted(async () => {
         <el-form-item>
           <el-select v-model="filters.operator" placeholder="运营商" clearable style="width: 100px">
             <el-option v-for="o in toOptions(operatorLabels)" :key="o.value" v-bind="o" />
+          </el-select>
+        </el-form-item>
+        <el-form-item>
+          <el-select v-model="filters.province" placeholder="覆盖省份" clearable filterable style="width: 120px">
+            <el-option v-for="p in provinces" :key="p" :label="p" :value="p" />
           </el-select>
         </el-form-item>
         <el-form-item>
@@ -240,6 +260,9 @@ onMounted(async () => {
           <el-tag v-for="op in row.operators" :key="op" size="small" class="op">{{ labelOf(operatorLabels, op) }}</el-tag>
         </template>
       </el-table-column>
+      <el-table-column label="覆盖省份" min-width="140">
+        <template #default="{ row }">{{ provincesLabel(row.provinces) }}</template>
+      </el-table-column>
       <el-table-column label="面值" width="80" align="right">
         <template #default="{ row }">{{ row.face_value }} 元</template>
       </el-table-column>
@@ -270,7 +293,7 @@ onMounted(async () => {
     />
   </el-card>
 
-  <el-dialog v-model="dialogVisible" :title="editing ? '编辑供应商商品' : '新建供应商商品'" width="520px" @closed="formRef?.clearValidate()">
+  <el-dialog v-model="dialogVisible" :title="editing ? '编辑供应商商品' : '新建供应商商品'" width="640px" @closed="formRef?.clearValidate()">
     <el-form ref="formRef" :model="form" :rules="rules" label-width="110px">
       <el-form-item label="供应商" prop="supplier_id">
         <el-select v-model="form.supplier_id" :disabled="!!editing" filterable style="width: 100%">
@@ -314,6 +337,15 @@ onMounted(async () => {
         <el-checkbox-group v-model="form.operators">
           <el-checkbox v-for="o in toOptions(operatorLabels)" :key="o.value" :value="o.value">{{ o.label }}</el-checkbox>
         </el-checkbox-group>
+      </el-form-item>
+      <el-form-item label="覆盖省份" required>
+        <div class="provinces">
+          <el-checkbox v-model="form.nationwide">全国</el-checkbox>
+          <el-checkbox-group v-if="!form.nationwide" v-model="form.provinces">
+            <el-checkbox v-for="p in provinces" :key="p" :value="p" class="province">{{ p }}</el-checkbox>
+          </el-checkbox-group>
+          <div class="tip">只有这些省份的号码会走这个商品</div>
+        </div>
       </el-form-item>
       <el-form-item label="面值（元）" prop="face_value">
         <el-input-number v-model="form.face_value" :min="1" :max="100000" :step="10" :disabled="faceValueLocked" />
@@ -382,5 +414,13 @@ onMounted(async () => {
 
 .upstream-tag {
   margin-left: 8px;
+}
+.provinces {
+  width: 100%;
+}
+
+.province {
+  width: 72px;
+  margin-right: 8px;
 }
 </style>

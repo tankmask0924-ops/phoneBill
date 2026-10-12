@@ -156,8 +156,8 @@ class CacheAndScaleTest extends HttpTestCase
         ]], null);
         $this->assertSame([$spB->id, $spA->id], $ids(), '改绑定和成本后按新的优先级、成本排序');
 
-        make(SupplierAdminService::class)->update($admin, $b->id, ['provinces' => ['湖南']], null);
-        $this->assertSame([$spA->id], $ids(), '改覆盖省份立即生效');
+        make(SupplierProductAdminService::class)->update($admin, $spB->id, ['provinces' => ['湖南']], null);
+        $this->assertSame([$spA->id], $ids(), '改供应商商品的覆盖省份立即生效');
     }
 
     public function testMaintenanceStartsOnTimeWithoutClearingCache()

@@ -48,12 +48,11 @@ class SupplierControllerTest extends HttpTestCase
             'code' => $code,
             'driver' => 'mock',
             'config' => ['result' => 'success', 'api_url' => 'https://example.test', 'secret' => 'top-secret-value'],
-            'provinces' => ['广东', '湖南'],
         ]);
         $body = $this->body($created);
         $this->assertSame(200, $created->getStatusCode(), (string) $created->getBody());
         $this->supplierIds[] = $body['id'];
-        $this->assertSame(['湖南', '广东'], $body['provinces'], '按省份表的顺序排');
+        $this->assertArrayNotHasKey('provinces', $body, '覆盖省份在供应商商品上');
         $this->assertSame(['result' => 'success', 'api_url' => 'https://example.test'], $body['config']);
         $this->assertSame(['secret'], $body['configured_secrets']);
         $this->assertStringNotContainsString('top-secret-value', (string) $created->getBody());
@@ -63,9 +62,7 @@ class SupplierControllerTest extends HttpTestCase
         $updated = $this->body($this->jsonRequest('PUT', "/admin/suppliers/{$body['id']}", $token, [
             'name' => $body['name'] . '改',
             'config' => ['result' => 'failed', 'api_url' => '', 'secret' => ''],
-            'provinces' => ['广东', '*'],
         ]));
-        $this->assertSame(['*'], $updated['provinces'], '选了全国只保留 *');
         $this->assertSame(['secret'], $updated['configured_secrets']);
         $config = make(SupplierAdminService::class)->decryptConfig(Supplier::find($body['id']));
         $this->assertSame(['result' => 'failed', 'api_url' => '', 'secret' => 'top-secret-value'], $config);
@@ -73,9 +70,6 @@ class SupplierControllerTest extends HttpTestCase
         $list = $this->body($this->jsonRequest('GET', '/admin/suppliers?keyword=' . $code, $token));
         $this->assertSame(1, $list['total']);
         $this->assertSame(0, $list['data'][0]['product_count']);
-
-        $byProvince = $this->body($this->jsonRequest('GET', '/admin/suppliers?province=' . urlencode('西藏') . '&keyword=' . $code, $token));
-        $this->assertSame(1, $byProvince['total'], '覆盖全国的供应商按任何省份都能筛到');
 
         $meta = $this->body($this->jsonRequest('GET', '/admin/suppliers/meta', $token));
         $this->assertContains('mock', array_column($meta['drivers'], 'code'));
@@ -86,7 +80,7 @@ class SupplierControllerTest extends HttpTestCase
     {
         $token = $this->loginAs($this->createAdminWithPermissions(['supplier.manage']));
         $existing = $this->createSupplier();
-        $valid = ['name' => $this->uniq('供应商'), 'code' => $this->uniq('s_'), 'driver' => 'mock', 'config' => ['result' => 'success'], 'provinces' => ['广东']];
+        $valid = ['name' => $this->uniq('供应商'), 'code' => $this->uniq('s_'), 'driver' => 'mock', 'config' => ['result' => 'success']];
 
         foreach ([
             ['code' => 'Bad-Code'],
@@ -95,8 +89,6 @@ class SupplierControllerTest extends HttpTestCase
             ['driver' => 'no_such_driver'],
             ['config' => ['result' => '']],
             ['config' => ['result' => 'maybe']],
-            ['provinces' => []],
-            ['provinces' => ['火星']],
         ] as $override) {
             $response = $this->jsonRequest('POST', '/admin/suppliers', $token, array_merge($valid, $override));
             $this->assertSame(422, $response->getStatusCode(), json_encode($override, JSON_UNESCAPED_UNICODE));

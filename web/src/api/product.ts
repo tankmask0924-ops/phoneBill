@@ -32,8 +32,6 @@ export interface Supplier {
   /** 非密钥参数；密钥不回显，已填过的列在 configured_secrets 里 */
   config: Record<string, string>
   configured_secrets: string[]
-  /** 省份简称，['*'] 表示全国 */
-  provinces: string[]
   status: string
   remark: string | null
   product_count: number
@@ -46,7 +44,6 @@ export interface SupplierForm {
   code?: string
   driver: string
   config: Record<string, string>
-  provinces: string[]
   remark: string
 }
 
@@ -69,6 +66,8 @@ export interface SupplierProduct {
   cost_price: string
   external_code: string
   operators: OperatorCode[]
+  /** 覆盖的省份，['*'] 表示全国 */
+  provinces: string[]
   status: string
   remark: string | null
   bound_product_count: number
@@ -83,6 +82,7 @@ export interface SupplierProductForm {
   cost_price: string
   external_code: string
   operators: OperatorCode[]
+  provinces: string[]
   remark: string
 }
 
@@ -108,6 +108,7 @@ export interface UpstreamProduct {
 }
 
 export const supplierProductApi = {
+  meta: () => http.get<{ provinces: string[] }>('/admin/supplier-products/meta'),
   supplierOptions: () => http.get<SupplierOption[]>('/admin/supplier-products/supplier-options'),
   upstreamProducts: (supplierId: number) =>
     http.get<UpstreamProduct[]>('/admin/supplier-products/upstream-products', { supplier_id: supplierId }),

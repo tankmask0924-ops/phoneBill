@@ -46,19 +46,29 @@ class SupplierProductControllerTest extends HttpTestCase
             'cost_price' => '98.8',
             'external_code' => 'YD100',
             'operators' => ['cucc', 'cmcc', 'cmcc'],
+            'provinces' => ['广东', '湖南'],
         ]);
         $body = $this->body($created);
         $this->assertSame(200, $created->getStatusCode(), (string) $created->getBody());
         $this->supplierProductIds[] = $body['id'];
         $this->assertSame('98.80', $body['cost_price']);
         $this->assertSame(['cmcc', 'cucc'], $body['operators']);
+        $this->assertSame(['湖南', '广东'], $body['provinces'], '按省份表的顺序排');
         $this->assertSame($supplier->name, $body['supplier_name']);
+
+        // 省份必填、要合法
+        foreach ([[], ['火星'], null] as $provinces) {
+            $bad = ['supplier_id' => $supplier->id, 'name' => 'x', 'face_value' => 100, 'cost_price' => '1', 'external_code' => 'X', 'operators' => ['cmcc'], 'provinces' => $provinces];
+            $this->assertSame(422, $this->jsonRequest('POST', '/admin/supplier-products', $token, $bad)->getStatusCode(), json_encode($provinces));
+        }
 
         $updated = $this->body($this->jsonRequest('PUT', "/admin/supplier-products/{$body['id']}", $token, [
             'cost_price' => 99,
             'operators' => ['ctcc'],
             'face_value' => 50,
+            'provinces' => ['广东', '*'],
         ]));
+        $this->assertSame(['*'], $updated['provinces'], '选了全国只保留 *');
         $this->assertSame('99.00', $updated['cost_price']);
         $this->assertSame(['ctcc'], $updated['operators']);
         $this->assertSame(50, $updated['face_value'], '还没被绑定，面值可以改');
@@ -67,6 +77,9 @@ class SupplierProductControllerTest extends HttpTestCase
         $this->assertSame([$body['id']], array_column($list['data'], 'id'));
         $none = $this->body($this->jsonRequest('GET', "/admin/supplier-products?supplier_id={$supplier->id}&operator=cmcc", $token));
         $this->assertSame([], $none['data']);
+        $byProvince = $this->body($this->jsonRequest('GET', "/admin/supplier-products?supplier_id={$supplier->id}&province=" . urlencode('西藏'), $token));
+        $this->assertSame([$body['id']], array_column($byProvince['data'], 'id'), '覆盖全国的按任何省份都能筛到');
+        $this->assertCount(31, $this->body($this->jsonRequest('GET', '/admin/supplier-products/meta', $token))['provinces']);
 
         $options = $this->body($this->jsonRequest('GET', '/admin/supplier-products/supplier-options', $token));
         $this->assertContains($supplier->id, array_column($options, 'id'));
@@ -81,7 +94,7 @@ class SupplierProductControllerTest extends HttpTestCase
         $this->assertTrue(array_column($options, 'supports_upstream_products', 'id')[$supplier->id]);
 
         $created = $this->body($this->jsonRequest('POST', '/admin/supplier-products', $token, [
-            'supplier_id' => $supplier->id, 'name' => '移动100', 'face_value' => 100, 'cost_price' => '98.5', 'external_code' => 'MOCK_CMCC_100', 'operators' => ['cmcc'],
+            'supplier_id' => $supplier->id, 'name' => '移动100', 'face_value' => 100, 'cost_price' => '98.5', 'external_code' => 'MOCK_CMCC_100', 'operators' => ['cmcc'], 'provinces' => ['*'],
         ]));
         $this->supplierProductIds[] = $created['id'];
 

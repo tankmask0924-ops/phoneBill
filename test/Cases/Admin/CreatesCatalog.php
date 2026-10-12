@@ -30,6 +30,7 @@ use App\Model\ProductRoute;
 use App\Model\Supplier;
 use App\Model\SupplierProduct;
 use App\Model\SupplierProductOperator;
+use App\Model\SupplierProductProvince;
 use App\Model\SupplierProvince;
 use App\Security\Encrypter;
 
@@ -47,6 +48,9 @@ trait CreatesCatalog
     private array $supplierIds = [];
 
     private array $supplierProductIds = [];
+
+    /** createSupplier() 传的省份，createSupplierProduct() 没指定省份时用它（省份在供应商商品上） */
+    private array $supplierDefaultProvinces = [];
 
     private array $productIds = [];
 
@@ -79,6 +83,7 @@ trait CreatesCatalog
         Product::destroy($this->productIds);
         ProductCategory::destroy($this->categoryIds);
         SupplierProductOperator::whereIn('supplier_product_id', $this->supplierProductIds)->delete();
+        SupplierProductProvince::whereIn('supplier_product_id', $this->supplierProductIds)->delete();
         SupplierProduct::destroy($this->supplierProductIds);
         ChannelMaintenance::whereIn('supplier_id', $this->supplierIds)->delete();
         MobileBlacklist::whereIn('mobile', $this->blacklistMobiles)->delete();
@@ -106,9 +111,7 @@ trait CreatesCatalog
             'status' => $status,
         ]);
         $this->supplierIds[] = $supplier->id;
-        foreach ($provinces as $province) {
-            SupplierProvince::create(['supplier_id' => $supplier->id, 'province' => $province]);
-        }
+        $this->supplierDefaultProvinces[$supplier->id] = $provinces;
 
         return $supplier;
     }
@@ -123,8 +126,9 @@ trait CreatesCatalog
 
     /**
      * @param list<string> $operators
+     * @param null|list<string> $provinces 不传就用 createSupplier() 时给供应商的省份
      */
-    private function createSupplierProduct(Supplier $supplier, array $operators, int $faceValue = 100, string $cost = '98.00', string $status = 'active'): SupplierProduct
+    private function createSupplierProduct(Supplier $supplier, array $operators, int $faceValue = 100, string $cost = '98.00', string $status = 'active', ?array $provinces = null): SupplierProduct
     {
         $product = SupplierProduct::create([
             'supplier_id' => $supplier->id,
@@ -137,6 +141,9 @@ trait CreatesCatalog
         $this->supplierProductIds[] = $product->id;
         foreach ($operators as $operator) {
             SupplierProductOperator::create(['supplier_product_id' => $product->id, 'operator' => $operator]);
+        }
+        foreach ($provinces ?? $this->supplierDefaultProvinces[$supplier->id] ?? ['*'] as $province) {
+            SupplierProductProvince::create(['supplier_product_id' => $product->id, 'province' => $province]);
         }
 
         return $product;

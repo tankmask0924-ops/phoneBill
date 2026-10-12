@@ -13,6 +13,7 @@ declare(strict_types=1);
 namespace App\Service\Admin;
 
 use App\Enum\Operator;
+use App\Enum\Province;
 use Hyperf\HttpMessage\Exception\HttpException;
 
 /**
@@ -66,6 +67,28 @@ trait ValidatesAdminInput
         }
 
         return (int) $value;
+    }
+
+    /**
+     * 覆盖省份：选了「全国」时只保留 *，其余按 Province::NAMES 的顺序。
+     *
+     * @return list<string>
+     */
+    private function provinces(mixed $provinces): array
+    {
+        if (! is_array($provinces) || $provinces === []) {
+            throw new HttpException(422, '请选择覆盖的省份');
+        }
+        if (in_array(Province::ALL, $provinces, true)) {
+            return [Province::ALL];
+        }
+        foreach ($provinces as $province) {
+            if (! is_string($province) || ! Province::isValid($province)) {
+                throw new HttpException(422, '未知的省份：' . (is_string($province) ? $province : gettype($province)));
+            }
+        }
+
+        return array_values(array_intersect(Province::NAMES, $provinces));
     }
 
     /**

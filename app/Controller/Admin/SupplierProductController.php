@@ -14,6 +14,7 @@ namespace App\Controller\Admin;
 
 use App\Annotation\RequiresPermission;
 use App\Controller\AbstractController;
+use App\Enum\Province;
 use App\Middleware\AdminAuthMiddleware;
 use App\Middleware\AdminPermissionMiddleware;
 use App\Model\AdminUser;
@@ -49,6 +50,18 @@ class SupplierProductController extends AbstractController
     public function index(): array
     {
         return $this->supplierProductAdminService->list($this->request->all());
+    }
+
+    /**
+     * 表单选项：省份（覆盖省份在供应商商品上）。
+     */
+    #[Middleware(AdminAuthMiddleware::class)]
+    #[Middleware(AdminPermissionMiddleware::class)]
+    #[RequiresPermission('supplier_product.view')]
+    #[GetMapping(path: 'meta')]
+    public function meta(): array
+    {
+        return ['provinces' => Province::NAMES];
     }
 
     /**
