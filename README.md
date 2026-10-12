@@ -159,6 +159,17 @@ npm run build        # 产物在 merchant-web/dist，部署在 /merchant/ 路径
 - 确认容器里有 `crontab-dispatcher`、`async-queue`（默认 2 个）、`async-queue-notify` 这几个进程，否则定时任务和异步队列不执行
 - 部署后执行 `admin:sync-permissions`；这次加了登录态的 aud 校验，已登录的管理员需要重新登录一次
 
+## 清理订单和商品（上线前清测试数据）
+
+```bash
+docker exec -it pb php bin/hyperf.php data:clean-orders-products --dry-run   # 只列出每张表要删多少行
+docker exec -it pb php bin/hyperf.php data:clean-orders-products             # 要输入数据库名确认；--force 跳过确认
+```
+
+- **删除**：订单、供应商提交记录、通知商户记录、商品每日统计；平台商品、绑定、默认售价、商品分类、商户开通的商品和价格、供应商商品（含运营商、省份）；**所有资金流水**，并把**所有商户余额归零**。已入账的加款申请保留，只去掉和流水的关联。
+- **保留**：供应商、商户和后台账号、管理员和权限、号段、黑名单、通道维护、收款配置、付款账号、加款申请、系统配置、操作日志。
+- 不可恢复：先备份数据库，并在没有下单流量时执行（最好先停掉商户的下单）。全部在一个事务里删，出错整体回滚；删完自动清掉选路和商户价格缓存。逻辑见 `App\Service\Maintenance\DataCleanupService`。
+
 ## 容量与调优
 
 按每天几十万单（高峰每秒 30～50 单）设计，相关配置都在 `.env`：
