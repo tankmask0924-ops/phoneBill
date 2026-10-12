@@ -23,6 +23,8 @@ final class RechargeResult
         public readonly ?string $message = null,
         public readonly ?string $request = null,
         public readonly ?string $response = null,
+        /** 调供应商接口时出了异常（连不上、超时、握手失败等），不知道上游收没收到 */
+        public readonly bool $callFailed = false,
     ) {
     }
 
@@ -39,5 +41,13 @@ final class RechargeResult
     public static function processing(?string $supplierOrderNo = null, ?string $message = null, ?string $request = null, ?string $response = null): self
     {
         return new self(RechargeStatus::Processing, $supplierOrderNo, $message, $request, $response);
+    }
+
+    /**
+     * 调用异常：按处理中算（上游可能已经建单），由调用方决定是否转人工。
+     */
+    public static function callFailed(string $message): self
+    {
+        return new self(RechargeStatus::Processing, null, $message, null, null, true);
     }
 }

@@ -137,22 +137,23 @@ class OrderFlowTest extends HttpTestCase
         $this->assertSame('100.50', Merchant::find($merchant->id)->balance);
     }
 
-    public function testTimeoutWaitsForCallbackInsteadOfSwitchingSupplier()
+    public function testCallFailureTurnsAbnormalAndWaitsForCallback()
     {
         [$merchant, $product, $mobile, $suppliers] = $this->scenario([
             ['provinces' => ['*'], 'operators' => ['cmcc'], 'cost' => '98.00', 'result' => 'timeout', 'priority' => 1],
             ['provinces' => ['*'], 'operators' => ['cmcc'], 'cost' => '99.00', 'result' => 'success', 'priority' => 2],
         ]);
 
+        // 调用异常：上游可能已经建单，不当失败、不换供应商，立即转异常订单人工处理
         $order = $this->placeOrder($merchant, $product, $mobile);
         $this->process()->submit($order->id);
-        $this->assertSame(Order::STATUS_PROCESSING, Order::find($order->id)->status, '超时不当失败，不换供应商');
+        $this->assertSame(Order::STATUS_ABNORMAL, Order::find($order->id)->status);
         $attempt = OrderAttempt::where('order_id', $order->id)->first();
-        $this->assertSame(OrderAttempt::STATUS_PROCESSING, $attempt->status);
+        $this->assertSame(OrderAttempt::STATUS_PROCESSING, $attempt->status, '提交本身还在处理中，查单、回调照常');
         $this->assertStringContainsString('模拟超时', $attempt->message);
         $this->assertSame(1, OrderAttempt::where('order_id', $order->id)->count());
 
-        // 再推一次提交也不会换供应商：上一次还在处理中
+        // 再推一次提交也不会换供应商：订单已经是异常
         $this->process()->submit($order->id);
         $this->assertSame(1, OrderAttempt::where('order_id', $order->id)->count());
 
@@ -165,6 +166,26 @@ class OrderFlowTest extends HttpTestCase
         $this->assertSame(Order::STATUS_SUCCESS, Order::find($order->id)->status);
         $this->assertSame([400, 'invalid'], $this->supplierCallback($suppliers[0], ['attempt_no' => $attempt->attempt_no, 'status' => 'whatever']));
         $this->assertSame(404, $this->client->request('POST', '/notify/supplier/no_such_supplier')->getStatusCode());
+    }
+
+    public function testCallFailureThenUpstreamFailureStaysAbnormalForManualRefund()
+    {
+        [$merchant, $product, $mobile, $suppliers] = $this->scenario([
+            ['provinces' => ['*'], 'operators' => ['cmcc'], 'cost' => '98.00', 'result' => 'timeout', 'priority' => 1],
+            ['provinces' => ['*'], 'operators' => ['cmcc'], 'cost' => '99.00', 'result' => 'success', 'priority' => 2],
+        ]);
+        $order = $this->placeOrder($merchant, $product, $mobile);
+        $this->process()->submit($order->id);
+        $balance = Merchant::find($merchant->id)->balance;
+        $attempt = OrderAttempt::where('order_id', $order->id)->first();
+
+        // 上游后来说失败：提交记为失败，但订单保持异常，不自动换供应商、不自动退款，等人工核实
+        $this->assertSame([200, 'ok'], $this->supplierCallback($suppliers[0], ['attempt_no' => $attempt->attempt_no, 'status' => 'failed']));
+        $this->assertSame(OrderAttempt::STATUS_FAILED, OrderAttempt::find($attempt->id)->status);
+        $this->assertSame(Order::STATUS_ABNORMAL, Order::find($order->id)->status);
+        $this->process()->submit($order->id);
+        $this->assertSame(1, OrderAttempt::where('order_id', $order->id)->count());
+        $this->assertSame($balance, Merchant::find($merchant->id)->balance);
     }
 
     public function testQueryDueAndAbnormalAfterTimeout()

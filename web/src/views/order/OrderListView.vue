@@ -177,7 +177,7 @@ onMounted(async () => {
       :closable="false"
       show-icon
       class="tip-bar"
-      title="下单超过 2 小时还没有结果的订单。请先到供应商后台核实，再在详情里「置为成功」或「置为失败」（失败会退款）。"
+      title="两种情况会进这里：提交给供应商时接口异常（连不上、超时等，看提交记录里的说明），或下单超过 2 小时还没有结果。请先到供应商后台核实，再在详情里「置为成功」或「置为失败」（失败会退款）；供应商后来明确成功的会自动改为成功。"
     />
     <el-form inline @submit.prevent="list.search">
       <el-form-item>

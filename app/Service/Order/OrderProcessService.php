@@ -131,6 +131,11 @@ class OrderProcessService extends AbstractService
                     'response' => $result->response,
                 ]);
                 $this->applyResult($attempt->id, $result, false);
+                if ($result->callFailed) {
+                    $this->markAbnormalAfterCallFailure($order, $attempt, $result);
+
+                    return;
+                }
                 if ($result->status !== RechargeStatus::Failed) {
                     return;
                 }
@@ -371,6 +376,22 @@ class OrderProcessService extends AbstractService
         }
 
         return count($ids);
+    }
+
+    /**
+     * 提交时调供应商接口出了异常（连不上、超时、握手失败等）：上游可能已经建单（实测连接超时的单商腾那边照样建了），
+     * 判失败换下一家可能重复充值，等 2 小时又太久，所以立即转异常订单交给人工。查单、回调照常进行，
+     * 上游明确成功的会自动改为成功；明确失败的保持异常，人工核实后置为失败并退款。
+     */
+    private function markAbnormalAfterCallFailure(Order $order, OrderAttempt $attempt, RechargeResult $result): void
+    {
+        if ($this->orderDao->transition($order->id, [Order::STATUS_PROCESSING], Order::STATUS_ABNORMAL)) {
+            $this->logger()->warning('提交供应商时接口异常，订单转异常', [
+                'order_id' => $order->id,
+                'attempt_no' => $attempt->attempt_no,
+                'message' => $result->message,
+            ]);
+        }
     }
 
     private function logger(): LoggerInterface

@@ -141,7 +141,7 @@ class SupplierGateway extends AbstractService
         try {
             $result = $this->driver($supplier)->{$method}($request);
         } catch (Throwable $e) {
-            $result = RechargeResult::processing(null, mb_substr('调用异常，按处理中等待结果：' . $e->getMessage(), 0, 255));
+            $result = RechargeResult::callFailed(mb_substr('调用异常：' . $e->getMessage(), 0, 255));
         }
         $this->logger()->info($method, [
             'supplier' => $supplier->code,
