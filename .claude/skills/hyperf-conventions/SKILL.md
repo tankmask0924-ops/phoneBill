@@ -125,6 +125,31 @@ protected function setUp(): void
 - [phpunit.xml.dist](phpunit.xml.dist) 里固定测试环境变量，新增影响测试行为的开关也在这里设。
 - 列表类接口必须有一个「筛不出任何数据」的用例，断言返回 200 和空列表。
 
+### 7.1 跑哪些测试
+
+改完代码先按改动范围判断：只跑相关测试文件，还是跑全量（`composer test`，约 1～2 分钟）。改了 PHP 代码都要跑 `composer analyse`（很快）。
+
+**只跑相关测试文件**：改动只影响一个模块，其他地方用不到。
+
+- 新接或修改某一家供应商驱动，只动了 `app/Supplier/Driver/XxxDriver.php`：跑 `test/Cases/Supplier/XxxDriverTest.php`
+- 只改某个 Controller / Service 内部逻辑，方法签名和返回结构不变：跑它对应的测试文件
+- 相关测试文件用 `grep -rl '类名' test/` 找出来，命中几个就跑几个
+
+**必须跑全量**：改动的代码被多个模块共用，或者会影响全局。
+
+- 公共类型和接口：`app/Supplier/` 下的接口和值对象（`SupplierDriverInterface`、`RechargeResult`、`RechargeRequest` 等）、`SupplierDriverRegistry`、`AbstractController` / `AbstractService` / `AbstractDao`
+- 订单主流程和资金：`app/Service/Order/`、`SupplierGateway`，以及扣款、退款、余额相关代码
+- Model、Dao、数据库迁移（表结构、字段、状态常量）
+- 鉴权和安全：Middleware、`app/Auth/`、`app/Security/`（签名、加解密）、权限编码
+- 全局配置和框架层：`config/`、Listener、异常处理器、Aspect、Crontab、Process、`composer.json` 依赖
+- 测试基础设施：`test/HttpTestCase.php`、`test/Support/`、`test/Cases/Admin/CreatesCatalog.php` 等被多个测试复用的 trait
+- 改了公共方法的签名、返回结构或语义，`grep` 下来调用方分布在多个模块
+- 拿不准的时候按全量处理
+
+**不用跑测试**：只改 `docs/`、README、`.claude/` 下的文档，或者只改前端（`web/`、`merchant-web/`）。
+
+向用户汇报时说清楚跑的是哪些测试；只跑了相关测试的，也要说明没跑全量。
+
 ## 8. 配置、Docker、Git
 
 **环境变量**
