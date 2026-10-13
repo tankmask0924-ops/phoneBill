@@ -98,10 +98,8 @@ class OrderService extends AbstractService
             throw new OpenApiException(OpenApiException::DUPLICATE_RECHARGE, '该号码有正在处理的同面值订单');
         }
         try {
-            $windowMinutes = (int) $this->config->get('order.duplicate_window_minutes', 10);
-            $since = date('Y-m-d H:i:s', time() - $windowMinutes * 60);
-            if ($this->orderDao->hasRecent($mobile, $quote['face_value'], $since, self::IN_PROGRESS)) {
-                throw new OpenApiException(OpenApiException::DUPLICATE_RECHARGE, "该号码 {$windowMinutes} 分钟内有正在处理的同面值订单");
+            if ($this->orderDao->hasRecent($mobile, $quote['face_value'], $this->duplicateSince(), self::IN_PROGRESS)) {
+                throw new OpenApiException(OpenApiException::DUPLICATE_RECHARGE, $this->duplicateMessage());
             }
 
             $order = null;
@@ -170,6 +168,19 @@ class OrderService extends AbstractService
     }
 
     /**
+     * 重复充值检查的批量版（商户后台批量下单预览用）：这些号码里，同一面值在防重窗口内有进行中订单的那些。
+     *
+     * @param list<string> $mobiles
+     * @return array<string, string> 手机号 => 原因
+     */
+    public function duplicateMobiles(array $mobiles, int $faceValue): array
+    {
+        $found = $this->orderDao->recentMobiles($mobiles, $faceValue, $this->duplicateSince(), self::IN_PROGRESS);
+
+        return array_fill_keys($found, $this->duplicateMessage());
+    }
+
+    /**
      * 给商户看的订单信息（开放接口返回、结果通知用同一份）。等待中、异常都显示为 processing；
      * 人工处理单在手动回调之前也显示为 processing（结果由人工决定什么时候给商户）。
      *
@@ -220,6 +231,21 @@ class OrderService extends AbstractService
 
             return $order;
         });
+    }
+
+    private function duplicateSince(): string
+    {
+        return date('Y-m-d H:i:s', time() - $this->duplicateWindowMinutes() * 60);
+    }
+
+    private function duplicateMessage(): string
+    {
+        return "该号码 {$this->duplicateWindowMinutes()} 分钟内有正在处理的同面值订单";
+    }
+
+    private function duplicateWindowMinutes(): int
+    {
+        return (int) $this->config->get('order.duplicate_window_minutes', 10);
     }
 
     /**

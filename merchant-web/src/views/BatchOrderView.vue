@@ -55,6 +55,13 @@ async function doPreview() {
     ElMessage.warning('请填写手机号')
     return
   }
+  // 重复的号码直接去掉（保留第一次出现的），输入框里也改成去重后的
+  const unique = [...new Set(mobiles.value)]
+  const removed = mobiles.value.length - unique.length
+  if (removed > 0) {
+    mobilesText.value = unique.join('\n')
+    ElMessage.info(`已去掉 ${removed} 个重复号码`)
+  }
   if (mobiles.value.length > MAX_MOBILES) {
     ElMessage.warning(`一批最多 ${MAX_MOBILES} 个号码，当前 ${mobiles.value.length} 个，请分批提交`)
     return

@@ -87,6 +87,27 @@ class MerchantBatchOrderTest extends HttpTestCase
         $this->assertSame('300.00', Merchant::find($merchant->id)->balance);
     }
 
+    public function testPreviewFlagsMobilesWithOrdersInProgress()
+    {
+        [$merchant, $product, $first] = $this->scenario('300.00');
+        $second = substr($first, 0, 7) . '5678';
+        $token = $this->login($merchant);
+        $this->jsonRequest('POST', '/merchant/batch-orders', $token, ['product_code' => $product->code, 'mobiles' => [$first], 'batch_no' => 'B' . bin2hex(random_bytes(8))]);
+
+        // 刚下过同面值的单、还在处理中：预览就标出来，不算进合计
+        $result = $this->body($this->jsonRequest('POST', '/merchant/batch-orders/preview', $token, ['product_code' => $product->code, 'mobiles' => [$first, $second]]));
+        $this->assertSame([false, true], array_column($result['items'], 'ok'));
+        $this->assertStringContainsString('分钟内有正在处理的同面值订单', $result['items'][0]['error']);
+        $this->assertSame(1, $result['valid_count']);
+        $this->assertSame('99.50', $result['total_amount']);
+
+        // 那一单出了结果就不再拦
+        Order::where('merchant_id', $merchant->id)->update(['status' => Order::STATUS_FAILED]);
+        $result = $this->body($this->jsonRequest('POST', '/merchant/batch-orders/preview', $token, ['product_code' => $product->code, 'mobiles' => [$first, $second]]));
+        $this->assertSame([true, true], array_column($result['items'], 'ok'));
+        $this->assertSame('199.00', $result['total_amount']);
+    }
+
     public function testSubmitPlacesOrdersOneByOneAndResubmitIsIdempotent()
     {
         [$merchant, $product, $first] = $this->scenario('150.00');

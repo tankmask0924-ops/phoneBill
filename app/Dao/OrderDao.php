@@ -96,4 +96,27 @@ class OrderDao extends AbstractDao
             ->whereIn('status', $statuses)
             ->exists();
     }
+
+    /**
+     * hasRecent() 的批量版：这些手机号里，同一面值在 $since 之后有还没出结果的订单的那些。
+     *
+     * @param list<string> $mobiles
+     * @param list<string> $statuses
+     * @return list<string>
+     */
+    public function recentMobiles(array $mobiles, int $faceValue, string $since, array $statuses): array
+    {
+        if ($mobiles === []) {
+            return [];
+        }
+
+        return $this->newQuery()
+            ->whereIn('mobile', $mobiles)
+            ->where('created_at', '>=', $since)
+            ->where('face_value', $faceValue)
+            ->whereIn('status', $statuses)
+            ->distinct()
+            ->pluck('mobile')
+            ->all();
+    }
 }

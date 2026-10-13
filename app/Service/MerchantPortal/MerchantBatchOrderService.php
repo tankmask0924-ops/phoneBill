@@ -25,7 +25,7 @@ use Hyperf\Logger\LoggerFactory;
 /**
  * 商户后台批量下单（docs/project.md 5.1）：一批一个商品、多个手机号，逐个走开放接口同一套下单逻辑（OrderService）。
  *
- * - 先预览：每个号码的运营商、价格或不能下单的原因，加上合计金额和当前余额，不扣款；
+ * - 先预览：每个号码的运营商、价格或不能下单的原因（含同一批里重复、和进行中的订单重复），加上合计金额和当前余额，不扣款；
  * - 提交时商户订单号按「批次号-序号」生成，批次号由前端每批生成一次：同一批重复提交（比如超时后再点）
  *   返回之前建好的订单，不重复扣款；
  * - 每个号码单独下单、单独扣款，某个号码失败（余额不足、重复充值等）不影响其他号码，结果逐条返回；
@@ -55,8 +55,8 @@ class MerchantBatchOrderService extends AbstractService
         [$productCode, $mobiles] = $this->input($params);
 
         $items = [];
-        $total = '0.00';
         $seen = [];
+        $faceValue = null;
         foreach ($mobiles as $mobile) {
             $item = ['mobile' => $mobile, 'ok' => false, 'operator' => null, 'province' => null, 'price' => null, 'error' => null];
             if (isset($seen[$mobile])) {
@@ -74,8 +74,22 @@ class MerchantBatchOrderService extends AbstractService
                 continue;
             }
             $items[] = array_replace($item, ['ok' => true, 'operator' => $checked['operator'], 'province' => $checked['province'], 'price' => $checked['price']]);
-            $total = bcadd($total, $checked['price'], 2);
+            $faceValue = (int) $checked['quote']['face_value'];
         }
+
+        // 和之前的订单重复：同一面值在防重窗口内还有进行中的订单，提交时会被拒，一次查出来提前标上
+        $okMobiles = array_column(array_filter($items, static fn (array $i) => $i['ok']), 'mobile');
+        $duplicates = $faceValue === null ? [] : $this->orderService->duplicateMobiles($okMobiles, $faceValue);
+        $total = '0.00';
+        foreach ($items as &$row) {
+            if ($row['ok'] && isset($duplicates[$row['mobile']])) {
+                $row = array_replace($row, ['ok' => false, 'error' => $duplicates[$row['mobile']]]);
+            }
+            if ($row['ok']) {
+                $total = bcadd($total, $row['price'], 2);
+            }
+        }
+        unset($row);
 
         return [
             'items' => $items,
