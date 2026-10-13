@@ -32,6 +32,8 @@ final class RechargeRequest
         public readonly array $config,
         /** 查单时带上供应商之前返回的订单号 */
         public readonly ?string $supplierOrderNo = null,
+        /** 这次提交的成本价（元，供应商商品的进价）；下单时要传结算价的供应商用 */
+        public readonly ?string $costPrice = null,
     ) {
     }
 }

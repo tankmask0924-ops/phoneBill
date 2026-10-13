@@ -18,6 +18,7 @@ use App\Supplier\Driver\MockDriver;
 use App\Supplier\Driver\OpenPlatformDriver;
 use App\Supplier\Driver\PikoudaiDriver;
 use App\Supplier\Driver\ShangtengDriver;
+use App\Supplier\Driver\YingyetingDriver;
 use App\Supplier\Driver\ZhongkongDriver;
 use Psr\Container\ContainerInterface;
 
@@ -39,6 +40,7 @@ class SupplierDriverRegistry
         DayuanrenDriver::class,
         PikoudaiDriver::class,
         LiuhaoDriver::class,
+        YingyetingDriver::class,
     ];
 
     public function __construct(private ContainerInterface $container)

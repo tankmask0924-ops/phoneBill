@@ -185,6 +185,7 @@ class SupplierGateway extends AbstractService
             $supplierProduct->external_code,
             $this->driverConfig($supplier),
             $attempt->supplier_order_no,
+            $attempt->cost_price === null ? null : (string) $attempt->cost_price,
         );
 
         try {
