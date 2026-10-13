@@ -27,6 +27,7 @@ const router = createRouter({
       children: [
         { path: 'dashboard', name: 'dashboard', component: () => import('@/views/DashboardView.vue'), meta: { title: '首页' } },
         { path: 'orders', name: 'orders', component: () => import('@/views/OrderListView.vue'), meta: { title: '订单记录' } },
+        { path: 'batch-order', name: 'batch-order', component: () => import('@/views/BatchOrderView.vue'), meta: { title: '批量下单' } },
         {
           path: 'balance-logs',
           name: 'balance-logs',

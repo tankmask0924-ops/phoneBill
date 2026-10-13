@@ -25,7 +25,8 @@ export interface HttpOptions {
 /** 直接返回响应体，调用方通过泛型声明返回类型 */
 export interface Http {
   get<T>(url: string, params?: object): Promise<T>
-  post<T>(url: string, data?: unknown): Promise<T>
+  /** timeout：毫秒，个别慢接口（比如批量下单）单独放宽 */
+  post<T>(url: string, data?: unknown, timeout?: number): Promise<T>
   put<T>(url: string, data?: unknown): Promise<T>
   delete<T>(url: string, params?: object): Promise<T>
 }
@@ -71,7 +72,7 @@ export function createHttp(options: HttpOptions): Http {
 
   return {
     get: (url, params) => instance.get(url, { params }).then((res) => res.data),
-    post: (url, data) => instance.post(url, data).then((res) => res.data),
+    post: (url, data, timeout) => instance.post(url, data, timeout ? { timeout } : undefined).then((res) => res.data),
     put: (url, data) => instance.put(url, data).then((res) => res.data),
     delete: (url, params) => instance.delete(url, { params }).then((res) => res.data),
   }

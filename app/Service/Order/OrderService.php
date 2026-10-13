@@ -85,35 +85,11 @@ class OrderService extends AbstractService
         }
 
         $mobile = $this->string($params, 'mobile');
-        if (! $this->mobileSegmentService->isValidMobile($mobile)) {
-            throw new OpenApiException(OpenApiException::INVALID_PARAMS, 'mobile 必须是 11 位手机号');
-        }
         $notifyUrl = $this->string($params, 'notify_url');
         if ($notifyUrl !== '' && (mb_strlen($notifyUrl) > 500 || filter_var($notifyUrl, FILTER_VALIDATE_URL) === false || ! preg_match('#^https?://#i', $notifyUrl))) {
             throw new OpenApiException(OpenApiException::INVALID_PARAMS, 'notify_url 必须是 http:// 或 https:// 开头的网址');
         }
-
-        $productCode = $this->string($params, 'product_code');
-        $quote = preg_match('/^[A-Za-z0-9_-]{1,32}$/', $productCode) === 1 ? $this->priceService->quote($merchant->id, $productCode) : null;
-        if ($quote === null || ! $quote['product_active'] || ! $quote['opened_active']) {
-            throw new OpenApiException(OpenApiException::PRODUCT_NOT_AVAILABLE, '商品不存在、已下架或没有为你开通');
-        }
-        if ($this->blacklistService->isBlocked($mobile)) {
-            throw new OpenApiException(OpenApiException::BLACKLISTED, '该号码暂不支持充值');
-        }
-        $segment = $this->mobileSegmentService->identify($mobile);
-        if ($segment === null || $segment->is_virtual) {
-            throw new OpenApiException(OpenApiException::UNSUPPORTED_MOBILE, $segment === null ? '无法识别该号码的运营商' : '暂不支持虚拟运营商号码');
-        }
-        $price = $quote['prices'][$segment->operator] ?? null;
-        if ($price === null) {
-            throw new OpenApiException(OpenApiException::PRICE_NOT_SET, '该商品暂不支持这个号码的运营商');
-        }
-        $productId = $quote['product_id'];
-        $candidates = $this->productRouteService->candidates([$productId], $segment->operator, $segment->province)[$productId] ?? [];
-        if ($candidates === []) {
-            throw new OpenApiException(OpenApiException::NO_CHANNEL, '该号码所在地区暂时无法充值');
-        }
+        ['quote' => $quote, 'operator' => $operator, 'province' => $province, 'price' => $price] = $this->check($merchant, $this->string($params, 'product_code'), $mobile);
 
         // 同一号码同一面值串行处理，防止并发请求同时通过「重复充值」检查
         $lockKey = "order:mobile:{$mobile}:{$quote['face_value']}";
@@ -131,7 +107,7 @@ class OrderService extends AbstractService
             $order = null;
             for ($try = 1; $order === null; ++$try) {
                 try {
-                    $order = $this->createAndCharge($merchant, $merchantOrderNo, $quote, $mobile, $segment->operator, $segment->province, $price, $notifyUrl);
+                    $order = $this->createAndCharge($merchant, $merchantOrderNo, $quote, $mobile, $operator, $province, $price, $notifyUrl);
                 } catch (QueryException $e) {
                     // 平台订单号撞了（同一秒随机数相同）：换一个号重试
                     if ($try < 3 && str_contains($e->getMessage(), 'orders_order_no_unique')) {
@@ -157,6 +133,40 @@ class OrderService extends AbstractService
         $this->dispatcher->submit($order->id);
 
         return $order;
+    }
+
+    /**
+     * 下单前的检查（不含重复充值和余额）：手机号、商品、黑名单、号段、价格、可用通道。
+     * 开放接口下单和商户后台批量下单的预览共用，不通过时抛 OpenApiException。
+     *
+     * @return array{quote: array<string, mixed>, operator: string, province: string, price: string}
+     */
+    public function check(Merchant $merchant, string $productCode, string $mobile): array
+    {
+        if (! $this->mobileSegmentService->isValidMobile($mobile)) {
+            throw new OpenApiException(OpenApiException::INVALID_PARAMS, 'mobile 必须是 11 位手机号');
+        }
+        $quote = preg_match('/^[A-Za-z0-9_-]{1,32}$/', $productCode) === 1 ? $this->priceService->quote($merchant->id, $productCode) : null;
+        if ($quote === null || ! $quote['product_active'] || ! $quote['opened_active']) {
+            throw new OpenApiException(OpenApiException::PRODUCT_NOT_AVAILABLE, '商品不存在、已下架或没有为你开通');
+        }
+        if ($this->blacklistService->isBlocked($mobile)) {
+            throw new OpenApiException(OpenApiException::BLACKLISTED, '该号码暂不支持充值');
+        }
+        $segment = $this->mobileSegmentService->identify($mobile);
+        if ($segment === null || $segment->is_virtual) {
+            throw new OpenApiException(OpenApiException::UNSUPPORTED_MOBILE, $segment === null ? '无法识别该号码的运营商' : '暂不支持虚拟运营商号码');
+        }
+        $price = $quote['prices'][$segment->operator] ?? null;
+        if ($price === null) {
+            throw new OpenApiException(OpenApiException::PRICE_NOT_SET, '该商品暂不支持这个号码的运营商');
+        }
+        $productId = $quote['product_id'];
+        if (($this->productRouteService->candidates([$productId], $segment->operator, $segment->province)[$productId] ?? []) === []) {
+            throw new OpenApiException(OpenApiException::NO_CHANNEL, '该号码所在地区暂时无法充值');
+        }
+
+        return ['quote' => $quote, 'operator' => $segment->operator, 'province' => $segment->province, 'price' => (string) $price];
     }
 
     /**

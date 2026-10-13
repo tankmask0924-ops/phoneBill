@@ -153,6 +153,51 @@ export const fundingApi = {
   createRequest: (data: FundingRequestForm) => http.post<FundingRequest>('/merchant/funding-requests', data),
 }
 
+export interface BatchPreviewItem {
+  mobile: string
+  ok: boolean
+  operator: string | null
+  province: string | null
+  price: string | null
+  /** 不能下单的原因 */
+  error: string | null
+}
+
+export interface BatchPreview {
+  items: BatchPreviewItem[]
+  valid_count: number
+  total_amount: string
+  balance: string | null
+}
+
+export interface BatchResultItem {
+  mobile: string
+  /** 批次号-序号 */
+  merchant_order_no: string
+  ok: boolean
+  order_no: string | null
+  status: string | null
+  amount: string | null
+  error: string | null
+}
+
+export interface BatchResult {
+  batch_no: string
+  items: BatchResultItem[]
+  success_count: number
+  failed_count: number
+  balance: string | null
+}
+
+/** 批量下单：App\Controller\Merchant\BatchOrderController，一批最多 200 个号码 */
+export const batchOrderApi = {
+  preview: (productCode: string, mobiles: string[]) =>
+    http.post<BatchPreview>('/merchant/batch-orders/preview', { product_code: productCode, mobiles }),
+  /** 同步逐个下单，号码多时要十几秒以上，超时放宽到 2 分钟；同一个 batchNo 重复提交不会重复下单 */
+  submit: (productCode: string, mobiles: string[], batchNo: string) =>
+    http.post<BatchResult>('/merchant/batch-orders', { product_code: productCode, mobiles, batch_no: batchNo }, 120000),
+}
+
 export const portalApi = {
   dashboard: () => http.get<Dashboard>('/merchant/dashboard'),
   /** mobile 可以是多个手机号（换行、空格、逗号分隔，最多 200 个） */

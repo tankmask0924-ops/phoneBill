@@ -29,7 +29,7 @@ Hyperf 3.1 + PHP 8.4 + Swoole 后端，附带 Web 管理后台（Vue 3 + TypeScr
 
 第三阶段：
 
-- 商户后台 `merchant-web/`：登录、首页（余额和今日数据）、订单记录、资金流水、账户（接入信息和可下单商品）
+- 商户后台 `merchant-web/`：登录、首页（余额和今日数据）、订单记录、批量下单、资金流水、账户（接入信息和可下单商品）
 - 管理端「商户」页面可以给商户开后台账号、重置密码、启用禁用
 
 ## 目录
@@ -40,7 +40,7 @@ Hyperf 3.1 + PHP 8.4 + Swoole 后端，附带 Web 管理后台（Vue 3 + TypeScr
 | `migrations/` | 数据库迁移 |
 | `test/` | 测试（`test/Cases/`） |
 | `web/` | 管理后台前端（平台内部用） |
-| `merchant-web/` | 商户后台前端（商户用，只读） |
+| `merchant-web/` | 商户后台前端（商户用） |
 | `docs/` | 项目文档 [project.md](docs/project.md)、商户接入文档 [api.md](docs/api.md) |
 
 ## 后端本地开发
@@ -150,6 +150,7 @@ npm run build        # 产物在 merchant-web/dist，部署在 /merchant/ 路径
 | GET/PUT | `/merchant/auth/me`、`/merchant/auth/password` | 商户登录 |
 | GET | `/merchant/dashboard`、`/orders`、`/order-filter-options`、`/orders/{id}`、`/balance-logs`、`/products`（可下单商品和近 7 天统计）、`/account` | 商户登录，只能看自己的数据 |
 | PUT/POST | `/merchant/account/ip-whitelist`、`/merchant/account/reset-secret` | 商户登录，要再输一次登录密码 |
+| POST | `/merchant/batch-orders/preview`（预览）、`/merchant/batch-orders`（提交） | 商户登录，商户停用时不能下单 |
 | GET/POST/PUT/DELETE | `/merchant/payer-accounts`、`/{id}`；`/merchant/receiving-accounts`；`/merchant/funding-vouchers`（上传凭证）；`/merchant/funding-requests`、`/{id}` | 商户登录，只能看、改自己的 |
 
 ## 部署要点
