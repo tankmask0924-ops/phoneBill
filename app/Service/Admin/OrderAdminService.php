@@ -45,7 +45,8 @@ use Hyperf\HttpMessage\Exception\HttpException;
  *
  * - 置成功 / 置失败只对异常订单；冲正只对成功订单，要单独权限；三者都必须写备注，都记操作日志；
  * - 置失败、冲正都会退款并通知商户；人工处理单（提交时接口异常）不自动通知，人工手动回调；
- * - 手动回调只对成功 / 失败的订单：开新一轮通知，之前排队的通知作废；回调过的订单之后上游结果只记录、不再推给商户；
+ * - 手动回调对所有订单都可以：推商户当前看到的状态（没出结果的是 processing），开新一轮通知，之前排队的通知作废；
+ *   成功 / 失败的订单回调过之后上游结果只记录、不再推给商户，没出结果的订单回调后照常自动处理；
  * - 手动补单只对异常订单：同一笔订单重新提交给指定的供应商商品，不新建订单、不重复扣款；
  *   原来还在处理中的提交记为「人工确认上游未成功」，补单前必须先到上游确认原单没有充上，否则会重复充值。
  */
@@ -291,21 +292,21 @@ class OrderAdminService extends AbstractService
     }
 
     /**
-     * 手动回调：把订单当前结果推给商户（从第 1 次开始，失败按间隔重试）。开新一轮通知，之前排队的通知作废；
-     * 回调过的订单之后上游再来的结果只记录、不再推给商户。人工处理单要先人工置为成功 / 失败再回调。
+     * 手动回调：把商户当前看到的订单状态推给商户（从第 1 次开始，失败按间隔重试），所有订单都可以。
+     * 开新一轮通知，之前排队的通知作废。
+     *
+     * 只有成功 / 失败的订单才记「已手动回调」：之后上游再来的结果只记录、不再推给商户，人工处理单也从这时起给商户看结果。
+     * 没出结果的订单推 processing，不记，否则订单会被冻住、出结果也不再自动更新；它出结果后照常自动通知（人工处理单除外）。
      *
      * @return array<string, mixed>
      */
     public function manualNotify(AdminUser $operator, int $id, ?string $ip): array
     {
         $order = $this->findOrFail($id);
-        if (! $order->isFinal()) {
-            throw new HttpException(422, '订单还没有成功或失败，不能回调；异常订单请先置为成功或失败');
-        }
-        $this->orderDao->newQuery()->where('id', $order->id)->increment('notify_round', 1, [
-            'manual_notified_at' => date('Y-m-d H:i:s'),
+        $this->orderDao->newQuery()->where('id', $order->id)->increment('notify_round', 1, array_filter([
+            'manual_notified_at' => $order->isFinal() ? date('Y-m-d H:i:s') : null,
             'notify_status' => Order::NOTIFY_PENDING,
-        ]);
+        ]));
         $round = (int) $this->findOrFail($order->id)->notify_round;
         $this->dispatcher->notify($order->id, 1, 0, $round);
         $this->operationLogDao->record($operator->id, self::MODULE, 'manual_notify_order', 'order', $order->id, null, ['status' => $order->status, 'round' => $round], $ip);

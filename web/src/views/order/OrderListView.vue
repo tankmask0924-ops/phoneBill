@@ -189,10 +189,14 @@ async function reverse() {
 
 async function manualNotify() {
   const d = detail.value!
-  const result = d.status === 'success' ? '成功' : `失败（${d.fail_reason ?? ''}）`
+  const final = ['success', 'failed'].includes(d.status)
+  const result = d.status === 'success' ? '成功' : d.status === 'failed' ? `失败（${d.fail_reason ?? ''}）` : '处理中'
+  const after = final
+    ? '回调之后，上游再来的结果都只记录、不会再推给商户。'
+    : '订单还没有结果，不影响后续处理：出结果后照常自动更新' + (d.manual_only ? '（人工处理单仍要人工置为成功 / 失败后再手动回调）。' : '并自动通知商户。')
   try {
     await ElMessageBox.confirm(
-      `将把「${result}」推送给商户（没收到 success 会按间隔重试）。回调之后，上游再来的结果都只记录、不会再推给商户。确定回调吗？`,
+      `将把「${result}」推送给商户（没收到 success 会按间隔重试）。${after}确定回调吗？`,
       '手动回调',
       { type: 'warning' },
     )
@@ -404,7 +408,7 @@ onMounted(async () => {
           </template>
           <el-button v-if="canReverse && detail.status === 'success'" type="danger" plain @click="reverse">冲正</el-button>
           <el-button v-if="canManage && detail.status === 'abnormal'" type="primary" plain @click="openResupply">手动补单</el-button>
-          <el-button v-if="canManage && ['success', 'failed'].includes(detail.status)" type="primary" plain @click="manualNotify">手动回调</el-button>
+          <el-button v-if="canManage" type="primary" plain @click="manualNotify">手动回调</el-button>
         </div>
 
         <el-alert v-for="w in detail.warnings" :key="w" type="error" :closable="false" show-icon :title="w" class="warning" />

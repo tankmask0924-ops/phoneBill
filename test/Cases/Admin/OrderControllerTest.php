@@ -244,7 +244,48 @@ class OrderControllerTest extends HttpTestCase
             ['order_id' => $done->id, 'attempt_no' => 1, 'delay' => 0, 'round' => 1],
             ['order_id' => $done->id, 'attempt_no' => 1, 'delay' => 0, 'round' => 2],
         ], $this->dispatcher->notifies);
-        $this->assertSame(422, $this->jsonRequest('POST', "/admin/orders/{$abnormal->id}/notify", $token)->getStatusCode(), '没有结果的订单不能回调');
+
+        // 没出结果的订单也能回调，但不记「已手动回调」
+        $notified = $this->body($this->jsonRequest('POST', "/admin/orders/{$abnormal->id}/notify", $token));
+        $this->assertSame('pending', $notified['notify_status']);
+        $this->assertNull($notified['manual_notified_at']);
+    }
+
+    public function testManualNotifyUnfinishedOrderPushesProcessingAndKeepsAutoProcessing()
+    {
+        $token = $this->loginAs($this->createAdminWithPermissions(['order.view', 'order.manage']));
+        [$merchant, $product, $sp] = $this->fixture();
+        $http = ApplicationContext::getContainer()->get(HttpClient::class);
+
+        // 处理中的订单手动回调：推 processing
+        $order = $this->createOrder($merchant, $product, $sp, Order::STATUS_PROCESSING);
+        $this->dispatcher->notifies = [];
+        $this->jsonRequest('POST', "/admin/orders/{$order->id}/notify", $token);
+        $this->assertSame([['order_id' => $order->id, 'attempt_no' => 1, 'delay' => 0, 'round' => 1]], $this->dispatcher->notifies);
+        make(MerchantNotifyService::class)->notify($order->id, 1, 1);
+        $this->assertSame('processing', end($http->requests)['payload']['status']);
+        $this->assertSame(Order::NOTIFY_SUCCESS, Order::find($order->id)->notify_status);
+        $this->assertNull(Order::find($order->id)->manual_notified_at);
+
+        // 之后上游成功：照常改为成功并自动通知商户（没有被冻住）
+        $this->dispatcher->notifies = [];
+        $attempt = OrderAttempt::where('order_id', $order->id)->first();
+        make(OrderProcessService::class)->applyResult($attempt->id, RechargeResult::success('UP1'));
+        $this->assertSame(Order::STATUS_SUCCESS, Order::find($order->id)->status);
+        $this->assertSame([['order_id' => $order->id, 'attempt_no' => 1, 'delay' => 0, 'round' => 1]], $this->dispatcher->notifies);
+        make(MerchantNotifyService::class)->notify($order->id, 1, 1);
+        $this->assertSame('success', end($http->requests)['payload']['status']);
+
+        // 人工处理单（异常）手动回调：推 processing；之后人工置为成功仍不自动通知，商户还是看到处理中
+        $manual = $this->createOrder($merchant, $product, $sp, Order::STATUS_ABNORMAL);
+        $manual->update(['manual_only' => true]);
+        $this->jsonRequest('POST', "/admin/orders/{$manual->id}/notify", $token);
+        make(MerchantNotifyService::class)->notify($manual->id, 1, 1);
+        $this->assertSame('processing', end($http->requests)['payload']['status']);
+        $this->dispatcher->notifies = [];
+        $this->jsonRequest('POST', "/admin/orders/{$manual->id}/success", $token, ['remark' => '上游核实已到账']);
+        $this->assertSame([], $this->dispatcher->notifies);
+        $this->assertSame('processing', make(OrderService::class)->present(Order::find($manual->id))['status']);
     }
 
     public function testManualOnlyOrderNeedsManualNotifyAndLaterUpstreamResultsAreHeld()

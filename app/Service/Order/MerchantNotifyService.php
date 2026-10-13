@@ -66,8 +66,8 @@ class MerchantNotifyService extends AbstractService
     public function notify(int $orderId, int $attemptNo, int $round = 0): void
     {
         $order = $this->orderDao->find($orderId);
-        // 人工处理单没有手动回调前不通知（正常不会推到这里，兜底）
-        if ($order === null || ! $order->resultVisibleToMerchant() || $round !== $order->notify_round) {
+        // 推的是商户当前看到的状态（present）：没出结果、人工处理单没手动回调前都是 processing，只有手动回调会推这种
+        if ($order === null || $round !== $order->notify_round) {
             return;
         }
         $merchant = $this->merchantDao->find($order->merchant_id);
