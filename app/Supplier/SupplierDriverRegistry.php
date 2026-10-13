@@ -15,6 +15,7 @@ namespace App\Supplier;
 use App\Supplier\Driver\DayuanrenDriver;
 use App\Supplier\Driver\MockDriver;
 use App\Supplier\Driver\OpenPlatformDriver;
+use App\Supplier\Driver\PikoudaiDriver;
 use App\Supplier\Driver\ShangtengDriver;
 use App\Supplier\Driver\ZhongkongDriver;
 use Psr\Container\ContainerInterface;
@@ -35,6 +36,7 @@ class SupplierDriverRegistry
         ShangtengDriver::class,
         ZhongkongDriver::class,
         DayuanrenDriver::class,
+        PikoudaiDriver::class,
     ];
 
     public function __construct(private ContainerInterface $container)

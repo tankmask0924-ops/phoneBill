@@ -371,6 +371,7 @@ app/Supplier/
     ├── ShangtengDriver.php       # 商腾科技话费 API（docs/API接口.md）
     ├── ZhongkongDriver.php       # 中控话费 API（docs/中控API接口.md）
     ├── DayuanrenDriver.php       # 大猿人话费 API（docs/大猿人API接口.md）
+    ├── PikoudaiDriver.php        # 皮口袋话费 API（docs/话费接口.md）
     └── XxxDriver.php             # 每家供应商一个
 ```
 
@@ -451,6 +452,15 @@ app/Supplier/
 - 签名：去掉 `sign` 按名升序拼 `k=v&...`（不做 URL 编码），末尾拼 `&apikey=`，md5 转大写。回调按收到的全部参数验签并核对 `userid`，通过后回 `success`。
 - 结果判定：下单 `errno=0` 处理中、非 0 失败（文档写明「提交失败」）、HTTP 非 200 / 无法解析处理中；查单 / 回调 `state` 1 成功、-1 / 2 失败、0 处理中、3 部分成功保持处理中到时转异常人工处理。
 - 上游产品列表：`api_open=1` 算在售；`isp` 1 移动、**2 电信、3 联通**；不给面值，管理员自己填。
+
+### 7.5 皮口袋（驱动 `pikoudai`）
+
+上游文档 `docs/话费接口.md`（最后是对接方式、结果判定表和待确认事项）：产品编码下单、查单、余额、结果回调，全部 POST JSON。只接话费，没有商品列表接口。
+
+- 接口参数：接口域名（路径 `/api/...` 写在驱动里）、商户编号（`merchant_no`）、密钥；回调地址自动生成（见 4.2）。
+- 字段对应：`merchant_order_no` = 提交单号 `attempt_no`，`product_no` = 供应商商品编码，`equity_number` = 手机号，`num` 固定 `1`。上游 `orderNo` 存为供应商订单号。
+- 签名：去掉 `sign` 按名 ASCII 升序，键值直接相连（空值也参与），末尾拼密钥，md5 小写。回调按收到的全部字段（去掉 `Sign`，区分大小写）验签并核对 `MerchantNo`，通过后回 `success`；响应签名文档没说怎么算，不验。
+- 结果判定：文档没列错误码，下单只有 `code=1000` 算受理，其余都是处理中、等查单；查单 / 回调 `Success` 成功、`Failure` 失败、其他处理中。待上游给出一定没建单的错误码后，可以改成直接失败。
 
 ## 8. 权限
 
