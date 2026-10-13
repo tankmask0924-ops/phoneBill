@@ -112,11 +112,25 @@ class PikoudaiDriverTest extends HttpTestCase
         $this->assertSame(PikoudaiDriver::sign($payload, 'pkd_secret'), $payload['sign']);
         $this->assertArrayNotHasKey('secret', $payload);
 
-        // 非 1000、HTTP 出错、无法解析：不知道建没建单，处理中
-        $this->respond(['code' => 2001, 'message' => '余额不足']);
+        // 校验类错误码：上游明确拒单，失败
+        foreach (['1001', '1002', '1004', '1005', '1006', '1008', '1011', '1012'] as $code) {
+            $this->respond(['code' => (int) $code, 'message' => '拒单' . $code]);
+            $result = $this->driver()->recharge($this->request());
+            $this->assertSame(RechargeStatus::Failed, $result->status, $code);
+            $this->assertStringContainsString("[{$code}] 拒单{$code}", $result->message);
+        }
+        $this->respond(['code' => 1004, 'message' => '']);
+        $this->assertStringContainsString('[1004] 额度不足', $this->driver()->recharge($this->request())->message);
+
+        // 订单号重复、系统繁忙、文档外的错误码、HTTP 出错：不知道建没建单，处理中
+        $this->respond(['code' => 1003, 'message' => '订单号重复']);
         $result = $this->driver()->recharge($this->request());
         $this->assertSame(RechargeStatus::Processing, $result->status);
-        $this->assertStringContainsString('[2001] 余额不足', $result->message);
+        $this->assertStringContainsString('之前已提交过', $result->message);
+        foreach ([1007, 9999] as $code) {
+            $this->respond(['code' => $code, 'message' => 'x']);
+            $this->assertSame(RechargeStatus::Processing, $this->driver()->recharge($this->request())->status, (string) $code);
+        }
         $this->http->responses = [['status' => 502, 'body' => 'Bad Gateway']];
         $this->assertSame(RechargeStatus::Processing, $this->driver()->recharge($this->request())->status);
     }
@@ -137,7 +151,7 @@ class PikoudaiDriverTest extends HttpTestCase
 
         // 出错、单号对不上、没有状态：处理中
         foreach ([
-            ['code' => 3001, 'message' => '订单不存在'],
+            ['code' => 2001, 'message' => '查不到订单'],
             ['code' => 1000, 'message' => '成功', 'data' => ['merchantOrderNo' => 'OTHER', 'orderStatus' => 'Success']],
             ['code' => 1000, 'message' => '成功', 'data' => ['merchantOrderNo' => 'A0001']],
         ] as $body) {
@@ -155,7 +169,7 @@ class PikoudaiDriverTest extends HttpTestCase
         $this->assertMatchesRegularExpression('/^\d{13}$/', $sent['payload']['timestamp']);
         $this->assertSame(PikoudaiDriver::sign($sent['payload'], 'pkd_secret'), $sent['payload']['sign']);
 
-        $this->respond(['code' => 4001, 'message' => '签名错误']);
+        $this->respond(['code' => 1001, 'message' => '验签失败']);
         $this->expectException(RuntimeException::class);
         $this->driver()->balance(self::CONFIG);
     }

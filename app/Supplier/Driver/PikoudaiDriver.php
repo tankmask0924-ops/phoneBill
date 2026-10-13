@@ -26,7 +26,8 @@ use RuntimeException;
  *
  * - merchant_order_no 传提交单号 attempt_no，product_no 传供应商商品编码，equity_number 传手机号，num 固定 1；
  * - 全部接口 POST JSON；签名：除 sign 外参数按名 ASCII 升序拼 键值键值...（无分隔符，空值也参与），末尾拼密钥，md5 小写；
- * - 文档没列错误码，下单只有 code=1000 才算受理，其余一律处理中，结果只认查单和验签通过的回调；
+ * - 下单 code=1000 受理、1003 订单号重复（之前提交过）都是处理中；验签、IP、额度、参数、商户号、产品等校验类错误码
+ *   是上游明确拒单，判失败换下一家；1007 系统繁忙和文档外的错误码不知道建没建单，处理中等查单；
  * - 响应里的 sign 怎么算（data 是嵌套对象）文档没说，不验。
  */
 class PikoudaiDriver implements SupplierDriverInterface
@@ -38,6 +39,21 @@ class PikoudaiDriver implements SupplierDriverInterface
     private const PATH_BALANCE = '/api/merchant/balance';
 
     private const CODE_OK = '1000';
+
+    /** 订单号重复：之前已经提交过，绝不能当失败 */
+    private const CODE_DUPLICATE = '1003';
+
+    /** 下单时上游明确拒单（校验没过，没有建单）的错误码 */
+    private const REJECT_CODES = [
+        '1001' => '验签失败',
+        '1002' => 'IP不正确',
+        '1004' => '额度不足',
+        '1005' => '价格配置不正确',
+        '1006' => '匹配参数值不能为空',
+        '1008' => '商户号不存在',
+        '1011' => '禁止进单',
+        '1012' => '产品Key不正确',
+    ];
 
     #[Inject]
     protected HttpClient $http;
@@ -71,8 +87,14 @@ class PikoudaiDriver implements SupplierDriverInterface
             'notify_url' => $request->config['notify_url'] ?? '',
         ], 10.0);
         $body = $this->decode($response['body']);
+        if ($body !== null && isset(self::REJECT_CODES[$body['code']])) {
+            return RechargeResult::failed('上游拒单：' . $this->describe($body, $response), $request->supplierOrderNo, $sent, $response['body']);
+        }
+        if ($body !== null && $body['code'] === self::CODE_DUPLICATE) {
+            return RechargeResult::processing($request->supplierOrderNo, '上游订单号已存在（之前已提交过），等待结果', $sent, $response['body']);
+        }
         if ($body === null || $body['code'] !== self::CODE_OK) {
-            // 文档没说哪些错误码一定没建单，判失败可能导致退款后上游又充上，只能等查单确认
+            // 包括 1007 系统繁忙：不知道建没建单，判失败可能导致退款后上游又充上，只能等查单确认
             return RechargeResult::processing($request->supplierOrderNo, '下单未确认受理，等待查单：' . $this->describe($body, $response), $sent, $response['body']);
         }
 
@@ -228,7 +250,9 @@ class PikoudaiDriver implements SupplierDriverInterface
             return 'HTTP ' . $response['status'] . ' ' . mb_substr($response['body'], 0, 100);
         }
 
-        return '[' . $body['code'] . '] ' . (is_scalar($body['message'] ?? null) ? (string) $body['message'] : '');
+        $message = is_scalar($body['message'] ?? null) ? trim((string) $body['message']) : '';
+
+        return '[' . $body['code'] . '] ' . ($message === '' ? self::REJECT_CODES[$body['code']] ?? '' : $message);
     }
 
     private static function stringify(mixed $value): string
