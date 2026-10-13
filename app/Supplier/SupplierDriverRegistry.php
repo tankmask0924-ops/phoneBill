@@ -13,6 +13,7 @@ declare(strict_types=1);
 namespace App\Supplier;
 
 use App\Supplier\Driver\DayuanrenDriver;
+use App\Supplier\Driver\LiuhaoDriver;
 use App\Supplier\Driver\MockDriver;
 use App\Supplier\Driver\OpenPlatformDriver;
 use App\Supplier\Driver\PikoudaiDriver;
@@ -37,6 +38,7 @@ class SupplierDriverRegistry
         ZhongkongDriver::class,
         DayuanrenDriver::class,
         PikoudaiDriver::class,
+        LiuhaoDriver::class,
     ];
 
     public function __construct(private ContainerInterface $container)
