@@ -28,7 +28,8 @@ use Throwable;
  * - 全部是 GET /flow/charge.aspx，按 method 区分业务；custom_number 传提交单号 attempt_no，
  *   product 传供应商商品编码（话费就是面值，比如 100），另带不参与签名的 network / area；
  * - 签名：按文档固定顺序拼 k=v&...（不排序），末尾直接拼 key，md5 小写；
- * - 下单 0000 受理、9545 订单号重复都是处理中，文档列出的其他响应码按失败，表外的处理中等查单；
+ * - 下单 0000 受理、9545 订单号重复都是处理中；1111 其他原因按接口异常处理，订单立即转异常人工处理；
+ *   文档列出的其他响应码按失败换下一家；表外的处理中等查单；
  * - 回调签名只有 md5(Mobile + Custom_Number + key)，不含充值状态，签名固定、换个状态就能重放，
  *   所以验签通过后再主动查一次单，以查单结果为准；
  * - 回调地址不随请求传，要在上游那边配好。
@@ -42,6 +43,9 @@ class LiuhaoDriver implements SupplierDriverInterface
     /** 订单号重复：之前已经提交过，绝不能当失败 */
     private const CODE_DUPLICATE = '9545';
 
+    /** 其他原因：不知道建没建单，按接口异常处理，订单立即转异常人工处理 */
+    private const CODE_OTHER = '1111';
+
     /** 下单时文档写明按失败处理的响应码 */
     private const REJECT_CODES = [
         '9522' => '手机号码有误',
@@ -49,7 +53,6 @@ class LiuhaoDriver implements SupplierDriverInterface
         '9511' => '签名验证未通过',
         '9533' => '请求的流量包未找到',
         '9555' => '余额不足',
-        '1111' => '其他原因',
     ];
 
     /** 查单时订单不存在（文档：可处理失败） */
@@ -101,6 +104,9 @@ class LiuhaoDriver implements SupplierDriverInterface
         $body = $this->decode($response['body']);
         if ($body !== null && isset(self::REJECT_CODES[$body['ResultCode']])) {
             return RechargeResult::failed('上游拒单：' . $this->describe($body, $response), $request->supplierOrderNo, $sent, $response['body']);
+        }
+        if ($body !== null && $body['ResultCode'] === self::CODE_OTHER) {
+            return RechargeResult::callFailed('上游未受理（其他原因），转异常人工处理：' . $this->describe($body, $response), $sent, $response['body']);
         }
         if ($body !== null && $body['ResultCode'] === self::CODE_DUPLICATE) {
             return RechargeResult::processing($request->supplierOrderNo, '上游订单号已存在（之前已提交过），等待结果', $sent, $response['body']);
