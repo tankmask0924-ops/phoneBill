@@ -190,6 +190,7 @@ const operatorTabs: { name: OperatorTab; label: string }[] = [
   { name: 'cmcc', label: '移动' },
   { name: 'ctcc', label: '电信' },
   { name: 'cucc', label: '联通' },
+  { name: 'cbn', label: '广电' },
 ]
 const productTab = ref<OperatorTab>('all')
 const productKeyword = ref('')
