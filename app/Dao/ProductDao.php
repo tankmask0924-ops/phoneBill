@@ -34,13 +34,50 @@ class ProductDao extends AbstractDao
     }
 
     /**
-     * 这个分类下的平台商品 id。
+     * 这个分类下的平台商品 id，含已删除的（按分类查历史订单用）。
      *
      * @return list<int>
      */
     public function idsByCategory(int $categoryId): array
     {
-        return $this->newQuery()->where('category_id', $categoryId)->pluck('id')->map(static fn ($v) => (int) $v)->values()->all();
+        return Product::withTrashed()->where('category_id', $categoryId)->pluck('id')->map(static fn ($v) => (int) $v)->values()->all();
+    }
+
+    /**
+     * 含已删除的，给历史统计显示名称、编码、面值。
+     *
+     * @param list<int> $ids
+     * @return array<int, Product> id => 商品
+     */
+    public function findManyWithTrashed(array $ids): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+
+        return Product::withTrashed()->whereIn('id', $ids)->get()->keyBy('id')->all();
+    }
+
+    /**
+     * 名称或编码包含关键字的商品 id，含已删除的（查历史统计用）。
+     *
+     * @return list<int>
+     */
+    public function idsMatchingWithTrashed(string $keyword): array
+    {
+        return Product::withTrashed()
+            ->where(fn ($q) => $q->where('name', 'like', "%{$keyword}%")->orWhere('code', 'like', "%{$keyword}%"))
+            ->pluck('id')->map(static fn ($v) => (int) $v)->values()->all();
+    }
+
+    /**
+     * 这个前缀的商品编码，含已删除的（编码有唯一索引，删了也占着）。
+     *
+     * @return list<string>
+     */
+    public function codesWithPrefix(string $prefix): array
+    {
+        return Product::withTrashed()->where('code', 'like', $prefix . '%')->pluck('code')->all();
     }
 
     /**

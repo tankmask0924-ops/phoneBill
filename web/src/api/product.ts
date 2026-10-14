@@ -201,6 +201,8 @@ export const productApi = {
   create: (data: ProductForm) => http.post<Product>('/admin/products', data),
   update: (id: number, data: Partial<ProductForm>) => http.put<Product>(`/admin/products/${id}`, data),
   changeStatus: (id: number, status: string) => http.post<Product>(`/admin/products/${id}/status`, { status }),
+  /** 软删除：还有商户开通着、或有充值中的订单时后端拒绝 */
+  remove: (id: number) => http.delete<{ success: boolean }>(`/admin/products/${id}`),
 }
 
 /** 商品统计：App\Controller\Admin\ProductStatsController，每天凌晨汇总前一天 */

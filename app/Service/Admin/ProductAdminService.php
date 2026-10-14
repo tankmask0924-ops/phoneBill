@@ -13,6 +13,9 @@ declare(strict_types=1);
 namespace App\Service\Admin;
 
 use App\Dao\AdminOperationLogDao;
+use App\Dao\MerchantProductDao;
+use App\Dao\MerchantProductPriceDao;
+use App\Dao\OrderDao;
 use App\Dao\ProductCategoryDao;
 use App\Dao\ProductDailyStatDao;
 use App\Dao\ProductDao;
@@ -37,7 +40,8 @@ use Hyperf\HttpMessage\Exception\HttpException;
  * - 默认售价按运营商设置，只能给已覆盖的运营商设，只用来在给商户开通商品时带出初始价格；
  * - 商品编码是商户下单时传的，新建时按面值自动生成（HF{面值}-{序号}，如 HF100-001）；面值决定能绑哪些供应商商品，这两项建好后都不能改；
  * - 必须选商品分类（ProductCategoryAdminService），老商品没有分类的显示为未分类，编辑时补上；
- * - 不提供删除，不卖了就下架。
+ * - 删除是软删除：还有商户开通着（先在商户里关闭）、或者有没出结果的订单时不能删；删除时连同绑定、默认售价、
+ *   商户已关闭的开通记录一起清掉，历史订单和统计照常显示名字，商品编码不再复用。
  */
 class ProductAdminService extends AbstractService
 {
@@ -78,6 +82,15 @@ class ProductAdminService extends AbstractService
 
     #[Inject]
     protected MerchantPriceService $priceService;
+
+    #[Inject]
+    protected MerchantProductDao $merchantProductDao;
+
+    #[Inject]
+    protected MerchantProductPriceDao $merchantPriceDao;
+
+    #[Inject]
+    protected OrderDao $orderDao;
 
     /**
      * @param array<string, mixed> $query keyword / category_id / face_value / status
@@ -237,6 +250,32 @@ class ProductAdminService extends AbstractService
     }
 
     /**
+     * 软删除。商户开通着（已关闭的不算）或者有没出结果的订单（失败换供应商、手动补单还要用绑定）时不能删。
+     */
+    public function delete(AdminUser $operator, int $id, ?string $ip): void
+    {
+        $product = $this->findOrFail($id);
+        $opened = $this->merchantProductDao->countActiveForProduct($product->id);
+        if ($opened > 0) {
+            throw new HttpException(422, "还有 {$opened} 个商户开通着「{$product->name}」，先在商户的商品与价格里关闭再删除");
+        }
+        if ($this->orderDao->hasUnfinishedForProduct($product->id)) {
+            throw new HttpException(422, "「{$product->name}」还有充值中的订单，等出结果后再删除");
+        }
+        $before = $this->formatMany([$product])[0];
+        Db::transaction(function () use ($operator, $product, $before, $ip) {
+            $this->merchantPriceDao->deleteFor($this->merchantProductDao->idsForProduct($product->id));
+            $this->merchantProductDao->deleteForProduct($product->id);
+            $this->productRouteDao->replaceForProduct($product->id, []);
+            $this->productPriceDao->replaceForProduct($product->id, []);
+            $this->productDao->delete($product->id);
+            $this->operationLogDao->record($operator->id, self::MODULE, 'delete_product', 'product', $product->id, $before, null, $ip);
+        });
+        $this->priceService->flush();
+        $this->routeService->flushConfig();
+    }
+
+    /**
      * @param list<int> $ids
      * @return array<int, array<string, mixed>> id => 和列表一样的结构
      */
@@ -282,7 +321,8 @@ class ProductAdminService extends AbstractService
     {
         $prefix = "HF{$faceValue}-";
         $max = 0;
-        foreach ($this->productDao->newQuery()->where('code', 'like', $prefix . '%')->pluck('code') as $code) {
+        // 已删除的商品也占着编码（唯一索引）
+        foreach ($this->productDao->codesWithPrefix($prefix) as $code) {
             if (preg_match('/^HF\d+-(\d+)$/', (string) $code, $m) === 1) {
                 $max = max($max, (int) $m[1]);
             }

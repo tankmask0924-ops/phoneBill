@@ -48,4 +48,14 @@ class MerchantProductPriceDao extends AbstractDao
             $this->create(['merchant_product_id' => $merchantProductId, 'operator' => $operator, 'price' => $price]);
         }
     }
+
+    /**
+     * @param list<int> $merchantProductIds
+     */
+    public function deleteFor(array $merchantProductIds): void
+    {
+        if ($merchantProductIds !== []) {
+            $this->newQuery()->whereIn('merchant_product_id', $merchantProductIds)->delete();
+        }
+    }
 }

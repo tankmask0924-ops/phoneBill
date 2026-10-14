@@ -228,6 +228,21 @@ async function toggleStatus(row: Product) {
   await list.load()
 }
 
+async function remove(row: Product) {
+  try {
+    await ElMessageBox.confirm(
+      `删除后商户不能再买，绑定和默认售价一起清掉，历史订单仍保留名字。还有商户开通着的要先在商户里关闭。确定删除「${row.name}」吗？`,
+      '删除',
+      { type: 'warning' },
+    )
+  } catch {
+    return
+  }
+  await productApi.remove(row.id)
+  ElMessage.success('已删除')
+  await list.load()
+}
+
 onMounted(async () => {
   await permission.load()
   list.load()
@@ -307,7 +322,7 @@ onMounted(async () => {
       <el-table-column label="状态" width="80">
         <template #default="{ row }"><StatusTag :map="shelfStatusLabels" :value="row.status" /></template>
       </el-table-column>
-      <el-table-column label="操作" width="120" fixed="right">
+      <el-table-column label="操作" width="170" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" @click="openEdit(row as Product)">{{ canManage ? '编辑' : '查看' }}</el-button>
           <el-button
@@ -318,6 +333,7 @@ onMounted(async () => {
           >
             {{ row.status === 'active' ? '下架' : '上架' }}
           </el-button>
+          <el-button v-if="canManage" link type="danger" @click="remove(row as Product)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>

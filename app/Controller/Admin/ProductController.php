@@ -21,6 +21,7 @@ use App\Network\ClientIpResolver;
 use App\Service\Admin\ProductAdminService;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpServer\Annotation\Controller;
+use Hyperf\HttpServer\Annotation\DeleteMapping;
 use Hyperf\HttpServer\Annotation\GetMapping;
 use Hyperf\HttpServer\Annotation\Middleware;
 use Hyperf\HttpServer\Annotation\PostMapping;
@@ -81,6 +82,17 @@ class ProductController extends AbstractController
     public function changeStatus(int $id): array
     {
         return $this->productAdminService->changeStatus($this->admin(), $id, $this->request->input('status'), $this->clientIp());
+    }
+
+    #[Middleware(AdminAuthMiddleware::class)]
+    #[Middleware(AdminPermissionMiddleware::class)]
+    #[RequiresPermission('product.manage')]
+    #[DeleteMapping(path: '{id:\d+}')]
+    public function destroy(int $id): array
+    {
+        $this->productAdminService->delete($this->admin(), $id, $this->clientIp());
+
+        return ['success' => true];
     }
 
     private function admin(): AdminUser

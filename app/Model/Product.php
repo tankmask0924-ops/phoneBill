@@ -13,6 +13,7 @@ declare(strict_types=1);
 namespace App\Model;
 
 use Carbon\Carbon;
+use Hyperf\Database\Model\SoftDeletes;
 
 /**
  * 平台商品：按面值建，一个商品覆盖多个运营商。
@@ -26,9 +27,12 @@ use Carbon\Carbon;
  * @property null|string $remark
  * @property Carbon $created_at
  * @property Carbon $updated_at
+ * @property null|Carbon $deleted_at
  */
 class Product extends Model
 {
+    use SoftDeletes;
+
     protected ?string $table = 'products';
 
     protected array $fillable = [

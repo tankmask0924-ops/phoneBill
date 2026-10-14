@@ -12,6 +12,12 @@ declare(strict_types=1);
 
 namespace HyperfTest\Cases\Admin;
 
+use App\Model\MerchantProduct;
+use App\Model\Order;
+use App\Model\Product;
+use App\Model\ProductDailyStat;
+use App\Model\ProductPrice;
+use App\Model\ProductRoute;
 use HyperfTest\HttpTestCase;
 
 /**
@@ -134,6 +140,61 @@ class ProductControllerTest extends HttpTestCase
         $first = $create(50);
         $second = $create(50);
         $this->assertSame((int) substr($first, 5) + 1, (int) substr($second, 5));
+    }
+
+    public function testDeleteProductRulesAndHistory()
+    {
+        $token = $this->loginAs($this->createAdminWithPermissions(['product.view', 'product.manage', 'merchant.view']));
+        $sp = $this->createSupplierProduct($this->createSupplier(), ['cmcc'], 98761);
+        $product = $this->createProduct([$sp->id => 1], 98761);
+        ProductPrice::create(['product_id' => $product->id, 'operator' => 'cmcc', 'default_price' => '98760.00']);
+        $merchant = $this->createMerchant();
+        $opened = $this->openProduct($merchant, $product, ['cmcc' => '98760.50']);
+
+        $blocked = $this->jsonRequest('DELETE', "/admin/products/{$product->id}", $token);
+        $this->assertSame(422, $blocked->getStatusCode(), '还有商户开通着');
+        $this->assertStringContainsString('1 个商户', (string) $blocked->getBody());
+        $opened->update(['status' => 'disabled']);
+
+        $order = Order::create([
+            'order_no' => date('YmdHis') . random_int(100000, 999999), 'merchant_id' => $merchant->id, 'merchant_order_no' => $this->uniq('M'),
+            'product_id' => $product->id, 'product_code' => $product->code, 'product_name' => $product->name, 'mobile' => '10090000001',
+            'operator' => 'cmcc', 'province' => '广东', 'face_value' => 98761, 'sale_price' => '98760.50', 'status' => Order::STATUS_PENDING, 'notify_status' => 'none',
+        ]);
+        $this->assertSame(422, $this->jsonRequest('DELETE', "/admin/products/{$product->id}", $token)->getStatusCode(), '还有没出结果的订单');
+        Order::where('id', $order->id)->update(['status' => Order::STATUS_FAILED, 'finished_at' => date('Y-m-d H:i:s')]);
+        ProductDailyStat::create([
+            'stat_date' => date('Y-m-d', strtotime('-1 day')), 'product_id' => $product->id, 'operator' => 'cmcc', 'order_count' => 1, 'success_count' => 0,
+            'failed_count' => 1, 'unfinished_count' => 0, 'total_duration' => 0, 'computed_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        try {
+            $deleted = $this->jsonRequest('DELETE', "/admin/products/{$product->id}", $token);
+            $this->assertSame(200, $deleted->getStatusCode(), (string) $deleted->getBody());
+            $this->assertNull(Product::find($product->id));
+            $this->assertNotNull(Product::withTrashed()->find($product->id), '软删除');
+            $this->assertSame(0, MerchantProduct::where('product_id', $product->id)->count(), '已关闭的开通记录一起清掉');
+            $this->assertSame(0, ProductRoute::where('product_id', $product->id)->count(), '解除绑定，供应商商品可以删了');
+            $this->assertSame(0, ProductPrice::where('product_id', $product->id)->count());
+            $this->assertSame(404, $this->jsonRequest('DELETE', "/admin/products/{$product->id}", $token)->getStatusCode());
+
+            $this->assertSame(0, $this->body($this->jsonRequest('GET', '/admin/products?keyword=' . $product->code, $token))['total']);
+            $this->assertNotContains($product->id, array_column($this->body($this->jsonRequest('GET', "/admin/merchants/{$merchant->id}/available-products", $token)), 'id'));
+
+            // 历史统计照常显示名字
+            $stats = $this->body($this->jsonRequest('GET', '/admin/product-stats?product_id=' . $product->id . '&date_from=' . date('Y-m-d', strtotime('-1 day')), $this->loginAs($this->createAdminWithPermissions(['product.view']))));
+            $this->assertSame($product->name, $stats['data'][0]['product_name']);
+
+            // 编码不复用：同面值新建的商品排在已删除的后面
+            $created = $this->body($this->jsonRequest('POST', '/admin/products', $token, [
+                'category_id' => $this->createCategory()->id, 'name' => 'x', 'face_value' => 98761, 'routes' => [], 'prices' => [],
+            ]));
+            $this->productIds[] = $created['id'];
+            $this->assertNotSame($product->code, $created['code']);
+        } finally {
+            Order::where('id', $order->id)->delete();
+            ProductDailyStat::where('product_id', $product->id)->delete();
+        }
     }
 
     public function testWarningsForEmptyAndDisabledRoutes()

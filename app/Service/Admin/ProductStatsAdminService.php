@@ -55,11 +55,12 @@ class ProductStatsAdminService extends AbstractService
             ->toBase()
             ->first();
         $stats = $builder->orderByDesc('stat_date')->orderBy('product_id')->orderBy('operator')->forPage($page, $perPage)->get();
-        $products = $this->productDao->newQuery()->whereIn('id', $stats->pluck('product_id')->unique()->all())->get()->keyBy('id');
+        // 含已删除的商品，历史统计照常显示名字
+        $products = $this->productDao->findManyWithTrashed($stats->pluck('product_id')->unique()->values()->all());
 
         return [
             'data' => $stats->map(function (ProductDailyStat $s) use ($products) {
-                $product = $products->get($s->product_id);
+                $product = $products[$s->product_id] ?? null;
 
                 return [
                     'stat_date' => $s->stat_date,
@@ -123,11 +124,7 @@ class ProductStatsAdminService extends AbstractService
         }
         $keyword = trim((string) ($query['keyword'] ?? ''));
         if ($keyword !== '') {
-            $ids = $this->productDao->newQuery()
-                ->where(fn ($q) => $q->where('name', 'like', "%{$keyword}%")->orWhere('code', 'like', "%{$keyword}%"))
-                ->pluck('id')
-                ->all();
-            $builder->whereIn('product_id', $ids);
+            $builder->whereIn('product_id', $this->productDao->idsMatchingWithTrashed($keyword));
         }
         if (in_array($query['operator'] ?? null, Operator::values(), true)) {
             $builder->where('operator', $query['operator']);

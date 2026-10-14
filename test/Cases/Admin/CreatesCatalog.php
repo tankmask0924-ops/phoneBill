@@ -80,7 +80,7 @@ trait CreatesCatalog
         ProductRoute::whereIn('product_id', $this->productIds)->delete();
         ProductRoute::whereIn('supplier_product_id', $this->supplierProductIds)->delete();
         ProductPrice::whereIn('product_id', $this->productIds)->delete();
-        Product::destroy($this->productIds);
+        Product::withTrashed()->whereIn('id', $this->productIds)->forceDelete();
         ProductCategory::destroy($this->categoryIds);
         SupplierProductOperator::whereIn('supplier_product_id', $this->supplierProductIds)->delete();
         SupplierProductProvince::whereIn('supplier_product_id', $this->supplierProductIds)->delete();

@@ -126,7 +126,7 @@ npm run build        # 产物在 merchant-web/dist，部署在 /merchant/ 路径
 | GET | `/admin/supplier-products`、`/admin/supplier-products/meta`（省份）、`/admin/supplier-products/supplier-options`、`/admin/supplier-products/upstream-products` | `supplier_product.view` |
 | POST/PUT/DELETE | `/admin/supplier-products`、`/{id}`、`/{id}/status`；`DELETE /{id}` 是软删除，没被平台商品绑定、没有充值中的单才能删 | `supplier_product.manage` |
 | GET | `/admin/products`、`/admin/products/supplier-product-options`、`/admin/product-stats`、`/admin/product-categories` | `product.view` |
-| POST/PUT | `/admin/products`、`/{id}`、`/{id}/status` | `product.manage` |
+| POST/PUT/DELETE | `/admin/products`、`/{id}`、`/{id}/status`；`DELETE /{id}` 是软删除，没有商户开通着、没有充值中的单才能删 | `product.manage` |
 | POST/PUT/DELETE | `/admin/product-categories`、`/{id}` | `product.manage` |
 | GET | `/admin/funding/requests`、`/requests/{id}`、`/payer-accounts`、`/merchant-options`、`/admin/receiving-accounts`、`/admin/merchants/{id}/receiving-accounts` | `funding.view` |
 | POST | `/admin/funding/requests/{id}/approve`、`/requests/{id}/reject`、`/payer-accounts/{id}/approve`、`/payer-accounts/{id}/reject` | `funding.review` |
