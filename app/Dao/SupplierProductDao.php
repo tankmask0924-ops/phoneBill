@@ -24,6 +24,34 @@ class SupplierProductDao extends AbstractDao
     }
 
     /**
+     * 含已删除的，在途的提交和查单时用。
+     */
+    public function findWithTrashed(int $id): ?SupplierProduct
+    {
+        return SupplierProduct::withTrashed()->find($id);
+    }
+
+    /**
+     * id => 名称，含已删除的（给历史数据显示名字）。
+     *
+     * @param list<int> $ids
+     * @return array<int, string>
+     */
+    public function namesWithTrashed(array $ids): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+
+        return SupplierProduct::withTrashed()->whereIn('id', $ids)->pluck('name', 'id')->all();
+    }
+
+    public function countForSupplier(int $supplierId): int
+    {
+        return $this->newQuery()->where('supplier_id', $supplierId)->count();
+    }
+
+    /**
      * 这些供应商商品编码里，该供应商已经建过的。
      *
      * @param list<string> $codes

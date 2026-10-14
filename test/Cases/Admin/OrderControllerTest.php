@@ -18,7 +18,10 @@ use App\Model\Order;
 use App\Model\OrderAttempt;
 use App\Model\OrderNotifyLog;
 use App\Model\Product;
+use App\Model\ProductRoute;
+use App\Model\Supplier;
 use App\Model\SupplierProduct;
+use App\Model\SupplierProductOperator;
 use App\Network\HttpClient;
 use App\Service\Order\MerchantNotifyService;
 use App\Service\Order\OrderDispatcher;
@@ -136,6 +139,82 @@ class OrderControllerTest extends HttpTestCase
         $this->assertSame(1, $this->body($this->jsonRequest('GET', "/admin/orders?merchant_id={$merchant->id}&status=failed", $token))['summary']['failed_count']);
         $empty = $this->body($this->jsonRequest('GET', '/admin/orders?merchant_id=999999999', $token))['summary'];
         $this->assertSame(['order_count' => 0, 'success_rate' => null, 'profit' => '0.00', 'avg_duration' => null], array_intersect_key($empty, array_flip(['order_count', 'success_rate', 'profit', 'avg_duration'])));
+    }
+
+    public function testFaceValueFilter()
+    {
+        $token = $this->loginAs($this->createAdminWithPermissions(['order.view']));
+        [$merchant, $product, $sp] = $this->fixture();
+        $hundred = $this->createOrder($merchant, $product, $sp, Order::STATUS_SUCCESS);
+        $fifty = $this->createOrder($merchant, $product, $sp, Order::STATUS_FAILED);
+        Order::where('id', $fifty->id)->update(['face_value' => 50]);
+        $ids = fn (array $query) => array_column($this->body($this->jsonRequest('GET', '/admin/orders?' . http_build_query($query + ['merchant_id' => $merchant->id]), $token))['data'], 'id');
+
+        $this->assertSame([$hundred->id], $ids(['face_value' => 100]));
+        $this->assertSame([$fifty->id], $ids(['face_value' => 50]));
+        $empty = $this->body($this->jsonRequest('GET', "/admin/orders?merchant_id={$merchant->id}&face_value=999", $token));
+        $this->assertSame([], $empty['data']);
+        $this->assertSame(0, $empty['summary']['order_count']);
+        $this->assertContains(100, $this->body($this->jsonRequest('GET', '/admin/orders/filter-options', $token))['face_values']);
+    }
+
+    public function testDeleteSupplierAndSupplierProductKeepsOrderHistory()
+    {
+        $token = $this->loginAs($this->createAdminWithPermissions(['order.view', 'supplier.view', 'supplier.manage', 'supplier_product.view', 'supplier_product.manage']));
+        [$merchant, $product, $sp] = $this->fixture();
+        $supplier = Supplier::find($sp->supplier_id);
+        $success = $this->createOrder($merchant, $product, $sp, Order::STATUS_SUCCESS);
+        $abnormal = $this->createOrder($merchant, $product, $sp, Order::STATUS_ABNORMAL);
+
+        $this->assertSame(422, $this->jsonRequest('DELETE', "/admin/suppliers/{$supplier->id}", $token)->getStatusCode(), '名下还有供应商商品');
+        $this->assertSame(422, $this->jsonRequest('DELETE', "/admin/supplier-products/{$sp->id}", $token)->getStatusCode(), '还绑定在平台商品上');
+        ProductRoute::where('supplier_product_id', $sp->id)->delete();
+        $this->assertSame(422, $this->jsonRequest('DELETE', "/admin/supplier-products/{$sp->id}", $token)->getStatusCode(), '还有提交了没出结果的单');
+        OrderAttempt::where('order_id', $abnormal->id)->update(['status' => OrderAttempt::STATUS_FAILED]);
+
+        $deleted = $this->jsonRequest('DELETE', "/admin/supplier-products/{$sp->id}", $token);
+        $this->assertSame(200, $deleted->getStatusCode(), (string) $deleted->getBody());
+        $this->assertNull(SupplierProduct::find($sp->id));
+        $this->assertNotNull(SupplierProduct::withTrashed()->find($sp->id), '软删除');
+        $this->assertSame(0, SupplierProductOperator::where('supplier_product_id', $sp->id)->count());
+        $this->assertSame(404, $this->jsonRequest('DELETE', "/admin/supplier-products/{$sp->id}", $token)->getStatusCode());
+
+        $this->assertSame(200, $this->jsonRequest('DELETE', "/admin/suppliers/{$supplier->id}", $token)->getStatusCode());
+        $this->assertSame(0, $this->body($this->jsonRequest('GET', '/admin/suppliers?keyword=' . $supplier->code, $token))['total']);
+        $this->assertNotContains($supplier->id, array_column($this->body($this->jsonRequest('GET', '/admin/supplier-products/supplier-options', $token)), 'id'));
+
+        // 历史订单照常显示名字，订单筛选里还能选到（标「已删除」）
+        $orders = $this->body($this->jsonRequest('GET', "/admin/orders?merchant_id={$merchant->id}&status=success", $token));
+        $this->assertSame($supplier->name, $orders['data'][0]['supplier_name']);
+        $detail = $this->body($this->jsonRequest('GET', "/admin/orders/{$success->id}", $token));
+        $this->assertSame($supplier->name, $detail['attempts'][0]['supplier_name']);
+        $this->assertSame($sp->name, $detail['attempts'][0]['supplier_product_name']);
+        $options = $this->body($this->jsonRequest('GET', '/admin/orders/filter-options', $token));
+        $this->assertContains(['id' => $supplier->id, 'name' => $supplier->name . '（已删除）'], $options['suppliers']);
+
+        // 编码和名称还占着
+        $again = $this->jsonRequest('POST', '/admin/suppliers', $token, ['name' => $this->uniq('供应商'), 'code' => $supplier->code, 'driver' => 'mock', 'config' => ['result' => 'success']]);
+        $this->assertSame(422, $again->getStatusCode());
+        $this->assertStringContainsString('已删除', (string) $again->getBody());
+    }
+
+    public function testDashboardNeedsOrderViewAndCountsToday()
+    {
+        $this->assertSame(403, $this->jsonRequest('GET', '/admin/dashboard', $this->loginAs($this->createAdminWithPermissions(['merchant.view'])))->getStatusCode());
+        $token = $this->loginAs($this->createAdminWithPermissions(['order.view']));
+        $before = $this->body($this->jsonRequest('GET', '/admin/dashboard', $token));
+        $this->assertSame(['sales', 'merchant_count', 'order_count', 'profit'], array_keys($before['total']));
+
+        [$merchant, $product, $sp] = $this->fixture();
+        $success = $this->createOrder($merchant, $product, $sp, Order::STATUS_SUCCESS);
+        Order::where('id', $success->id)->update(['profit' => '1.50']);
+        $this->createOrder($merchant, $product, $sp, Order::STATUS_FAILED);
+
+        $after = $this->body($this->jsonRequest('GET', '/admin/dashboard', $token))['today'];
+        $this->assertSame($before['today']['order_count'] + 2, $after['order_count']);
+        $this->assertSame($before['today']['success_count'] + 1, $after['success_count']);
+        $this->assertSame(bcadd($before['today']['sales'], '99.50', 2), $after['sales'], '只算成功的');
+        $this->assertSame(bcadd($before['today']['profit'], '1.50', 2), $after['profit']);
     }
 
     public function testBatchMobileFilter()

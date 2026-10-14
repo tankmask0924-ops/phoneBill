@@ -58,7 +58,7 @@ class PortalController extends AbstractController
     #[GetMapping(path: 'order-filter-options')]
     public function orderFilterOptions(): array
     {
-        return $this->portalService->orderFilterOptions();
+        return $this->portalService->orderFilterOptions($this->merchant());
     }
 
     #[GetMapping(path: 'orders/{id:\d+}')]

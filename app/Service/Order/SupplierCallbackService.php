@@ -45,7 +45,8 @@ class SupplierCallbackService extends AbstractService
      */
     public function handle(string $supplierCode, ServerRequestInterface $request): array
     {
-        $supplier = $this->supplierDao->newQuery()->where('code', $supplierCode)->first();
+        // 已删除的供应商也照常处理迟到的回调
+        $supplier = $this->supplierDao->findByCodeWithTrashed($supplierCode);
         if ($supplier === null) {
             return ['status' => 404, 'body' => 'unknown supplier'];
         }

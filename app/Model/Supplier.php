@@ -13,6 +13,7 @@ declare(strict_types=1);
 namespace App\Model;
 
 use Carbon\Carbon;
+use Hyperf\Database\Model\SoftDeletes;
 
 /**
  * 供应商。config 是加密后的接口参数，读写都通过 SupplierAdminService，不要直接用。
@@ -26,9 +27,12 @@ use Carbon\Carbon;
  * @property null|string $remark
  * @property Carbon $created_at
  * @property Carbon $updated_at
+ * @property null|Carbon $deleted_at
  */
 class Supplier extends Model
 {
+    use SoftDeletes;
+
     protected ?string $table = 'suppliers';
 
     protected array $fillable = [

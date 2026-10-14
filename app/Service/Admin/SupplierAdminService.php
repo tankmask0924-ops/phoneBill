@@ -13,6 +13,7 @@ declare(strict_types=1);
 namespace App\Service\Admin;
 
 use App\Dao\AdminOperationLogDao;
+use App\Dao\OrderAttemptDao;
 use App\Dao\SupplierDao;
 use App\Dao\SupplierProductDao;
 use App\Enum\Province;
@@ -33,7 +34,7 @@ use Hyperf\HttpMessage\Exception\HttpException;
  *
  * - 编码用在供应商回调地址里，建好后不能改；回调地址按系统配置里的回调域名自动生成（见 SupplierGateway::notifyUrl()），不用填；
  * - 接口参数整体加密存储；密钥类参数（驱动声明为 secret）接口不回显，编辑时留空表示不修改；
- * - 不提供删除，不用了就停用，历史订单还要查得到。
+ * - 删除是软删除：名下没有供应商商品、也没有在途的单才能删；删除后历史订单照常显示名字，名称和编码不能再用。
  */
 class SupplierAdminService extends AbstractService
 {
@@ -48,6 +49,9 @@ class SupplierAdminService extends AbstractService
 
     #[Inject]
     protected SupplierProductDao $supplierProductDao;
+
+    #[Inject]
+    protected OrderAttemptDao $attemptDao;
 
     #[Inject]
     protected AdminOperationLogDao $operationLogDao;
@@ -146,8 +150,9 @@ class SupplierAdminService extends AbstractService
         if (preg_match('/^[a-z0-9_]{2,32}$/', $code) !== 1) {
             throw new HttpException(422, '编码为 2~32 位小写字母、数字或下划线');
         }
-        if ($this->supplierDao->newQuery()->where('code', $code)->exists()) {
-            throw new HttpException(422, "编码「{$code}」已存在");
+        $sameCode = $this->supplierDao->findByCodeWithTrashed($code);
+        if ($sameCode !== null) {
+            throw new HttpException(422, $sameCode->trashed() ? "编码「{$code}」被已删除的供应商用过，请换一个" : "编码「{$code}」已存在");
         }
         $driver = $this->driver($data['driver'] ?? null);
         $config = $this->validateConfig($driver, $data['config'] ?? [], []);
@@ -244,6 +249,25 @@ class SupplierAdminService extends AbstractService
     }
 
     /**
+     * 软删除。名下还有供应商商品（先删商品）或者有提交了还没出结果的单时不能删。
+     */
+    public function delete(AdminUser $operator, int $id, ?string $ip): void
+    {
+        $supplier = $this->findOrFail($id);
+        $productCount = $this->supplierProductDao->countForSupplier($supplier->id);
+        if ($productCount > 0) {
+            throw new HttpException(422, "「{$supplier->name}」下还有 {$productCount} 个供应商商品，请先删除它们");
+        }
+        if ($this->attemptDao->hasProcessingForSupplier($supplier->id)) {
+            throw new HttpException(422, "「{$supplier->name}」还有充值中的订单，等出结果后再删除");
+        }
+        $before = $this->format($supplier);
+        $this->supplierDao->delete($supplier->id);
+        $this->operationLogDao->record($operator->id, self::MODULE, 'delete_supplier', 'supplier', $supplier->id, $before, null, $ip);
+        $this->routeService->flushConfig();
+    }
+
+    /**
      * 实时查供应商那边的余额（列表打开时逐个查），见 SupplierGateway::balance()。
      *
      * @return array{supported: bool, balance: null|string, error: null|string}
@@ -276,12 +300,13 @@ class SupplierAdminService extends AbstractService
     private function validateName(mixed $name, ?int $exceptId): string
     {
         $name = $this->requiredString($name, '供应商名称', 64);
-        $exists = $this->supplierDao->newQuery()
+        // 已删除的也占着名称（唯一索引）
+        $same = $this->supplierDao->newQuery()->withTrashed()
             ->where('name', $name)
             ->when($exceptId !== null, fn ($q) => $q->where('id', '!=', $exceptId))
-            ->exists();
-        if ($exists) {
-            throw new HttpException(422, "供应商「{$name}」已存在");
+            ->first();
+        if ($same !== null) {
+            throw new HttpException(422, $same->trashed() ? "供应商「{$name}」和已删除的供应商重名，请换一个" : "供应商「{$name}」已存在");
         }
 
         return $name;

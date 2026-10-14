@@ -171,8 +171,9 @@ class SupplierGateway extends AbstractService
 
     private function call(string $method, Order $order, OrderAttempt $attempt): RechargeResult
     {
-        $supplier = $this->supplierDao->find($attempt->supplier_id);
-        $supplierProduct = $this->supplierProductDao->find($attempt->supplier_product_id);
+        // 含已删除的：删除前会检查在途的单，这里兜住检查之后、选路缓存清掉之前提交的单
+        $supplier = $this->supplierDao->findWithTrashed($attempt->supplier_id);
+        $supplierProduct = $this->supplierProductDao->findWithTrashed($attempt->supplier_product_id);
         if ($supplier === null || $supplierProduct === null) {
             throw new RuntimeException("尝试 {$attempt->attempt_no} 的供应商或供应商商品不存在");
         }

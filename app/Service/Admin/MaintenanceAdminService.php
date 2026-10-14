@@ -75,7 +75,7 @@ class MaintenanceAdminService extends AbstractService
 
         $total = (clone $builder)->count();
         $rows = $builder->orderByDesc('id')->forPage($page, $perPage)->get();
-        $suppliers = $this->supplierDao->newQuery()->whereIn('id', $rows->pluck('supplier_id')->unique()->all())->pluck('name', 'id');
+        $suppliers = $this->supplierDao->namesWithTrashed($rows->pluck('supplier_id')->unique()->values()->all());
         $admins = $this->adminUserDao->newQuery()->whereIn('id', $rows->pluck('admin_user_id')->filter()->unique()->all())->pluck('real_name', 'id');
 
         return [
@@ -154,7 +154,7 @@ class MaintenanceAdminService extends AbstractService
         $this->routeService->flushMaintenances();
         $this->operationLogDao->record($operator->id, self::MODULE, 'finish_maintenance', 'channel_maintenance', $row->id, $before, ['end_at' => $now], $ip);
 
-        return $this->format($this->findOrFail($row->id), $this->supplierDao->find($row->supplier_id)?->name);
+        return $this->format($this->findOrFail($row->id), $this->supplierDao->findWithTrashed($row->supplier_id)?->name);
     }
 
     private function findOrFail(int $id): ChannelMaintenance

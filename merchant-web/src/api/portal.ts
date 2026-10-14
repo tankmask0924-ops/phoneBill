@@ -1,4 +1,6 @@
+import { ElMessage } from 'element-plus'
 import type { Paged } from '@/utils/paged'
+import { useAuthStore } from '@/stores/auth'
 import { http } from './http'
 
 type Query = Record<string, unknown>
@@ -34,6 +36,28 @@ export interface Order {
   finished_at: string | null
 }
 
+/** 当前筛选条件下全部订单（不只这一页）的汇总；成功、失败按你看到的状态算 */
+export interface OrderSummary {
+  order_count: number
+  success_count: number
+  failed_count: number
+  processing_count: number
+  /** 成功 /（成功 + 失败）的百分比，没有出结果的单时为 null */
+  success_rate: string | null
+  /** 成功订单的扣款合计 */
+  amount: string
+  /** 成功订单的平均耗时（秒） */
+  avg_duration: number | null
+}
+
+export interface OrderFilterOptions {
+  provinces: string[]
+  /** 已开通商品的面值（元） */
+  face_values: number[]
+  /** 已开通商品的分类 */
+  categories: { id: number; name: string }[]
+}
+
 export interface OrderDetail extends Order {
   balance_logs: { type: string; amount: string; balance_after: string; created_at: string | null }[]
 }
@@ -65,6 +89,9 @@ export interface CatalogProduct {
   product_code: string
   name: string
   face_value: number
+  /** 老商品可能没有分类 */
+  category_id: number | null
+  category_name: string | null
   operators: {
     operator: string
     price: string
@@ -201,16 +228,59 @@ export const batchOrderApi = {
 export const portalApi = {
   dashboard: () => http.get<Dashboard>('/merchant/dashboard'),
   /** mobile 可以是多个手机号（换行、空格、逗号分隔，最多 200 个） */
-  orders: (params: Query) => http.get<Paged<Order>>('/merchant/orders', params),
-  orderFilterOptions: () => http.get<{ provinces: string[] }>('/merchant/order-filter-options'),
+  orders: (params: Query) => http.get<Paged<Order> & { summary: OrderSummary }>('/merchant/orders', params),
+  orderFilterOptions: () => http.get<OrderFilterOptions>('/merchant/order-filter-options'),
   order: (id: number) => http.get<OrderDetail>(`/merchant/orders/${id}`),
   balanceLogs: (params: Query) => http.get<Paged<BalanceLog>>('/merchant/balance-logs', params),
   account: () => http.get<Account>('/merchant/account'),
   /** from / to 是统计的日期范围（近 7 天，不含今天） */
-  products: () => http.get<{ from: string; to: string; products: CatalogProduct[] }>('/merchant/products'),
+  products: () =>
+    http.get<{ from: string; to: string; products: CatalogProduct[]; categories: { id: number; name: string }[] }>(
+      '/merchant/products',
+    ),
   /** 改 IP 白名单、重置密钥都要再输一次登录密码 */
   updateIpWhitelist: (password: string, ipWhitelist: string) =>
     http.put<{ ip_whitelist: string[] }>('/merchant/account/ip-whitelist', { password, ip_whitelist: ipWhitelist }),
   resetSecret: (password: string) =>
     http.post<{ app_key: string; app_secret: string }>('/merchant/account/reset-secret', { password }),
+}
+
+export type ExportType = 'orders' | 'balance_logs'
+
+/** 导出记录：App\Controller\Merchant\ExportController，文件保留 7 天 */
+export interface ExportRecord {
+  id: number
+  type: ExportType
+  type_label: string
+  filters: Record<string, string | number>
+  /** pending 生成中 / success 已完成 / failed 失败 */
+  status: string
+  file_name: string
+  row_count: number | null
+  error: string | null
+  created_at: string | null
+  finished_at: string | null
+  expires_at: string | null
+}
+
+export const exportApi = {
+  /** filters 跟对应列表接口的筛选参数一样，异步生成，到导出列表下载 */
+  create: (type: ExportType, filters: Query) => http.post<ExportRecord>('/merchant/exports', { type, filters }),
+  list: (params: Query) => http.get<Paged<ExportRecord>>('/merchant/exports', params),
+  /** 走 fetch 而不是 http 封装，因为要拿文件流 */
+  download: async (record: ExportRecord): Promise<void> => {
+    const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/merchant/exports/${record.id}/download`, {
+      headers: { Authorization: `Bearer ${useAuthStore().token ?? ''}` },
+    })
+    if (!response.ok) {
+      ElMessage.error((await response.text()) || '下载失败')
+      return
+    }
+    const url = URL.createObjectURL(await response.blob())
+    const link = document.createElement('a')
+    link.href = url
+    link.download = record.file_name
+    link.click()
+    URL.revokeObjectURL(url)
+  },
 }

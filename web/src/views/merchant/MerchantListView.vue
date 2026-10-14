@@ -3,7 +3,7 @@ import StatusTag from '@/components/StatusTag.vue'
 import { usePagedList } from '@/utils/paged'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { Plus, WarningFilled } from '@element-plus/icons-vue'
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { type AvailableProduct, type Merchant, merchantApi, type MerchantProduct, type MerchantUser } from '@/api/merchant'
 import type { OperatorCode } from '@/api/product'
 import { type ReceivingAccount, receivingAccountApi } from '@/api/funding'
@@ -183,6 +183,57 @@ const merchantProducts = ref<DraftRow[]>([])
 const available = ref<AvailableProduct[]>([])
 const opening = ref<number | undefined>()
 
+/** 按运营商分 tab（商品覆盖这个运营商就算），只在前端筛选、分页 */
+type OperatorTab = 'all' | OperatorCode
+const operatorTabs: { name: OperatorTab; label: string }[] = [
+  { name: 'all', label: '全部' },
+  { name: 'cmcc', label: '移动' },
+  { name: 'ctcc', label: '电信' },
+  { name: 'cucc', label: '联通' },
+]
+const productTab = ref<OperatorTab>('all')
+const productKeyword = ref('')
+const productPage = ref(1)
+const productPageSize = ref(20)
+
+function coversTab(operators: OperatorCode[], tab: OperatorTab): boolean {
+  return tab === 'all' || operators.includes(tab)
+}
+
+function matchesKeyword(name: string | null, code: string | null): boolean {
+  const keyword = productKeyword.value.trim().toLowerCase()
+  return keyword === '' || (name ?? '').toLowerCase().includes(keyword) || (code ?? '').toLowerCase().includes(keyword)
+}
+
+function tabCount(tab: OperatorTab): number {
+  return merchantProducts.value.filter((p) => coversTab(p.operators, tab)).length
+}
+
+const filteredProducts = computed(() =>
+  merchantProducts.value.filter((p) => coversTab(p.operators, productTab.value) && matchesKeyword(p.product_name, p.product_code)),
+)
+const pagedProducts = computed(() =>
+  filteredProducts.value.slice((productPage.value - 1) * productPageSize.value, productPage.value * productPageSize.value),
+)
+const filteredAvailable = computed(() => available.value.filter((p) => coversTab(p.operators, productTab.value)))
+
+/** 选了某个运营商 tab 时只显示这个运营商的价格 */
+function visibleOperators(row: DraftRow): OperatorCode[] {
+  return productTab.value === 'all' ? row.operators : row.operators.filter((op) => op === productTab.value)
+}
+
+watch([productTab, productKeyword, productPageSize], () => {
+  productPage.value = 1
+})
+
+// 保存后重新加载，当前页可能没数据了（比如最后一页）
+watch(filteredProducts, (rows) => {
+  const lastPage = Math.max(1, Math.ceil(rows.length / productPageSize.value))
+  if (productPage.value > lastPage) {
+    productPage.value = lastPage
+  }
+})
+
 async function loadProducts() {
   const id = productsTarget.value!.id
   productsLoading.value = true
@@ -199,6 +250,9 @@ function openProducts(row: Merchant) {
   productsTarget.value = row
   merchantProducts.value = []
   available.value = []
+  productTab.value = 'all'
+  productKeyword.value = ''
+  productPage.value = 1
   productsVisible.value = true
   loadProducts()
 }
@@ -434,20 +488,32 @@ onMounted(async () => {
   </el-dialog>
 
   <!-- 商品与价格 -->
-  <el-drawer v-model="productsVisible" :title="`商品与价格 - ${productsTarget?.name ?? ''}`" size="860px">
-    <div v-if="canPrice" class="open-product">
+  <el-drawer v-model="productsVisible" :title="`商品与价格 - ${productsTarget?.name ?? ''}`" size="80%">
+    <el-tabs v-model="productTab" class="product-tabs">
+      <el-tab-pane v-for="t in operatorTabs" :key="t.name" :name="t.name" :label="`${t.label} (${tabCount(t.name)})`" />
+    </el-tabs>
+    <div class="product-toolbar">
+      <el-input v-model="productKeyword" placeholder="按商品名称 / 编码筛选已开通的商品" clearable style="width: 280px" />
       <el-select
+        v-if="canPrice"
         v-model="opening"
-        placeholder="选择要开通的商品，开通后按默认售价带出价格"
+        :placeholder="
+          filteredAvailable.length === 0 ? '没有可开通的商品' : `开通商品（可选 ${filteredAvailable.length} 个），开通后按默认售价带出价格`
+        "
         filterable
-        :disabled="available.length === 0"
-        style="width: 100%"
+        :disabled="filteredAvailable.length === 0"
+        class="open-product"
         @change="openProduct"
       >
-        <el-option v-for="p in available" :key="p.id" :label="`${p.name}（${p.code} · ${p.face_value} 元）`" :value="p.id" />
+        <el-option v-for="p in filteredAvailable" :key="p.id" :label="`${p.name}（${p.code} · ${p.face_value} 元）`" :value="p.id" />
       </el-select>
     </div>
-    <el-table v-loading="productsLoading" :data="merchantProducts" border empty-text="还没有开通商品，商户无法下单">
+    <el-table
+      v-loading="productsLoading"
+      :data="pagedProducts"
+      border
+      :empty-text="merchantProducts.length === 0 ? '还没有开通商品，商户无法下单' : '没有符合条件的商品'"
+    >
       <el-table-column label="商品" min-width="160">
         <template #default="{ row }">
           <div>{{ row.product_name }}</div>
@@ -463,7 +529,7 @@ onMounted(async () => {
       <el-table-column label="各运营商价格（元）" min-width="340">
         <template #default="{ row }">
           <div v-if="row.operators.length === 0" class="muted">商品还没有绑定供应商商品</div>
-          <div v-for="op in row.operators" :key="op" class="price-row">
+          <div v-for="op in visibleOperators(row as DraftRow)" :key="op" class="price-row">
             <span class="price-label">{{ labelOf(operatorLabels, op) }}</span>
             <el-input v-model="row.draft[op]" :disabled="!canPrice" placeholder="未设置" style="width: 110px" size="small" />
             <span class="muted">默认 {{ row.default_prices[op] ?? '-' }}</span>
@@ -484,6 +550,14 @@ onMounted(async () => {
         </template>
       </el-table-column>
     </el-table>
+    <el-pagination
+      v-model:current-page="productPage"
+      v-model:page-size="productPageSize"
+      class="pagination"
+      layout="total, sizes, prev, pager, next"
+      :page-sizes="[20, 50, 100]"
+      :total="filteredProducts.length"
+    />
   </el-drawer>
 
   <!-- 商户后台账号 -->
@@ -580,8 +654,18 @@ onMounted(async () => {
   word-break: break-all;
 }
 
-.open-product {
+.product-tabs {
+  margin-top: -8px;
+}
+
+.product-toolbar {
+  display: flex;
+  gap: 12px;
   margin-bottom: 12px;
+}
+
+.open-product {
+  flex: 1;
 }
 
 .price-row {

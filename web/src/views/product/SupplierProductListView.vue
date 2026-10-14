@@ -199,6 +199,17 @@ async function toggleStatus(row: SupplierProduct) {
   await list.load()
 }
 
+async function remove(row: SupplierProduct) {
+  try {
+    await ElMessageBox.confirm(`删除后不再显示，历史订单仍保留名字。确定删除供应商商品「${row.name}」吗？`, '删除', { type: 'warning' })
+  } catch {
+    return
+  }
+  await supplierProductApi.remove(row.id)
+  ElMessage.success('已删除')
+  await list.load()
+}
+
 onMounted(async () => {
   await permission.load()
   list.load()
@@ -272,12 +283,17 @@ onMounted(async () => {
       <el-table-column label="状态" width="80">
         <template #default="{ row }"><StatusTag :map="shelfStatusLabels" :value="row.status" /></template>
       </el-table-column>
-      <el-table-column v-if="canManage" label="操作" width="120" fixed="right">
+      <el-table-column v-if="canManage" label="操作" width="160" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" @click="openEdit(row as SupplierProduct)">编辑</el-button>
           <el-button link :type="row.status === 'active' ? 'danger' : 'success'" @click="toggleStatus(row as SupplierProduct)">
             {{ row.status === 'active' ? '下架' : '上架' }}
           </el-button>
+          <el-tooltip :disabled="row.bound_product_count === 0" content="还绑定在平台商品上，先解绑" placement="top">
+            <span class="action">
+              <el-button link type="danger" :disabled="row.bound_product_count > 0" @click="remove(row as SupplierProduct)">删除</el-button>
+            </span>
+          </el-tooltip>
         </template>
       </el-table-column>
     </el-table>
@@ -369,6 +385,10 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.action {
+  margin-left: 12px;
+}
+
 .toolbar {
   display: flex;
   justify-content: space-between;

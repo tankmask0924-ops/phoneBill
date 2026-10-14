@@ -14,11 +14,14 @@ namespace App\Service\Merchant;
 
 use App\Dao\MerchantProductDao;
 use App\Dao\MerchantProductPriceDao;
+use App\Dao\ProductCategoryDao;
 use App\Dao\ProductDailyStatDao;
 use App\Dao\ProductDao;
 use App\Model\Merchant;
+use App\Model\Product;
 use App\Service\AbstractService;
 use App\Service\Admin\ProductStatsAdminService;
+use Hyperf\Database\Model\Collection;
 use Hyperf\Di\Annotation\Inject;
 
 /**
@@ -41,6 +44,9 @@ class MerchantCatalogService extends AbstractService
     #[Inject]
     protected ProductDailyStatDao $statDao;
 
+    #[Inject]
+    protected ProductCategoryDao $categoryDao;
+
     /**
      * 已开通、且平台商品还在上架的，按面值排。
      *
@@ -50,12 +56,7 @@ class MerchantCatalogService extends AbstractService
     {
         $opened = $this->merchantProductDao->newQuery()->where('merchant_id', $merchant->id)->where('status', 'active')->get()->keyBy('product_id');
         $prices = $this->merchantPriceDao->pricesFor($opened->pluck('id')->all());
-        $products = $this->productDao->newQuery()
-            ->whereIn('id', $opened->keys()->all())
-            ->where('status', 'active')
-            ->orderBy('face_value')
-            ->orderBy('id')
-            ->get();
+        $products = $this->productModels($opened->keys()->all());
 
         $result = [];
         foreach ($products as $product) {
@@ -71,21 +72,39 @@ class MerchantCatalogService extends AbstractService
     }
 
     /**
-     * 商户后台「可下单商品」：每个商品按运营商列出价格，以及平台整体近 7 天（不含今天）的成功率、平均耗时。
-     * 没有订单的运营商统计为 null。
+     * 已开通、且平台商品还在上架的平台商品（Model），按面值排。
      *
-     * @return array{from: string, to: string, products: list<array<string, mixed>>}
+     * @return Collection<int, Product>
+     */
+    public function openedProductModels(Merchant $merchant): Collection
+    {
+        $productIds = $this->merchantProductDao->newQuery()->where('merchant_id', $merchant->id)->where('status', 'active')->pluck('product_id')->all();
+
+        return $this->productModels($productIds);
+    }
+
+    /**
+     * 商户后台「可下单商品」：每个商品按运营商列出价格，以及平台整体近 7 天（不含今天）的成功率、平均耗时。
+     * 没有订单的运营商统计为 null。带上商品分类（老商品可能没有分类，为 null），前端按分类分 tab。
+     *
+     * @return array{from: string, to: string, products: list<array<string, mixed>>, categories: list<array{id: int, name: string}>}
      */
     public function openedProductsWithStats(Merchant $merchant): array
     {
         $products = $this->openedProducts($merchant);
-        $ids = $this->productDao->newQuery()->whereIn('code', array_column($products, 'product_code'))->pluck('id', 'code')->all();
+        $models = $this->productDao->newQuery()->whereIn('code', array_column($products, 'product_code'))->get(['id', 'code', 'category_id'])->keyBy('code');
+        $ids = $models->map(static fn (Product $p) => $p->id)->all();
+        $categories = $this->categoryDao->optionsFor($models->pluck('category_id')->filter()->unique()->values()->all());
+        $categoryNames = array_column($categories, 'name', 'id');
         $from = date('Y-m-d', strtotime('-' . self::STATS_DAYS . ' days'));
         $to = date('Y-m-d', strtotime('-1 day'));
         $totals = $this->statDao->rangeTotalsByOperator(array_values(array_map('intval', $ids)), $from, $to);
 
         foreach ($products as &$product) {
             $productTotals = $totals[(int) ($ids[$product['product_code']] ?? 0)] ?? [];
+            $categoryId = $models->get($product['product_code'])?->category_id;
+            $product['category_id'] = $categoryId;
+            $product['category_name'] = $categoryId === null ? null : ($categoryNames[$categoryId] ?? null);
             $product['operators'] = [];
             foreach ($product['prices'] as $operator => $price) {
                 $t = $productTotals[$operator] ?? null;
@@ -99,6 +118,20 @@ class MerchantCatalogService extends AbstractService
         }
         unset($product);
 
-        return ['from' => $from, 'to' => $to, 'products' => $products];
+        return ['from' => $from, 'to' => $to, 'products' => $products, 'categories' => $categories];
+    }
+
+    /**
+     * @param list<int> $ids
+     * @return Collection<int, Product>
+     */
+    private function productModels(array $ids): Collection
+    {
+        return $this->productDao->newQuery()
+            ->whereIn('id', $ids)
+            ->where('status', 'active')
+            ->orderBy('face_value')
+            ->orderBy('id')
+            ->get();
     }
 }

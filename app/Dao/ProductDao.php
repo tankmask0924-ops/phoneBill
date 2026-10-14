@@ -24,6 +24,26 @@ class ProductDao extends AbstractDao
     }
 
     /**
+     * 平台商品用到的面值，从小到大（订单面值筛选的下拉框）。
+     *
+     * @return list<int>
+     */
+    public function distinctFaceValues(): array
+    {
+        return $this->newQuery()->distinct()->orderBy('face_value')->pluck('face_value')->map(static fn ($v) => (int) $v)->values()->all();
+    }
+
+    /**
+     * 这个分类下的平台商品 id。
+     *
+     * @return list<int>
+     */
+    public function idsByCategory(int $categoryId): array
+    {
+        return $this->newQuery()->where('category_id', $categoryId)->pluck('id')->map(static fn ($v) => (int) $v)->values()->all();
+    }
+
+    /**
      * @param list<int> $categoryIds
      * @return array<int, int> 分类 id => 平台商品数
      */

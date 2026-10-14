@@ -1,20 +1,35 @@
 <script setup lang="ts">
+import { Download } from '@element-plus/icons-vue'
 import { recentDays } from '@/utils/date'
+import { cleanParams, submitExport } from '@/utils/export'
 import { usePagedList } from '@/utils/paged'
-import { onMounted } from 'vue'
+import { onMounted, ref } from 'vue'
 import { type BalanceLog, portalApi } from '@/api/portal'
 import { balanceTypeLabels, labelOf, toOptions } from '@/utils/labels'
 
+/** 按订单号查时不限日期 */
+function toParams(params: Record<string, unknown>): Record<string, unknown> {
+  const { dates, ...rest } = params as Record<string, unknown> & { dates?: [string, string] | null; order_no?: string }
+  return dates && !rest.order_no ? { ...rest, created_from: dates[0], created_to: dates[1] } : rest
+}
+
 const list = usePagedList<BalanceLog, { order_no: string; type: string; dates: [string, string] | null }>(
-  (params) => {
-    // 按订单号查时不限日期
-    const { dates, ...rest } = params as Record<string, unknown> & { dates?: [string, string]; order_no?: string }
-    return portalApi.balanceLogs(dates && !rest.order_no ? { ...rest, created_from: dates[0], created_to: dates[1] } : rest)
-  },
+  (params) => portalApi.balanceLogs(toParams(params)),
   { order_no: '', type: '', dates: recentDays() },
   20,
 )
 const { rows, total, page, perPage, loading, filters } = list
+
+const exporting = ref(false)
+
+async function exportLogs() {
+  exporting.value = true
+  try {
+    await submitExport('balance_logs', toParams(cleanParams({ ...filters })))
+  } finally {
+    exporting.value = false
+  }
+}
 
 onMounted(list.load)
 </script>
@@ -42,6 +57,7 @@ onMounted(list.load)
       </el-form-item>
       <el-form-item>
         <el-button type="primary" native-type="submit">查询</el-button>
+        <el-button :icon="Download" :loading="exporting" @click="exportLogs">导出</el-button>
       </el-form-item>
     </el-form>
 

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { type AdminDashboard, dashboardApi } from '@/api/dashboard'
 import { useAuthStore } from '@/stores/auth'
 import { usePermissionStore } from '@/stores/permission'
 import { roleLabel } from '@/utils/labels'
@@ -7,10 +8,81 @@ import { roleLabel } from '@/utils/labels'
 const auth = useAuthStore()
 const permission = usePermissionStore()
 
-onMounted(() => permission.load())
+/** 汇总里有销售额和利润，跟订单列表一样要 order.view */
+const canViewStats = computed(() => permission.can('order.view'))
+const data = ref<AdminDashboard | null>(null)
+const loading = ref(false)
+
+async function load() {
+  loading.value = true
+  try {
+    data.value = await dashboardApi.summary()
+  } finally {
+    loading.value = false
+  }
+}
+
+onMounted(async () => {
+  await permission.load()
+  if (canViewStats.value) {
+    load()
+  }
+})
 </script>
 
 <template>
+  <div v-if="canViewStats" v-loading="loading" class="stats">
+    <el-row :gutter="16">
+      <el-col :span="6">
+        <el-card shadow="never">
+          <el-statistic title="总销售额（元）" :value="Number(data?.total.sales ?? 0)" :precision="2" />
+        </el-card>
+      </el-col>
+      <el-col :span="6">
+        <el-card shadow="never">
+          <el-statistic title="总商户数" :value="data?.total.merchant_count ?? 0" />
+        </el-card>
+      </el-col>
+      <el-col :span="6">
+        <el-card shadow="never">
+          <el-statistic title="总订单数" :value="data?.total.order_count ?? 0" />
+        </el-card>
+      </el-col>
+      <el-col :span="6">
+        <el-card shadow="never">
+          <el-statistic title="总利润（元）" :value="Number(data?.total.profit ?? 0)" :precision="2" />
+        </el-card>
+      </el-col>
+    </el-row>
+    <el-row :gutter="16" class="row">
+      <el-col :span="6">
+        <el-card shadow="never">
+          <el-statistic title="今日订单" :value="data?.today.order_count ?? 0" />
+        </el-card>
+      </el-col>
+      <el-col :span="6">
+        <el-card shadow="never">
+          <el-statistic title="今日成功" :value="data?.today.success_count ?? 0" />
+        </el-card>
+      </el-col>
+      <el-col :span="6">
+        <el-card shadow="never">
+          <el-statistic title="今日销售（元）" :value="Number(data?.today.sales ?? 0)" :precision="2" />
+        </el-card>
+      </el-col>
+      <el-col :span="6">
+        <el-card shadow="never">
+          <el-statistic title="今日利润（元）" :value="Number(data?.today.profit ?? 0)" :precision="2" />
+        </el-card>
+      </el-col>
+    </el-row>
+    <div class="actions">
+      <el-button @click="load">刷新</el-button>
+      <router-link to="/order/orders"><el-button type="primary" plain>查看订单</el-button></router-link>
+      <span class="tip">销售额、利润只算成功的订单；累计数据每分钟更新一次</span>
+    </div>
+  </div>
+
   <el-card shadow="never">
     <h2 class="welcome">欢迎回来，{{ permission.me?.real_name ?? auth.username }}</h2>
     <el-descriptions v-if="permission.me" :column="3" border>
@@ -27,5 +99,25 @@ onMounted(() => permission.load())
 .welcome {
   margin: 0 0 16px;
   font-size: 20px;
+}
+
+.stats {
+  margin-bottom: 16px;
+}
+
+.row {
+  margin-top: 16px;
+}
+
+.actions {
+  margin-top: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tip {
+  color: #909399;
+  font-size: 13px;
 }
 </style>

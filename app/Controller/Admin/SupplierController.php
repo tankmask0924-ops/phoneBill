@@ -21,6 +21,7 @@ use App\Network\ClientIpResolver;
 use App\Service\Admin\SupplierAdminService;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpServer\Annotation\Controller;
+use Hyperf\HttpServer\Annotation\DeleteMapping;
 use Hyperf\HttpServer\Annotation\GetMapping;
 use Hyperf\HttpServer\Annotation\Middleware;
 use Hyperf\HttpServer\Annotation\PostMapping;
@@ -93,6 +94,17 @@ class SupplierController extends AbstractController
     public function changeStatus(int $id): array
     {
         return $this->supplierAdminService->changeStatus($this->admin(), $id, $this->request->input('status'), $this->clientIp());
+    }
+
+    #[Middleware(AdminAuthMiddleware::class)]
+    #[Middleware(AdminPermissionMiddleware::class)]
+    #[RequiresPermission('supplier.manage')]
+    #[DeleteMapping(path: '{id:\d+}')]
+    public function destroy(int $id): array
+    {
+        $this->supplierAdminService->delete($this->admin(), $id, $this->clientIp());
+
+        return ['success' => true];
     }
 
     private function admin(): AdminUser

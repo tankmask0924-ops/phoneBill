@@ -40,6 +40,7 @@ type Filters = {
   status: string
   operator: string
   province: string
+  face_value: number | ''
   dates: [string, string] | null
 }
 
@@ -63,12 +64,12 @@ const list = usePagedList<Order, Filters>(
       return result
     }),
   // 异常订单页不限时间：异常订单不管多久都要处理
-  { keyword: '', mobile: '', merchant_id: '', supplier_id: '', status: '', operator: '', province: '', dates: props.abnormal ? null : recentDays() },
+  { keyword: '', mobile: '', merchant_id: '', supplier_id: '', status: '', operator: '', province: '', face_value: '', dates: props.abnormal ? null : recentDays() },
   20,
 )
 const { rows, total, page, perPage, loading, filters } = list
 
-const options = ref<OrderFilterOptions>({ merchants: [], suppliers: [], provinces: [] })
+const options = ref<OrderFilterOptions>({ merchants: [], suppliers: [], provinces: [], face_values: [] })
 const exporting = ref(false)
 
 async function exportCsv() {
@@ -300,6 +301,11 @@ onMounted(async () => {
         </el-select>
       </el-form-item>
       <el-form-item>
+        <el-select v-model="filters.face_value" placeholder="面值" clearable style="width: 100px">
+          <el-option v-for="v in options.face_values" :key="v" :label="`${v} 元`" :value="v" />
+        </el-select>
+      </el-form-item>
+      <el-form-item>
         <el-date-picker
           v-model="filters.dates"
           type="daterange"
@@ -327,9 +333,9 @@ onMounted(async () => {
         <div class="summary-sub">成功 /（成功 + 失败）</div>
       </div>
       <div class="summary-item">
-        <div class="summary-label">成本（元）</div>
-        <div class="summary-value">{{ summary.cost }}</div>
-        <div class="summary-sub">成功订单扣款 {{ summary.amount }}</div>
+        <div class="summary-label">成功金额（元）</div>
+        <div class="summary-value">{{ summary.amount }}</div>
+        <div class="summary-sub">成功 {{ summary.success_count }} 单的扣款合计</div>
       </div>
       <div class="summary-item">
         <div class="summary-label">利润（元）</div>

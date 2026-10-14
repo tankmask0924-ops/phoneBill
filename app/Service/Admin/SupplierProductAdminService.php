@@ -13,6 +13,7 @@ declare(strict_types=1);
 namespace App\Service\Admin;
 
 use App\Dao\AdminOperationLogDao;
+use App\Dao\OrderAttemptDao;
 use App\Dao\ProductRouteDao;
 use App\Dao\SupplierDao;
 use App\Dao\SupplierProductDao;
@@ -37,7 +38,7 @@ use Throwable;
  * - 覆盖省份必填（可选「全国」），号码所在省份在里面才会选到这个商品；
  * - 所属供应商建好后不能改；
  * - 已经被平台商品绑定的，面值不能改（平台商品只能绑同面值的供应商商品）；
- * - 不提供删除，不用了就下架。
+ * - 删除是软删除：被平台商品绑定着、或者有提交了还没出结果的单时不能删；删除后历史订单照常显示名字。
  */
 class SupplierProductAdminService extends AbstractService
 {
@@ -61,6 +62,9 @@ class SupplierProductAdminService extends AbstractService
 
     #[Inject]
     protected ProductRouteDao $productRouteDao;
+
+    #[Inject]
+    protected OrderAttemptDao $attemptDao;
 
     #[Inject]
     protected AdminOperationLogDao $operationLogDao;
@@ -250,6 +254,28 @@ class SupplierProductAdminService extends AbstractService
         }
 
         return $this->formatMany([$product])[0];
+    }
+
+    /**
+     * 软删除，连同支持的运营商、覆盖的省份一起清掉。
+     */
+    public function delete(AdminUser $operator, int $id, ?string $ip): void
+    {
+        $product = $this->findOrFail($id);
+        if ($this->productRouteDao->isSupplierProductBound($product->id)) {
+            throw new HttpException(422, "「{$product->name}」还绑定在平台商品上，先在平台商品里解绑再删除");
+        }
+        if ($this->attemptDao->hasProcessingForSupplierProduct($product->id)) {
+            throw new HttpException(422, "「{$product->name}」还有充值中的订单，等出结果后再删除");
+        }
+        $before = $this->formatMany([$product])[0];
+        Db::transaction(function () use ($operator, $product, $before, $ip) {
+            $this->operatorDao->replaceForSupplierProduct($product->id, []);
+            $this->provinceDao->replaceForSupplierProduct($product->id, []);
+            $this->supplierProductDao->delete($product->id);
+            $this->operationLogDao->record($operator->id, self::MODULE, 'delete_supplier_product', 'supplier_product', $product->id, $before, null, $ip);
+        });
+        $this->routeService->flushConfig();
     }
 
     /**

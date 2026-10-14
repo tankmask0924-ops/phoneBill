@@ -23,6 +23,7 @@ use App\Service\Admin\SupplierAdminService;
 use App\Service\Admin\SupplierProductAdminService;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpServer\Annotation\Controller;
+use Hyperf\HttpServer\Annotation\DeleteMapping;
 use Hyperf\HttpServer\Annotation\GetMapping;
 use Hyperf\HttpServer\Annotation\Middleware;
 use Hyperf\HttpServer\Annotation\PostMapping;
@@ -113,6 +114,17 @@ class SupplierProductController extends AbstractController
     public function changeStatus(int $id): array
     {
         return $this->supplierProductAdminService->changeStatus($this->admin(), $id, $this->request->input('status'), $this->clientIp());
+    }
+
+    #[Middleware(AdminAuthMiddleware::class)]
+    #[Middleware(AdminPermissionMiddleware::class)]
+    #[RequiresPermission('supplier_product.manage')]
+    #[DeleteMapping(path: '{id:\d+}')]
+    public function destroy(int $id): array
+    {
+        $this->supplierProductAdminService->delete($this->admin(), $id, $this->clientIp());
+
+        return ['success' => true];
     }
 
     private function admin(): AdminUser

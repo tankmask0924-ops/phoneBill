@@ -45,6 +45,22 @@ class OrderAttemptDao extends AbstractDao
     }
 
     /**
+     * 这个供应商还有没有提交了还没出结果的单（删除供应商前检查）。
+     */
+    public function hasProcessingForSupplier(int $supplierId): bool
+    {
+        return $this->newQuery()->where('status', OrderAttempt::STATUS_PROCESSING)->where('supplier_id', $supplierId)->exists();
+    }
+
+    /**
+     * 这个供应商商品还有没有提交了还没出结果的单（删除供应商商品前检查）。
+     */
+    public function hasProcessingForSupplierProduct(int $supplierProductId): bool
+    {
+        return $this->newQuery()->where('status', OrderAttempt::STATUS_PROCESSING)->where('supplier_product_id', $supplierProductId)->exists();
+    }
+
+    /**
      * 带条件的状态变更，返回是否改成功。
      *
      * @param array<string, mixed> $attrs

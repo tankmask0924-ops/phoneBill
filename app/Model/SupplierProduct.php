@@ -13,6 +13,7 @@ declare(strict_types=1);
 namespace App\Model;
 
 use Carbon\Carbon;
+use Hyperf\Database\Model\SoftDeletes;
 
 /**
  * 供应商商品。
@@ -27,9 +28,12 @@ use Carbon\Carbon;
  * @property null|string $remark
  * @property Carbon $created_at
  * @property Carbon $updated_at
+ * @property null|Carbon $deleted_at
  */
 class SupplierProduct extends Model
 {
+    use SoftDeletes;
+
     protected ?string $table = 'supplier_products';
 
     protected array $fillable = [

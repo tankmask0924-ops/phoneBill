@@ -1,24 +1,54 @@
 <script setup lang="ts">
 import StatusTag from '@/components/StatusTag.vue'
-import { recentDays } from '@/utils/date'
+import { Download } from '@element-plus/icons-vue'
+import { formatDuration, recentDays } from '@/utils/date'
+import { cleanParams, submitExport } from '@/utils/export'
 import { usePagedList } from '@/utils/paged'
 import { onMounted, ref } from 'vue'
-import { type Order, type OrderDetail, portalApi } from '@/api/portal'
+import { type Order, type OrderDetail, type OrderFilterOptions, type OrderSummary, portalApi } from '@/api/portal'
 import { balanceTypeLabels, labelOf, operatorLabels, orderStatusLabels, toOptions } from '@/utils/labels'
 
-const list = usePagedList<
-  Order,
-  { keyword: string; mobile: string; status: string; operator: string; province: string; dates: [string, string] | null }
->(
-  (params) => {
-    // 日期范围拆成 created_from / created_to
-    const { dates, ...rest } = params as Record<string, unknown> & { dates?: [string, string] }
-    return portalApi.orders(dates ? { ...rest, created_from: dates[0], created_to: dates[1] } : rest)
-  },
-  { keyword: '', mobile: '', status: '', operator: '', province: '', dates: recentDays() },
+type Filters = {
+  keyword: string
+  mobile: string
+  status: string
+  operator: string
+  province: string
+  face_value: number | ''
+  category_id: number | ''
+  dates: [string, string] | null
+}
+
+/** 日期范围拆成 created_from / created_to */
+function toParams(params: Record<string, unknown>): Record<string, unknown> {
+  const { dates, ...rest } = params as Record<string, unknown> & { dates?: [string, string] | null }
+  return dates ? { ...rest, created_from: dates[0], created_to: dates[1] } : rest
+}
+
+/** 当前筛选条件下全部订单的汇总，跟列表一起返回 */
+const summary = ref<OrderSummary | null>(null)
+
+const list = usePagedList<Order, Filters>(
+  (params) =>
+    portalApi.orders(toParams(params)).then((result) => {
+      summary.value = result.summary
+      return result
+    }),
+  { keyword: '', mobile: '', status: '', operator: '', province: '', face_value: '', category_id: '', dates: recentDays() },
   20,
 )
 const { rows, total, page, perPage, loading, filters } = list
+
+const exporting = ref(false)
+
+async function exportOrders() {
+  exporting.value = true
+  try {
+    await submitExport('orders', toParams(cleanParams({ ...filters })))
+  } finally {
+    exporting.value = false
+  }
+}
 
 const detailVisible = ref(false)
 const detail = ref<OrderDetail | null>(null)
@@ -29,11 +59,11 @@ async function openDetail(row: Order) {
   detail.value = await portalApi.order(row.id)
 }
 
-const provinces = ref<string[]>([])
+const options = ref<OrderFilterOptions>({ provinces: [], face_values: [], categories: [] })
 
 onMounted(async () => {
   list.load()
-  provinces.value = (await portalApi.orderFilterOptions()).provinces
+  options.value = await portalApi.orderFilterOptions()
 })
 </script>
 
@@ -60,7 +90,17 @@ onMounted(async () => {
       </el-form-item>
       <el-form-item>
         <el-select v-model="filters.province" placeholder="地区" clearable filterable style="width: 110px">
-          <el-option v-for="p in provinces" :key="p" :label="p" :value="p" />
+          <el-option v-for="p in options.provinces" :key="p" :label="p" :value="p" />
+        </el-select>
+      </el-form-item>
+      <el-form-item>
+        <el-select v-model="filters.face_value" placeholder="面值" clearable style="width: 100px">
+          <el-option v-for="v in options.face_values" :key="v" :label="`${v} 元`" :value="v" />
+        </el-select>
+      </el-form-item>
+      <el-form-item>
+        <el-select v-model="filters.category_id" placeholder="分类" clearable style="width: 120px">
+          <el-option v-for="c in options.categories" :key="c.id" :label="c.name" :value="c.id" />
         </el-select>
       </el-form-item>
       <el-form-item>
@@ -80,8 +120,32 @@ onMounted(async () => {
       </el-form-item>
       <el-form-item>
         <el-button type="primary" native-type="submit">查询</el-button>
+        <el-button :icon="Download" :loading="exporting" @click="exportOrders">导出</el-button>
       </el-form-item>
     </el-form>
+
+    <div v-if="summary" class="summary">
+      <div class="summary-item">
+        <div class="summary-label">订单数</div>
+        <div class="summary-value">{{ summary.order_count }}</div>
+        <div class="summary-sub">成功 {{ summary.success_count }} · 失败 {{ summary.failed_count }} · 充值中 {{ summary.processing_count }}</div>
+      </div>
+      <div class="summary-item">
+        <div class="summary-label">成功率</div>
+        <div class="summary-value">{{ summary.success_rate === null ? '-' : `${summary.success_rate}%` }}</div>
+        <div class="summary-sub">成功 /（成功 + 失败）</div>
+      </div>
+      <div class="summary-item">
+        <div class="summary-label">消费金额（元）</div>
+        <div class="summary-value">{{ summary.amount }}</div>
+        <div class="summary-sub">成功订单的扣款合计</div>
+      </div>
+      <div class="summary-item">
+        <div class="summary-label">平均耗时</div>
+        <div class="summary-value">{{ formatDuration(summary.avg_duration) }}</div>
+        <div class="summary-sub">成功订单：下单到成功</div>
+      </div>
+    </div>
 
     <el-table v-loading="loading" :data="rows" border>
       <el-table-column prop="order_no" label="平台订单号" width="210" />
@@ -152,6 +216,36 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.summary-item {
+  padding: 12px 16px;
+  background: #f5f7fa;
+  border-radius: 4px;
+}
+
+.summary-label {
+  color: #909399;
+  font-size: 13px;
+}
+
+.summary-value {
+  margin: 4px 0;
+  font-size: 22px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.summary-sub {
+  color: #909399;
+  font-size: 12px;
+}
+
 .pagination {
   justify-content: flex-end;
   margin-top: 16px;

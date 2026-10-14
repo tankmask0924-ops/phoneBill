@@ -1,4 +1,4 @@
-import { CreditCard, Goods, HomeFilled, Money, Tickets, Upload, User, Wallet } from '@element-plus/icons-vue'
+import { CreditCard, Download, Goods, HomeFilled, Money, Tickets, Upload, User, Wallet } from '@element-plus/icons-vue'
 import type { MenuItem } from '@/types'
 
 export const menus: MenuItem[] = [
@@ -7,6 +7,7 @@ export const menus: MenuItem[] = [
   { path: '/batch-order', title: '批量下单', icon: Upload },
   { path: '/products', title: '可下单商品', icon: Goods },
   { path: '/balance-logs', title: '资金流水', icon: Money },
+  { path: '/exports', title: '导出列表', icon: Download },
   { path: '/funding', title: '加款申请', icon: Wallet },
   { path: '/payer-accounts', title: '付款账号', icon: CreditCard },
   { path: '/account', title: '账户', icon: User },

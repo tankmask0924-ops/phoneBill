@@ -122,9 +122,9 @@ npm run build        # 产物在 merchant-web/dist，部署在 /merchant/ 路径
 | POST/PUT/DELETE | `/admin/roles`、`/admin/roles/{id}` | `role.manage` |
 | GET | `/admin/operation-logs` | `operation_log.view` |
 | GET | `/admin/suppliers`、`/admin/suppliers/meta`、`/admin/suppliers/{id}/balance`（实时余额） | `supplier.view` |
-| POST/PUT | `/admin/suppliers`、`/{id}`、`/{id}/status` | `supplier.manage` |
+| POST/PUT/DELETE | `/admin/suppliers`、`/{id}`、`/{id}/status`；`DELETE /{id}` 是软删除，名下没有供应商商品、没有充值中的单才能删 | `supplier.manage` |
 | GET | `/admin/supplier-products`、`/admin/supplier-products/meta`（省份）、`/admin/supplier-products/supplier-options`、`/admin/supplier-products/upstream-products` | `supplier_product.view` |
-| POST/PUT | `/admin/supplier-products`、`/{id}`、`/{id}/status` | `supplier_product.manage` |
+| POST/PUT/DELETE | `/admin/supplier-products`、`/{id}`、`/{id}/status`；`DELETE /{id}` 是软删除，没被平台商品绑定、没有充值中的单才能删 | `supplier_product.manage` |
 | GET | `/admin/products`、`/admin/products/supplier-product-options`、`/admin/product-stats`、`/admin/product-categories` | `product.view` |
 | POST/PUT | `/admin/products`、`/{id}`、`/{id}/status` | `product.manage` |
 | POST/PUT/DELETE | `/admin/product-categories`、`/{id}` | `product.manage` |
@@ -139,7 +139,7 @@ npm run build        # 产物在 merchant-web/dist，部署在 /merchant/ 路径
 | POST/PUT | `/admin/merchants`、`/{id}`、`/{id}/status`、`/{id}/secret` | `merchant.manage` |
 | PUT | `/admin/merchants/{id}/products/{productId}` | `merchant.price` |
 | POST | `/admin/merchants/{id}/balance` | `merchant.balance` |
-| GET | `/admin/orders`、`/filter-options`、`/export`、`/{id}` | `order.view` |
+| GET | `/admin/orders`、`/filter-options`、`/export`、`/{id}`；`/admin/dashboard`（首页汇总，含销售额和利润） | `order.view` |
 | GET/POST | `/admin/orders/{id}/query`、`/{id}/success`、`/{id}/fail`、`/{id}/notify`（手动回调）、`/{id}/resupply-options`、`/{id}/resupply`（手动补单） | `order.manage` |
 | POST | `/admin/orders/{id}/reverse` | `order.reverse` |
 | GET/POST | `/open/v1/recharge`、`/order`、`/balance`、`/products` | 商户签名，见 [docs/api.md](docs/api.md) |
@@ -150,6 +150,7 @@ npm run build        # 产物在 merchant-web/dist，部署在 /merchant/ 路径
 | GET/PUT | `/merchant/auth/me`、`/merchant/auth/password` | 商户登录 |
 | GET | `/merchant/dashboard`、`/orders`、`/order-filter-options`、`/orders/{id}`、`/balance-logs`、`/products`（可下单商品和近 7 天统计）、`/account` | 商户登录，只能看自己的数据 |
 | PUT/POST | `/merchant/account/ip-whitelist`、`/merchant/account/reset-secret` | 商户登录，要再输一次登录密码 |
+| GET/POST | `/merchant/exports`（导出订单记录 / 资金流水，异步生成 CSV，保留 7 天）、`/merchant/exports/{id}/download` | 商户登录，只能看、下载自己的 |
 | POST | `/merchant/batch-orders/preview`（预览）、`/merchant/batch-orders`（提交） | 商户登录，商户停用时不能下单 |
 | GET/POST/PUT/DELETE | `/merchant/payer-accounts`、`/{id}`；`/merchant/receiving-accounts`；`/merchant/funding-vouchers`（上传凭证）；`/merchant/funding-requests`、`/{id}` | 商户登录，只能看、改自己的 |
 

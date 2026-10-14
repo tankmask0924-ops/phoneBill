@@ -24,6 +24,22 @@ class ProductCategoryDao extends AbstractDao
     }
 
     /**
+     * 这些分类的 id、名称，按排序值排（下拉框、tab 用）。
+     *
+     * @param list<int> $ids
+     * @return list<array{id: int, name: string}>
+     */
+    public function optionsFor(array $ids): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+
+        return $this->newQuery()->whereIn('id', $ids)->orderBy('sort')->orderBy('id')->get(['id', 'name'])
+            ->map(static fn (ProductCategory $c) => ['id' => $c->id, 'name' => $c->name])->values()->all();
+    }
+
+    /**
      * @param list<int> $ids
      * @return array<int, string> id => 名称
      */

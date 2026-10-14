@@ -18,6 +18,7 @@ use App\Dao\MerchantDao;
 use App\Dao\OrderAttemptDao;
 use App\Dao\OrderDao;
 use App\Dao\OrderNotifyLogDao;
+use App\Dao\ProductDao;
 use App\Dao\SupplierDao;
 use App\Dao\SupplierProductDao;
 use App\Enum\Operator;
@@ -86,6 +87,9 @@ class OrderAdminService extends AbstractService
     protected SupplierProductDao $supplierProductDao;
 
     #[Inject]
+    protected ProductDao $productDao;
+
+    #[Inject]
     protected OrderProcessService $processService;
 
     #[Inject]
@@ -109,8 +113,13 @@ class OrderAdminService extends AbstractService
     {
         return [
             'merchants' => $this->merchantDao->newQuery()->orderBy('id')->get(['id', 'name'])->toArray(),
-            'suppliers' => $this->supplierDao->newQuery()->orderBy('id')->get(['id', 'name'])->toArray(),
+            // 含已删除的，方便查历史订单
+            'suppliers' => array_map(
+                static fn (array $s) => ['id' => $s['id'], 'name' => $s['deleted'] ? $s['name'] . '（已删除）' : $s['name']],
+                $this->supplierDao->allWithTrashed()
+            ),
             'provinces' => Province::NAMES,
+            'face_values' => $this->productDao->distinctFaceValues(),
         ];
     }
 
@@ -172,8 +181,8 @@ class OrderAdminService extends AbstractService
     {
         $order = $this->findOrFail($id);
         $attempts = $this->attemptDao->forOrder($order->id);
-        $suppliers = $this->supplierDao->newQuery()->whereIn('id', $attempts->pluck('supplier_id')->unique()->all())->pluck('name', 'id');
-        $supplierProducts = $this->supplierProductDao->newQuery()->whereIn('id', $attempts->pluck('supplier_product_id')->unique()->all())->pluck('name', 'id');
+        $suppliers = $this->supplierDao->namesWithTrashed($attempts->pluck('supplier_id')->unique()->values()->all());
+        $supplierProducts = $this->supplierProductDao->namesWithTrashed($attempts->pluck('supplier_product_id')->unique()->values()->all());
 
         return $this->formatMany([$order])[0] + [
             'warnings' => $this->warnings($order, $attempts->all()),
@@ -430,12 +439,12 @@ class OrderAdminService extends AbstractService
     /**
      * 没传日期、也不是按单号 / 手机号 / 未完成状态查时，默认最近 7 天（见 FiltersByDateRange）。
      *
-     * @param array<string, mixed> $query merchant_id / supplier_id / status / operator / province / keyword（平台或商户订单号）/ mobile（可多个，见 FiltersByMobiles）/ created_from / created_to
+     * @param array<string, mixed> $query merchant_id / supplier_id / product_id / face_value / status / operator / province / keyword（平台或商户订单号）/ mobile（可多个，见 FiltersByMobiles）/ created_from / created_to
      */
     private function filtered(array $query): Builder
     {
         $builder = $this->orderDao->newQuery();
-        foreach (['merchant_id', 'supplier_id', 'product_id'] as $field) {
+        foreach (['merchant_id', 'supplier_id', 'product_id', 'face_value'] as $field) {
             if (isset($query[$field]) && is_numeric($query[$field])) {
                 $builder->where($field, (int) $query[$field]);
             }
@@ -468,7 +477,7 @@ class OrderAdminService extends AbstractService
     private function formatMany(array $orders): array
     {
         $merchants = $this->merchantDao->newQuery()->whereIn('id', array_unique(array_map(static fn (Order $o) => $o->merchant_id, $orders)))->pluck('name', 'id');
-        $suppliers = $this->supplierDao->newQuery()->whereIn('id', array_filter(array_unique(array_map(static fn (Order $o) => $o->supplier_id, $orders))))->pluck('name', 'id');
+        $suppliers = $this->supplierDao->namesWithTrashed(array_values(array_filter(array_unique(array_map(static fn (Order $o) => $o->supplier_id, $orders)))));
 
         return array_map(static fn (Order $o) => [
             'id' => $o->id,

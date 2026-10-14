@@ -57,6 +57,8 @@ export const supplierApi = {
   create: (data: SupplierForm) => http.post<Supplier>('/admin/suppliers', data),
   update: (id: number, data: Partial<SupplierForm>) => http.put<Supplier>(`/admin/suppliers/${id}`, data),
   changeStatus: (id: number, status: string) => http.post<Supplier>(`/admin/suppliers/${id}/status`, { status }),
+  /** 软删除：名下还有供应商商品、或有充值中的订单时后端拒绝 */
+  remove: (id: number) => http.delete<{ success: boolean }>(`/admin/suppliers/${id}`),
   /** 实时查余额；查询出错不报错，放在 error 里 */
   balance: (id: number) =>
     http.get<{ supported: boolean; balance: string | null; error: string | null }>(`/admin/suppliers/${id}/balance`),
@@ -123,6 +125,8 @@ export const supplierProductApi = {
   create: (data: SupplierProductForm) => http.post<SupplierProduct>('/admin/supplier-products', data),
   update: (id: number, data: Partial<SupplierProductForm>) => http.put<SupplierProduct>(`/admin/supplier-products/${id}`, data),
   changeStatus: (id: number, status: string) => http.post<SupplierProduct>(`/admin/supplier-products/${id}/status`, { status }),
+  /** 软删除：被平台商品绑定着、或有充值中的订单时后端拒绝 */
+  remove: (id: number) => http.delete<{ success: boolean }>(`/admin/supplier-products/${id}`),
 }
 
 /** 商品分类：App\Controller\Admin\ProductCategoryController，只给平台商品用 */

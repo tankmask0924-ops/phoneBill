@@ -34,6 +34,7 @@ const router = createRouter({
           component: () => import('@/views/BalanceLogView.vue'),
           meta: { title: '资金流水' },
         },
+        { path: 'exports', name: 'exports', component: () => import('@/views/ExportListView.vue'), meta: { title: '导出列表' } },
         { path: 'products', name: 'products', component: () => import('@/views/ProductsView.vue'), meta: { title: '可下单商品' } },
         { path: 'funding', name: 'funding', component: () => import('@/views/FundingView.vue'), meta: { title: '加款申请' } },
         { path: 'payer-accounts', name: 'payer-accounts', component: () => import('@/views/PayerAccountView.vue'), meta: { title: '付款账号' } },

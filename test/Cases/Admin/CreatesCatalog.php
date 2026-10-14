@@ -84,11 +84,11 @@ trait CreatesCatalog
         ProductCategory::destroy($this->categoryIds);
         SupplierProductOperator::whereIn('supplier_product_id', $this->supplierProductIds)->delete();
         SupplierProductProvince::whereIn('supplier_product_id', $this->supplierProductIds)->delete();
-        SupplierProduct::destroy($this->supplierProductIds);
+        SupplierProduct::withTrashed()->whereIn('id', $this->supplierProductIds)->forceDelete();
         ChannelMaintenance::whereIn('supplier_id', $this->supplierIds)->delete();
         MobileBlacklist::whereIn('mobile', $this->blacklistMobiles)->delete();
         SupplierProvince::whereIn('supplier_id', $this->supplierIds)->delete();
-        Supplier::destroy($this->supplierIds);
+        Supplier::withTrashed()->whereIn('id', $this->supplierIds)->forceDelete();
         MobileSegment::destroy($this->segmentIds);
         $this->supplierIds = $this->supplierProductIds = $this->productIds = $this->segmentIds = $this->merchantIds = $this->blacklistMobiles = [];
     }

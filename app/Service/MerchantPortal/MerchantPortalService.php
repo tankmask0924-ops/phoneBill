@@ -14,6 +14,8 @@ namespace App\Service\MerchantPortal;
 
 use App\Dao\MerchantBalanceLogDao;
 use App\Dao\OrderDao;
+use App\Dao\ProductCategoryDao;
+use App\Dao\ProductDao;
 use App\Enum\Operator;
 use App\Enum\Province;
 use App\Model\Merchant;
@@ -24,6 +26,7 @@ use App\Service\FiltersByDateRange;
 use App\Service\FiltersByMobiles;
 use App\Service\Merchant\MerchantCatalogService;
 use App\Service\Order\OrderService;
+use App\Service\Product\ProductStatsService;
 use Hyperf\Database\Model\Builder;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpMessage\Exception\HttpException;
@@ -68,6 +71,12 @@ class MerchantPortalService extends AbstractService
     #[Inject]
     protected MerchantCatalogService $catalogService;
 
+    #[Inject]
+    protected ProductDao $productDao;
+
+    #[Inject]
+    protected ProductCategoryDao $categoryDao;
+
     /**
      * @return array<string, mixed>
      */
@@ -90,14 +99,36 @@ class MerchantPortalService extends AbstractService
     }
 
     /**
-     * @param array<string, mixed> $query keyword（平台 / 商户订单号）/ mobile（可多个，见 FiltersByMobiles）/ status（processing / success / failed）/ operator / province / created_from / created_to
-     * @return array{data: list<array<string, mixed>>, total: int, page: int, per_page: int}
+     * summary 是当前筛选条件下全部订单（不只这一页）的汇总，见 orderSummary()。
+     *
+     * @param array<string, mixed> $query 见 filteredOrders()
+     * @return array{data: list<array<string, mixed>>, total: int, page: int, per_page: int, summary: array<string, mixed>}
      */
     public function orders(Merchant $merchant, array $query): array
     {
         $page = max(1, (int) ($query['page'] ?? 1));
         $perPage = min(self::MAX_PER_PAGE, max(1, (int) ($query['per_page'] ?? 20)));
 
+        $builder = $this->filteredOrders($merchant, $query);
+        $summary = $this->orderSummary($builder);
+        $orders = $builder->orderByDesc('id')->forPage($page, $perPage)->get();
+
+        return [
+            'data' => $orders->map(fn (Order $o) => $this->presentOrder($o))->values()->all(),
+            'total' => $summary['order_count'],
+            'page' => $page,
+            'per_page' => $perPage,
+            'summary' => $summary,
+        ];
+    }
+
+    /**
+     * 订单列表、导出共用的筛选。没传日期、也不是按单号 / 手机号查时，默认最近 7 天。
+     *
+     * @param array<string, mixed> $query keyword（平台 / 商户订单号）/ mobile（可多个，见 FiltersByMobiles）/ status（processing / success / failed）/ operator / province / face_value / category_id / created_from / created_to
+     */
+    public function filteredOrders(Merchant $merchant, array $query): Builder
+    {
         $builder = $this->orderDao->newQuery()->where('merchant_id', $merchant->id);
         $keyword = trim((string) ($query['keyword'] ?? ''));
         if ($keyword !== '') {
@@ -113,17 +144,15 @@ class MerchantPortalService extends AbstractService
         if (is_string($query['province'] ?? null) && Province::isValid($query['province'])) {
             $builder->where('province', $query['province']);
         }
+        if (is_numeric($query['face_value'] ?? null)) {
+            $builder->where('face_value', (int) $query['face_value']);
+        }
+        if (is_numeric($query['category_id'] ?? null)) {
+            $builder->whereIn('product_id', $this->productDao->idsByCategory((int) $query['category_id']));
+        }
         $this->applyDateRange($builder, $query, $keyword !== '' || $byMobile);
 
-        $total = (clone $builder)->count();
-        $orders = $builder->orderByDesc('id')->forPage($page, $perPage)->get();
-
-        return [
-            'data' => $orders->map(fn (Order $o) => $this->presentOrder($o))->values()->all(),
-            'total' => $total,
-            'page' => $page,
-            'per_page' => $perPage,
-        ];
+        return $builder;
     }
 
     /**
@@ -158,6 +187,25 @@ class MerchantPortalService extends AbstractService
         $page = max(1, (int) ($query['page'] ?? 1));
         $perPage = min(self::MAX_PER_PAGE, max(1, (int) ($query['per_page'] ?? 20)));
 
+        $builder = $this->filteredBalanceLogs($merchant, $query);
+        $total = (clone $builder)->count();
+        $logs = $builder->orderByDesc('id')->forPage($page, $perPage)->get();
+
+        return [
+            'data' => $this->presentBalanceLogs($merchant, $logs->all()),
+            'total' => $total,
+            'page' => $page,
+            'per_page' => $perPage,
+        ];
+    }
+
+    /**
+     * 资金流水列表、导出共用的筛选。
+     *
+     * @param array<string, mixed> $query type / order_no / created_from / created_to
+     */
+    public function filteredBalanceLogs(Merchant $merchant, array $query): Builder
+    {
         $builder = $this->balanceLogDao->newQuery()->where('merchant_id', $merchant->id);
         if (in_array($query['type'] ?? null, self::BALANCE_TYPES, true)) {
             $builder->where('type', $query['type']);
@@ -168,31 +216,41 @@ class MerchantPortalService extends AbstractService
         }
         $this->applyDateRange($builder, $query, $orderNo !== '');
 
-        $total = (clone $builder)->count();
-        $logs = $builder->orderByDesc('id')->forPage($page, $perPage)->get();
-        $orders = $this->orderDao->newQuery()
-            ->where('merchant_id', $merchant->id)
-            ->whereIn('id', $logs->pluck('order_id')->filter()->unique()->all())
-            ->get(['id', 'order_no', 'merchant_order_no', 'mobile'])
-            ->keyBy('id');
+        return $builder;
+    }
 
-        return [
-            'data' => $logs->map(static fn (MerchantBalanceLog $l) => [
+    /**
+     * 补上订单号、手机号（一页的订单一次查出）。
+     *
+     * @param list<MerchantBalanceLog> $logs
+     * @return list<array<string, mixed>>
+     */
+    public function presentBalanceLogs(Merchant $merchant, array $logs): array
+    {
+        $orderIds = array_values(array_unique(array_filter(array_map(static fn (MerchantBalanceLog $l) => $l->order_id, $logs))));
+        $orders = $orderIds === [] ? [] : $this->orderDao->newQuery()
+            ->where('merchant_id', $merchant->id)
+            ->whereIn('id', $orderIds)
+            ->get(['id', 'order_no', 'merchant_order_no', 'mobile'])
+            ->keyBy('id')
+            ->all();
+
+        return array_map(static function (MerchantBalanceLog $l) use ($orders) {
+            $order = $l->order_id ? ($orders[$l->order_id] ?? null) : null;
+
+            return [
                 'id' => $l->id,
                 'type' => $l->type,
                 'amount' => $l->amount,
                 'balance_after' => $l->balance_after,
                 'order_id' => $l->order_id,
-                'order_no' => $l->order_id ? $orders->get($l->order_id)?->order_no : null,
-                'merchant_order_no' => $l->order_id ? $orders->get($l->order_id)?->merchant_order_no : null,
-                'mobile' => $l->order_id ? $orders->get($l->order_id)?->mobile : null,
+                'order_no' => $order?->order_no,
+                'merchant_order_no' => $order?->merchant_order_no,
+                'mobile' => $order?->mobile,
                 'remark' => $l->remark,
                 'created_at' => $l->created_at?->toDateTimeString(),
-            ])->values()->all(),
-            'total' => $total,
-            'page' => $page,
-            'per_page' => $perPage,
-        ];
+            ];
+        }, $logs);
     }
 
     /**
@@ -212,23 +270,70 @@ class MerchantPortalService extends AbstractService
     }
 
     /**
-     * 订单筛选的选项：省份（运营商前端写死）。
+     * 订单筛选的选项：省份（运营商前端写死），已开通商品的面值和分类。
      *
-     * @return array{provinces: list<string>}
+     * @return array{provinces: list<string>, face_values: list<int>, categories: list<array{id: int, name: string}>}
      */
-    public function orderFilterOptions(): array
+    public function orderFilterOptions(Merchant $merchant): array
     {
-        return ['provinces' => Province::NAMES];
+        $products = $this->catalogService->openedProductModels($merchant);
+        $faceValues = array_values(array_unique($products->pluck('face_value')->map(static fn ($v) => (int) $v)->all()));
+        sort($faceValues);
+
+        return [
+            'provinces' => Province::NAMES,
+            'face_values' => $faceValues,
+            'categories' => $this->categoryDao->optionsFor($products->pluck('category_id')->filter()->unique()->values()->all()),
+        ];
     }
 
     /**
      * 可下单商品：价格 + 平台整体近 7 天的成功率、平均耗时。
      *
-     * @return array{from: string, to: string, products: list<array<string, mixed>>}
+     * @return array{from: string, to: string, products: list<array<string, mixed>>, categories: list<array{id: int, name: string}>}
      */
     public function products(Merchant $merchant): array
     {
         return $this->catalogService->openedProductsWithStats($merchant);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function presentOrder(Order $order): array
+    {
+        return ['id' => $order->id, 'product_name' => $order->product_name, 'province' => $order->province] + $this->orderService->present($order);
+    }
+
+    /**
+     * 筛选条件下全部订单的汇总：成功率 = 成功 /（成功 + 失败），消费金额和平均耗时只算成功的订单。
+     * 成功、失败按商户看到的状态算：人工处理单手动回调之前算处理中（和 whereMerchantStatus() 一致）。
+     *
+     * @return array{order_count: int, success_count: int, failed_count: int, processing_count: int, success_rate: null|string, amount: string, avg_duration: null|int}
+     */
+    private function orderSummary(Builder $builder): array
+    {
+        $visible = '(manual_only = 0 or manual_notified_at is not null)';
+        $row = (clone $builder)->selectRaw(
+            "count(*) as order_count,
+            coalesce(sum(status = 'success' and {$visible}), 0) as success_count,
+            coalesce(sum(status = 'failed' and {$visible}), 0) as failed_count,
+            coalesce(sum(case when status = 'success' and {$visible} then sale_price end), 0) as amount,
+            avg(case when status = 'success' and {$visible} and finished_at is not null then timestampdiff(second, created_at, finished_at) end) as avg_duration"
+        )->toBase()->first();
+        $orders = (int) $row->order_count;
+        $success = (int) $row->success_count;
+        $failed = (int) $row->failed_count;
+
+        return [
+            'order_count' => $orders,
+            'success_count' => $success,
+            'failed_count' => $failed,
+            'processing_count' => $orders - $success - $failed,
+            'success_rate' => ProductStatsService::rate($success, $failed),
+            'amount' => bcadd((string) $row->amount, '0', 2),
+            'avg_duration' => $row->avg_duration === null ? null : (int) round((float) $row->avg_duration),
+        ];
     }
 
     /**
@@ -244,13 +349,5 @@ class MerchantPortalService extends AbstractService
 
         return $builder->whereIn('status', self::STATUS_FILTER[$status])
             ->where(static fn ($q) => $q->where('manual_only', false)->orWhereNotNull('manual_notified_at'));
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function presentOrder(Order $order): array
-    {
-        return ['id' => $order->id, 'product_name' => $order->product_name, 'province' => $order->province] + $this->orderService->present($order);
     }
 }

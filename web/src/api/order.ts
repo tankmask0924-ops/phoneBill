@@ -105,6 +105,8 @@ export interface OrderFilterOptions {
   merchants: { id: number; name: string }[]
   suppliers: { id: number; name: string }[]
   provinces: string[]
+  /** 平台商品用到的面值（元），从小到大 */
+  face_values: number[]
 }
 
 export const orderApi = {

@@ -162,6 +162,53 @@ class MerchantPortalTest extends HttpTestCase
         $this->assertCount(31, $this->body($this->jsonRequest('GET', '/merchant/order-filter-options', $token))['provinces']);
     }
 
+    public function testOrderSummaryAndFaceValueCategoryFilters()
+    {
+        [$merchant, $product] = $this->merchantWithProduct();
+        $category = $this->createCategory();
+        $product->update(['category_id' => $category->id]);
+        $token = $this->merchantLogin($this->createMerchantUser($merchant)->username, self::PASSWORD);
+        $now = time();
+        $success = $this->createOrder($merchant, Order::STATUS_SUCCESS);
+        Order::where('id', $success->id)->update(['product_id' => $product->id, 'created_at' => date('Y-m-d H:i:s', $now - 30), 'finished_at' => date('Y-m-d H:i:s', $now)]);
+        $small = $this->createOrder($merchant, Order::STATUS_SUCCESS);
+        Order::where('id', $small->id)->update(['face_value' => 50, 'sale_price' => '49.80', 'created_at' => date('Y-m-d H:i:s', $now - 10), 'finished_at' => date('Y-m-d H:i:s', $now)]);
+        $this->createOrder($merchant, Order::STATUS_FAILED);
+        // 人工处理单手动回调之前，对商户算充值中，不算成功
+        $manual = $this->createOrder($merchant, Order::STATUS_SUCCESS);
+        Order::where('id', $manual->id)->update(['manual_only' => true, 'manual_notified_at' => null]);
+        $get = fn (array $query) => $this->body($this->jsonRequest('GET', '/merchant/orders?' . http_build_query($query), $token));
+
+        $all = $get([]);
+        $this->assertSame(4, $all['total']);
+        $this->assertSame([
+            'order_count' => 4,
+            'success_count' => 2,
+            'failed_count' => 1,
+            'processing_count' => 1,
+            'success_rate' => '66.66',
+            'amount' => '149.30',
+            'avg_duration' => 20,
+        ], $all['summary']);
+
+        $this->assertSame([$small->id], array_column($get(['face_value' => 50])['data'], 'id'));
+        $this->assertSame([$success->id], array_column($get(['category_id' => $category->id])['data'], 'id'));
+        $empty = $get(['face_value' => 999]);
+        $this->assertSame([], $empty['data']);
+        $this->assertSame(0, $empty['summary']['order_count']);
+        $this->assertNull($empty['summary']['success_rate']);
+        $this->assertSame('0.00', $empty['summary']['amount']);
+
+        $options = $this->body($this->jsonRequest('GET', '/merchant/order-filter-options', $token));
+        $this->assertSame([100], $options['face_values'], '只取已开通商品的面值');
+        $this->assertSame([['id' => $category->id, 'name' => $category->name]], $options['categories']);
+
+        $products = $this->body($this->jsonRequest('GET', '/merchant/products', $token));
+        $this->assertSame($category->id, $products['products'][0]['category_id']);
+        $this->assertSame($category->name, $products['products'][0]['category_name']);
+        $this->assertSame([['id' => $category->id, 'name' => $category->name]], $products['categories']);
+    }
+
     public function testProductsWithRecentStats()
     {
         [$mine, $product] = $this->merchantWithProduct();

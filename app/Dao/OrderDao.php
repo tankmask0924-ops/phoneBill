@@ -25,6 +25,30 @@ class OrderDao extends AbstractDao
         return Order::find($id);
     }
 
+    /**
+     * 订单数、成功数、成功订单的扣款合计和利润合计；$from 为空时统计全部订单。
+     *
+     * @return array{order_count: int, success_count: int, sales: string, profit: string}
+     */
+    public function aggregate(?string $from = null): array
+    {
+        $row = $this->newQuery()
+            ->when($from !== null, static fn ($q) => $q->where('created_at', '>=', $from))
+            ->selectRaw(
+                "count(*) as order_count,
+                coalesce(sum(status = 'success'), 0) as success_count,
+                coalesce(sum(case when status = 'success' then sale_price end), 0) as sales,
+                coalesce(sum(case when status = 'success' then profit end), 0) as profit"
+            )->toBase()->first();
+
+        return [
+            'order_count' => (int) $row->order_count,
+            'success_count' => (int) $row->success_count,
+            'sales' => bcadd((string) $row->sales, '0', 2),
+            'profit' => bcadd((string) $row->profit, '0', 2),
+        ];
+    }
+
     public function findByOrderNo(string $orderNo): ?Order
     {
         return $this->newQuery()->where('order_no', $orderNo)->first();
