@@ -15,7 +15,7 @@ use function Hyperf\Support\env;
  * 订单处理的时间参数，含义见 docs/project.md 2.6。
  */
 return [
-    // 同一手机号、同一面值，多少分钟内只允许一笔进行中的订单
+    // 同一手机号、同一面值，多少分钟内只允许一笔进行中的订单；后台「系统配置 - 下单设置」改过以后以后台为准，0 表示不拦截
     'duplicate_window_minutes' => (int) env('ORDER_DUPLICATE_WINDOW_MINUTES', 10),
     // 下单后多少分钟仍没有结果，转为异常订单人工处理
     'abnormal_after_minutes' => (int) env('ORDER_ABNORMAL_AFTER_MINUTES', 120),

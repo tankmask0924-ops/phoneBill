@@ -24,8 +24,8 @@ use App\Service\Merchant\MerchantPriceService;
 use App\Service\Mobile\MobileSegmentService;
 use App\Service\Product\ProductRouteService;
 use App\Service\Risk\BlacklistService;
+use App\Service\Setting\OrderSettingService;
 use App\Support\RedisLock;
-use Hyperf\Contract\ConfigInterface;
 use Hyperf\Database\Exception\QueryException;
 use Hyperf\DbConnection\Db;
 use Hyperf\Di\Annotation\Inject;
@@ -68,7 +68,7 @@ class OrderService extends AbstractService
     protected OrderNoGenerator $orderNoGenerator;
 
     #[Inject]
-    protected ConfigInterface $config;
+    protected OrderSettingService $orderSettingService;
 
     /**
      * @param array<string, mixed> $params product_code / mobile / merchant_order_no / notify_url（可选）
@@ -91,15 +91,19 @@ class OrderService extends AbstractService
         }
         ['quote' => $quote, 'operator' => $operator, 'province' => $province, 'price' => $price] = $this->check($merchant, $this->string($params, 'product_code'), $mobile);
 
-        // 同一号码同一面值串行处理，防止并发请求同时通过「重复充值」检查
+        // 重复充值拦截（时间窗口在系统配置里设，0 表示不拦截）：同一号码同一面值串行处理，防止并发请求同时通过检查
+        $window = $this->orderSettingService->duplicateWindowMinutes();
         $lockKey = "order:mobile:{$mobile}:{$quote['face_value']}";
-        $token = $this->lock->acquire($lockKey, 10);
-        if ($token === null) {
-            throw new OpenApiException(OpenApiException::DUPLICATE_RECHARGE, '该号码有正在处理的同面值订单');
+        $token = null;
+        if ($window > 0) {
+            $token = $this->lock->acquire($lockKey, 10);
+            if ($token === null) {
+                throw new OpenApiException(OpenApiException::DUPLICATE_RECHARGE, '该号码有正在处理的同面值订单');
+            }
         }
         try {
-            if ($this->orderDao->hasRecent($mobile, $quote['face_value'], $this->duplicateSince(), self::IN_PROGRESS)) {
-                throw new OpenApiException(OpenApiException::DUPLICATE_RECHARGE, $this->duplicateMessage());
+            if ($window > 0 && $this->orderDao->hasRecent($mobile, $quote['face_value'], self::since($window), self::IN_PROGRESS)) {
+                throw new OpenApiException(OpenApiException::DUPLICATE_RECHARGE, self::duplicateMessage($window));
             }
 
             $order = null;
@@ -125,7 +129,9 @@ class OrderService extends AbstractService
 
             return $existing;
         } finally {
-            $this->lock->release($lockKey, $token);
+            if ($token !== null) {
+                $this->lock->release($lockKey, $token);
+            }
         }
 
         $this->dispatcher->submit($order->id);
@@ -168,16 +174,20 @@ class OrderService extends AbstractService
     }
 
     /**
-     * 重复充值检查的批量版（商户后台批量下单预览用）：这些号码里，同一面值在防重窗口内有进行中订单的那些。
+     * 重复充值检查的批量版（商户后台批量下单预览用）：这些号码里，同一面值在防重窗口内有进行中订单的那些。关掉拦截时为空。
      *
      * @param list<string> $mobiles
      * @return array<string, string> 手机号 => 原因
      */
     public function duplicateMobiles(array $mobiles, int $faceValue): array
     {
-        $found = $this->orderDao->recentMobiles($mobiles, $faceValue, $this->duplicateSince(), self::IN_PROGRESS);
+        $window = $this->orderSettingService->duplicateWindowMinutes();
+        if ($window <= 0) {
+            return [];
+        }
+        $found = $this->orderDao->recentMobiles($mobiles, $faceValue, self::since($window), self::IN_PROGRESS);
 
-        return array_fill_keys($found, $this->duplicateMessage());
+        return array_fill_keys($found, self::duplicateMessage($window));
     }
 
     /**
@@ -233,19 +243,14 @@ class OrderService extends AbstractService
         });
     }
 
-    private function duplicateSince(): string
+    private static function since(int $minutes): string
     {
-        return date('Y-m-d H:i:s', time() - $this->duplicateWindowMinutes() * 60);
+        return date('Y-m-d H:i:s', time() - $minutes * 60);
     }
 
-    private function duplicateMessage(): string
+    private static function duplicateMessage(int $minutes): string
     {
-        return "该号码 {$this->duplicateWindowMinutes()} 分钟内有正在处理的同面值订单";
-    }
-
-    private function duplicateWindowMinutes(): int
-    {
-        return (int) $this->config->get('order.duplicate_window_minutes', 10);
+        return "该号码 {$minutes} 分钟内有正在处理的同面值订单";
     }
 
     /**

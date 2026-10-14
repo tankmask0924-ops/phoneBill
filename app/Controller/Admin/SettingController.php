@@ -19,6 +19,7 @@ use App\Middleware\AdminPermissionMiddleware;
 use App\Model\AdminUser;
 use App\Network\ClientIpResolver;
 use App\Service\Admin\NotifySettingAdminService;
+use App\Service\Admin\OrderSettingAdminService;
 use App\Service\Admin\StorageSettingAdminService;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpServer\Annotation\Controller;
@@ -28,7 +29,7 @@ use Hyperf\HttpServer\Annotation\PostMapping;
 use Hyperf\HttpServer\Annotation\PutMapping;
 
 /**
- * 系统配置：回调域名（NotifySettingAdminService）、图片存储（腾讯云 COS，StorageSettingAdminService）。
+ * 系统配置：回调域名（NotifySettingAdminService）、下单设置（OrderSettingAdminService）、图片存储（腾讯云 COS，StorageSettingAdminService）。
  */
 #[Controller(prefix: '/admin/settings')]
 class SettingController extends AbstractController
@@ -38,6 +39,9 @@ class SettingController extends AbstractController
 
     #[Inject]
     protected NotifySettingAdminService $notifySettingService;
+
+    #[Inject]
+    protected OrderSettingAdminService $orderSettingService;
 
     #[Inject]
     protected ClientIpResolver $clientIpResolver;
@@ -85,6 +89,24 @@ class SettingController extends AbstractController
     public function saveNotify(): array
     {
         return $this->notifySettingService->save($this->admin(), $this->request->input('base_url'), $this->clientIp());
+    }
+
+    #[Middleware(AdminAuthMiddleware::class)]
+    #[Middleware(AdminPermissionMiddleware::class)]
+    #[RequiresPermission('setting.manage')]
+    #[GetMapping(path: 'order')]
+    public function order(): array
+    {
+        return $this->orderSettingService->get();
+    }
+
+    #[Middleware(AdminAuthMiddleware::class)]
+    #[Middleware(AdminPermissionMiddleware::class)]
+    #[RequiresPermission('setting.manage')]
+    #[PutMapping(path: 'order')]
+    public function saveOrder(): array
+    {
+        return $this->orderSettingService->save($this->admin(), $this->request->all(), $this->clientIp());
     }
 
     private function admin(): AdminUser

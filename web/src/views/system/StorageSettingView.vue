@@ -17,6 +17,20 @@ async function saveNotify() {
   }
 }
 
+// ---- 下单设置 ----
+const duplicateWindow = ref(10)
+const orderSaving = ref(false)
+
+async function saveOrder() {
+  orderSaving.value = true
+  try {
+    duplicateWindow.value = (await settingApi.saveOrder(duplicateWindow.value)).duplicate_window_minutes
+    ElMessage.success(duplicateWindow.value === 0 ? '已保存，不再拦截重复充值' : '已保存，新下的订单立即生效')
+  } finally {
+    orderSaving.value = false
+  }
+}
+
 // ---- 图片存储 ----
 const loading = ref(false)
 const saving = ref(false)
@@ -78,6 +92,7 @@ async function test() {
 onMounted(async () => {
   load()
   notifyBase.value = (await settingApi.notify()).base_url
+  duplicateWindow.value = (await settingApi.order()).duplicate_window_minutes
 })
 </script>
 
@@ -93,6 +108,22 @@ onMounted(async () => {
       </el-form-item>
       <el-form-item>
         <el-button type="primary" :loading="notifySaving" @click="saveNotify">保存</el-button>
+      </el-form-item>
+    </el-form>
+  </el-card>
+
+  <el-card shadow="never" header="下单设置" class="block">
+    <el-form label-width="110px" style="max-width: 560px" @submit.prevent="saveOrder">
+      <el-form-item label="重复充值拦截">
+        <el-input-number v-model="duplicateWindow" :min="0" :max="1440" :step="1" step-strictly controls-position="right" />
+        <span class="unit">分钟</span>
+        <div class="tip">
+          同一号码、同一面值在这段时间内还有充值中的订单时，新的下单直接拒绝（「该号码 N 分钟内有正在处理的同面值订单」），
+          批量下单预览里也会标出来。填 0 表示不拦截。
+        </div>
+      </el-form-item>
+      <el-form-item>
+        <el-button type="primary" :loading="orderSaving" @click="saveOrder">保存</el-button>
       </el-form-item>
     </el-form>
   </el-card>
@@ -139,6 +170,11 @@ onMounted(async () => {
 
 .block {
   margin-bottom: 16px;
+}
+
+.unit {
+  margin-left: 8px;
+  color: #606266;
 }
 
 .tip {

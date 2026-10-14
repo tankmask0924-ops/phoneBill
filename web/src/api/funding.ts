@@ -117,4 +117,8 @@ export const settingApi = {
   /** 回调域名：供应商回调地址 = 回调域名 + /notify/supplier/{供应商编码} */
   notify: () => http.get<{ base_url: string }>('/admin/settings/notify'),
   saveNotify: (baseUrl: string) => http.put<{ base_url: string }>('/admin/settings/notify', { base_url: baseUrl }),
+  /** 下单设置：同一号码同一面值在这么多分钟内有进行中的订单就拒绝下单，0 表示不拦截 */
+  order: () => http.get<{ duplicate_window_minutes: number }>('/admin/settings/order'),
+  saveOrder: (minutes: number) =>
+    http.put<{ duplicate_window_minutes: number }>('/admin/settings/order', { duplicate_window_minutes: minutes }),
 }

@@ -16,9 +16,12 @@ use App\Model\Merchant;
 use App\Model\MerchantUser;
 use App\Model\Order;
 use App\Model\Product;
+use App\Model\SystemSetting;
 use App\Service\Order\OrderDispatcher;
+use App\Service\Setting\OrderSettingService;
 use Hyperf\Context\ApplicationContext;
 use Hyperf\Contract\ApplicationInterface;
+use Hyperf\Contract\ConfigInterface;
 use Hyperf\Di\Container;
 use Hyperf\Di\Definition\DefinitionSourceFactory;
 use Hyperf\Testing\Client;
@@ -56,6 +59,7 @@ class MerchantBatchOrderTest extends HttpTestCase
     protected function tearDown(): void
     {
         $this->cleanUpCatalog();
+        $this->cleanUpAdmins();
         parent::tearDown();
     }
 
@@ -166,6 +170,51 @@ class MerchantBatchOrderTest extends HttpTestCase
     /**
      * @return array{0: Merchant, 1: Product, 2: string}
      */
+    public function testDuplicateWindowComesFromSystemSetting()
+    {
+        $original = SystemSetting::where('key', OrderSettingService::KEY)->first()?->value;
+        SystemSetting::where('key', OrderSettingService::KEY)->delete();
+        make(OrderSettingService::class)->flush();
+        try {
+            [$merchant, $product, $mobile] = $this->scenario('500.00');
+            $token = $this->login($merchant);
+            $admin = $this->loginAs($this->createAdminWithPermissions(['setting.manage']));
+            $submit = fn () => $this->body($this->jsonRequest('POST', '/merchant/batch-orders', $token, [
+                'product_code' => $product->code, 'mobiles' => [$mobile], 'batch_no' => 'B' . bin2hex(random_bytes(8)),
+            ]))['items'][0];
+            $preview = fn () => $this->body($this->jsonRequest('POST', '/merchant/batch-orders/preview', $token, ['product_code' => $product->code, 'mobiles' => [$mobile]]))['items'][0];
+
+            // 后台没设置过：用环境变量的默认值
+            $default = (int) make(ConfigInterface::class)->get('order.duplicate_window_minutes');
+            $this->assertSame(['duplicate_window_minutes' => $default], $this->body($this->jsonRequest('GET', '/admin/settings/order', $admin)));
+            foreach ([-1, 1441, 'x', 1.5, null] as $bad) {
+                $this->assertSame(422, $this->jsonRequest('PUT', '/admin/settings/order', $admin, ['duplicate_window_minutes' => $bad])->getStatusCode(), var_export($bad, true));
+            }
+
+            // 设成 0：不拦截，同号码同面值连着下两单都成功
+            $this->assertSame(['duplicate_window_minutes' => 0], $this->body($this->jsonRequest('PUT', '/admin/settings/order', $admin, ['duplicate_window_minutes' => 0])));
+            $this->assertTrue($submit()['ok']);
+            $this->assertTrue($preview()['ok'], '预览也不再标出来');
+            $this->assertTrue($submit()['ok']);
+            $this->assertSame(2, Order::where('merchant_id', $merchant->id)->count());
+
+            // 改回拦截：立即生效，提示里带新的分钟数
+            $this->jsonRequest('PUT', '/admin/settings/order', $admin, ['duplicate_window_minutes' => 5]);
+            $this->assertStringContainsString('5 分钟内有正在处理的同面值订单', $preview()['error']);
+            $this->assertFalse($submit()['ok']);
+            $this->assertSame(2, Order::where('merchant_id', $merchant->id)->count());
+
+            $noPermission = $this->loginAs($this->createAdminWithPermissions(['order.view']));
+            $this->assertSame(403, $this->jsonRequest('PUT', '/admin/settings/order', $noPermission, ['duplicate_window_minutes' => 0])->getStatusCode());
+        } finally {
+            SystemSetting::where('key', OrderSettingService::KEY)->delete();
+            if ($original !== null) {
+                SystemSetting::create(['key' => OrderSettingService::KEY, 'value' => $original]);
+            }
+            make(OrderSettingService::class)->flush();
+        }
+    }
+
     private function scenario(string $balance): array
     {
         $supplier = $this->createSupplier(['广东']);
