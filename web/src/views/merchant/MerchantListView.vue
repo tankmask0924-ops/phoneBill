@@ -177,11 +177,12 @@ async function saveBalance() {
 const productsVisible = ref(false)
 const productsTarget = ref<Merchant | null>(null)
 const productsLoading = ref(false)
-/** draft：正在编辑的价格，点「保存价格」才提交 */
+/**
+ * 平台商品全列出来：已开通 / 已关闭的是商户开通记录，还没开通的（只有上架的平台商品）status 为 none，
+ * 价格先按默认售价带出，改好后点「开通」。draft：正在编辑的价格，点保存或开通才提交。
+ */
 type DraftRow = MerchantProduct & { draft: Partial<Record<OperatorCode, string>> }
-const merchantProducts = ref<DraftRow[]>([])
-const available = ref<AvailableProduct[]>([])
-const opening = ref<number | undefined>()
+const productRows = ref<DraftRow[]>([])
 
 /** 按运营商分 tab（商品覆盖这个运营商就算），只在前端筛选、分页 */
 type OperatorTab = 'all' | OperatorCode
@@ -192,8 +193,11 @@ const operatorTabs: { name: OperatorTab; label: string }[] = [
   { name: 'cucc', label: '联通' },
   { name: 'cbn', label: '广电' },
 ]
+/** 按开通状态筛：active 已开通 / disabled 已关闭 / none 未开通 */
+type OpenFilter = 'all' | 'active' | 'disabled' | 'none'
 const productTab = ref<OperatorTab>('all')
 const productKeyword = ref('')
+const productOpenFilter = ref<OpenFilter>('all')
 const productPage = ref(1)
 const productPageSize = ref(20)
 
@@ -206,24 +210,30 @@ function matchesKeyword(name: string | null, code: string | null): boolean {
   return keyword === '' || (name ?? '').toLowerCase().includes(keyword) || (code ?? '').toLowerCase().includes(keyword)
 }
 
+function matchesOpenFilter(row: DraftRow): boolean {
+  return productOpenFilter.value === 'all' || row.status === productOpenFilter.value
+}
+
 function tabCount(tab: OperatorTab): number {
-  return merchantProducts.value.filter((p) => coversTab(p.operators, tab)).length
+  return productRows.value.filter((p) => coversTab(p.operators, tab)).length
 }
 
 const filteredProducts = computed(() =>
-  merchantProducts.value.filter((p) => coversTab(p.operators, productTab.value) && matchesKeyword(p.product_name, p.product_code)),
+  productRows.value.filter(
+    (p) => coversTab(p.operators, productTab.value) && matchesKeyword(p.product_name, p.product_code) && matchesOpenFilter(p),
+  ),
 )
 const pagedProducts = computed(() =>
   filteredProducts.value.slice((productPage.value - 1) * productPageSize.value, productPage.value * productPageSize.value),
 )
-const filteredAvailable = computed(() => available.value.filter((p) => coversTab(p.operators, productTab.value)))
+const openedCount = computed(() => productRows.value.filter((p) => p.status === 'active').length)
 
 /** 选了某个运营商 tab 时只显示这个运营商的价格 */
 function visibleOperators(row: DraftRow): OperatorCode[] {
   return productTab.value === 'all' ? row.operators : row.operators.filter((op) => op === productTab.value)
 }
 
-watch([productTab, productKeyword, productPageSize], () => {
+watch([productTab, productKeyword, productOpenFilter, productPageSize], () => {
   productPage.value = 1
 })
 
@@ -235,13 +245,35 @@ watch(filteredProducts, (rows) => {
   }
 })
 
+/** 还没开通的平台商品，排成和开通记录一样的结构 */
+function unopenedRow(merchantId: number, p: AvailableProduct): DraftRow {
+  return {
+    id: 0,
+    merchant_id: merchantId,
+    product_id: p.id,
+    product_code: p.code,
+    product_name: p.name,
+    product_status: 'active',
+    face_value: p.face_value,
+    operators: p.operators,
+    default_prices: p.prices,
+    prices: {},
+    status: 'none',
+    warnings: [],
+    updated_at: null,
+    draft: { ...p.prices },
+  }
+}
+
 async function loadProducts() {
   const id = productsTarget.value!.id
   productsLoading.value = true
   try {
     const [opened, rest] = await Promise.all([merchantApi.products(id), merchantApi.availableProducts(id)])
-    merchantProducts.value = opened.map((p) => ({ ...p, draft: { ...p.prices } }))
-    available.value = rest
+    productRows.value = [
+      ...opened.map((p) => ({ ...p, draft: { ...p.prices } })),
+      ...rest.map((p) => unopenedRow(id, p)),
+    ].sort((a, b) => (a.face_value ?? 0) - (b.face_value ?? 0) || a.product_id - b.product_id)
   } finally {
     productsLoading.value = false
   }
@@ -249,27 +281,16 @@ async function loadProducts() {
 
 function openProducts(row: Merchant) {
   productsTarget.value = row
-  merchantProducts.value = []
-  available.value = []
+  productRows.value = []
   productTab.value = 'all'
   productKeyword.value = ''
+  productOpenFilter.value = 'all'
   productPage.value = 1
   productsVisible.value = true
   loadProducts()
 }
 
-/** 开通：按商品的默认售价带出初始价格，开通后可以再改 */
-async function openProduct(productId: number) {
-  const product = available.value.find((p) => p.id === productId)
-  opening.value = undefined
-  if (!product) {
-    return
-  }
-  await merchantApi.saveProduct(productsTarget.value!.id, productId, { status: 'active', prices: { ...product.prices } })
-  ElMessage.success(`已开通「${product.name}」，请核对各运营商价格`)
-  await loadProducts()
-}
-
+/** 保存价格；传 status 时同时开通 / 关闭（没开通过的商品开通时按填的价格建开通记录） */
 async function saveProduct(row: DraftRow, status?: string) {
   for (const op of row.operators) {
     const value = row.draft[op]?.trim()
@@ -279,7 +300,8 @@ async function saveProduct(row: DraftRow, status?: string) {
     }
   }
   const saved = await merchantApi.saveProduct(row.merchant_id, row.product_id, { status: status ?? row.status, prices: row.draft })
-  ElMessage.success(saved.warnings.length > 0 ? `已保存，有 ${saved.warnings.length} 条提醒` : '已保存')
+  const action = row.status === 'none' ? `已开通「${row.product_name}」` : '已保存'
+  ElMessage.success(saved.warnings.length > 0 ? `${action}，有 ${saved.warnings.length} 条提醒` : action)
   await loadProducts()
   await list.load()
 }
@@ -494,26 +516,20 @@ onMounted(async () => {
       <el-tab-pane v-for="t in operatorTabs" :key="t.name" :name="t.name" :label="`${t.label} (${tabCount(t.name)})`" />
     </el-tabs>
     <div class="product-toolbar">
-      <el-input v-model="productKeyword" placeholder="按商品名称 / 编码筛选已开通的商品" clearable style="width: 280px" />
-      <el-select
-        v-if="canPrice"
-        v-model="opening"
-        :placeholder="
-          filteredAvailable.length === 0 ? '没有可开通的商品' : `开通商品（可选 ${filteredAvailable.length} 个），开通后按默认售价带出价格`
-        "
-        filterable
-        :disabled="filteredAvailable.length === 0"
-        class="open-product"
-        @change="openProduct"
-      >
-        <el-option v-for="p in filteredAvailable" :key="p.id" :label="`${p.name}（${p.code} · ${p.face_value} 元）`" :value="p.id" />
-      </el-select>
+      <el-input v-model="productKeyword" placeholder="按商品名称 / 编码筛选" clearable style="width: 260px" />
+      <el-radio-group v-model="productOpenFilter">
+        <el-radio-button value="all">全部</el-radio-button>
+        <el-radio-button value="active">已开通</el-radio-button>
+        <el-radio-button value="disabled">已关闭</el-radio-button>
+        <el-radio-button value="none">未开通</el-radio-button>
+      </el-radio-group>
+      <span class="muted">共 {{ productRows.length }} 个平台商品，已开通 {{ openedCount }} 个；未开通的按默认售价带出价格，核对后点「开通」</span>
     </div>
     <el-table
       v-loading="productsLoading"
       :data="pagedProducts"
       border
-      :empty-text="merchantProducts.length === 0 ? '还没有开通商品，商户无法下单' : '没有符合条件的商品'"
+      :empty-text="productRows.length === 0 ? '还没有上架的平台商品' : '没有符合条件的商品'"
     >
       <el-table-column label="商品" min-width="160">
         <template #default="{ row }">
@@ -540,14 +556,18 @@ onMounted(async () => {
       <el-table-column label="状态" width="90">
         <template #default="{ row }">
           <el-tag v-if="row.status === 'active'" type="success" size="small">已开通</el-tag>
-          <el-tag v-else type="info" size="small">已关闭</el-tag>
+          <el-tag v-else-if="row.status === 'disabled'" type="info" size="small">已关闭</el-tag>
+          <el-tag v-else type="warning" effect="plain" size="small">未开通</el-tag>
         </template>
       </el-table-column>
       <el-table-column v-if="canPrice" label="操作" width="120">
         <template #default="{ row }">
-          <el-button link type="primary" @click="saveProduct(row as DraftRow)">保存价格</el-button>
-          <el-button v-if="row.status === 'active'" link type="danger" @click="saveProduct(row as DraftRow, 'disabled')">关闭</el-button>
-          <el-button v-else link type="success" @click="saveProduct(row as DraftRow, 'active')">开通</el-button>
+          <el-button v-if="row.status === 'none'" link type="primary" @click="saveProduct(row as DraftRow, 'active')">开通</el-button>
+          <template v-else>
+            <el-button link type="primary" @click="saveProduct(row as DraftRow)">保存价格</el-button>
+            <el-button v-if="row.status === 'active'" link type="danger" @click="saveProduct(row as DraftRow, 'disabled')">关闭</el-button>
+            <el-button v-else link type="success" @click="saveProduct(row as DraftRow, 'active')">开通</el-button>
+          </template>
         </template>
       </el-table-column>
     </el-table>
@@ -661,12 +681,9 @@ onMounted(async () => {
 
 .product-toolbar {
   display: flex;
+  align-items: center;
   gap: 12px;
   margin-bottom: 12px;
-}
-
-.open-product {
-  flex: 1;
 }
 
 .price-row {
