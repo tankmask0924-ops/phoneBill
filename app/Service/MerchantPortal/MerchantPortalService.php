@@ -13,6 +13,7 @@ declare(strict_types=1);
 namespace App\Service\MerchantPortal;
 
 use App\Dao\MerchantBalanceLogDao;
+use App\Dao\OrderAttemptDao;
 use App\Dao\OrderDao;
 use App\Dao\ProductCategoryDao;
 use App\Dao\ProductDao;
@@ -35,7 +36,7 @@ use Hyperf\HttpMessage\Exception\HttpException;
  * 商户后台（只读）：首页、订单记录、资金流水、账户（docs/project.md 5.1）。
  *
  * 所有查询都按调用方传入的 Merchant 过滤（来自登录态，见 MerchantAuthMiddleware）；
- * 不返回成本、供应商等平台内部信息，订单状态按商户视角显示（等待中、异常都是 processing）。
+ * 不返回成本、供应商等平台内部信息，订单状态按商户视角显示（等待中、异常都是 processing），异常的另外标 abnormal。
  */
 class MerchantPortalService extends AbstractService
 {
@@ -61,6 +62,9 @@ class MerchantPortalService extends AbstractService
 
     #[Inject]
     protected OrderDao $orderDao;
+
+    #[Inject]
+    protected OrderAttemptDao $attemptDao;
 
     #[Inject]
     protected MerchantBalanceLogDao $balanceLogDao;
@@ -112,9 +116,10 @@ class MerchantPortalService extends AbstractService
         $builder = $this->filteredOrders($merchant, $query);
         $summary = $this->orderSummary($builder);
         $orders = $builder->orderByDesc('id')->forPage($page, $perPage)->get();
+        $unclear = $this->attemptDao->unclearProcessing($orders->pluck('id')->all());
 
         return [
-            'data' => $orders->map(fn (Order $o) => $this->presentOrder($o))->values()->all(),
+            'data' => $orders->map(fn (Order $o) => $this->presentOrder($o) + ['abnormal' => $o->abnormalForMerchant(isset($unclear[$o->id]))])->values()->all(),
             'total' => $summary['order_count'],
             'page' => $page,
             'per_page' => $perPage,
@@ -166,6 +171,7 @@ class MerchantPortalService extends AbstractService
         }
 
         return $this->presentOrder($order) + [
+            'abnormal' => $order->abnormalForMerchant($this->attemptDao->unclearProcessing([$order->id]) !== []),
             'balance_logs' => $this->balanceLogDao->newQuery()->where('merchant_id', $merchant->id)->where('order_id', $order->id)->orderBy('id')->get()
                 ->map(static fn (MerchantBalanceLog $l) => [
                     'type' => $l->type,

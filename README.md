@@ -140,7 +140,7 @@ npm run build        # 产物在 merchant-web/dist，部署在 /merchant/ 路径
 | PUT | `/admin/merchants/{id}/products/{productId}` | `merchant.price` |
 | POST | `/admin/merchants/{id}/balance` | `merchant.balance` |
 | GET | `/admin/orders`、`/filter-options`、`/export`、`/{id}`；`/admin/dashboard`（首页汇总，含销售额和利润） | `order.view` |
-| GET/POST | `/admin/orders/{id}/query`、`/{id}/success`、`/{id}/fail`、`/{id}/notify`（手动回调）、`/{id}/resupply-options`、`/{id}/resupply`（手动补单） | `order.manage` |
+| GET/POST | `/admin/orders/{id}/query`、`/{id}/success`、`/{id}/fail`、`/{id}/notify`（手动回调，选成功 / 失败，订单按选的结果改；成功改失败还要 `order.reverse`）、`/batch-notify`（批量手动回调）、`/{id}/resupply-options`、`/{id}/resupply`（手动补单） | `order.manage` |
 | POST | `/admin/orders/{id}/reverse` | `order.reverse` |
 | GET/POST | `/open/v1/recharge`、`/order`、`/balance`、`/products` | 商户签名，见 [docs/api.md](docs/api.md) |
 | GET/POST | `/notify/supplier/{供应商编码}` | 供应商回调，由驱动验签 |

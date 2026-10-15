@@ -160,8 +160,13 @@ onMounted(async () => {
       <el-table-column label="面值 / 扣款" width="120" align="right">
         <template #default="{ row }">{{ row.face_value }} / {{ row.amount }}</template>
       </el-table-column>
-      <el-table-column label="状态" width="130">
-        <template #default="{ row }"><StatusTag :map="orderStatusLabels" :value="row.status" /></template>
+      <el-table-column label="状态" width="150">
+        <template #default="{ row }">
+          <StatusTag :map="orderStatusLabels" :value="row.status" />
+          <template v-if="row.abnormal">
+            <el-tooltip content="订单处理异常，平台正在人工核实，结果出来后会回调通知" placement="top"><el-tag type="danger" effect="dark" size="small" class="abnormal-tag">异常</el-tag></el-tooltip>
+          </template>
+        </template>
       </el-table-column>
       <el-table-column prop="created_at" label="下单时间" width="170" />
       <el-table-column label="完成时间" width="170">
@@ -197,7 +202,12 @@ onMounted(async () => {
           </el-descriptions-item>
           <el-descriptions-item label="面值">{{ detail.face_value }} 元</el-descriptions-item>
           <el-descriptions-item label="扣款">{{ detail.amount }} 元</el-descriptions-item>
-          <el-descriptions-item label="状态"><StatusTag :map="orderStatusLabels" :value="detail.status" /></el-descriptions-item>
+          <el-descriptions-item label="状态">
+            <StatusTag :map="orderStatusLabels" :value="detail.status" />
+            <template v-if="detail.abnormal">
+              <el-tooltip content="订单处理异常，平台正在人工核实，结果出来后会回调通知" placement="top"><el-tag type="danger" effect="dark" size="small" class="abnormal-tag">异常</el-tag></el-tooltip>
+            </template>
+          </el-descriptions-item>
           <el-descriptions-item label="完成时间">{{ detail.finished_at ?? '-' }}</el-descriptions-item>
           <el-descriptions-item v-if="detail.fail_reason" label="失败原因" :span="2">{{ detail.fail_reason }}</el-descriptions-item>
         </el-descriptions>
@@ -216,6 +226,10 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.abnormal-tag {
+  margin-left: 4px;
+}
+
 .summary {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

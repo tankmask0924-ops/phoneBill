@@ -32,6 +32,28 @@ class OrderAttemptDao extends AbstractDao
         return $this->newQuery()->where('order_id', $orderId)->orderBy('id')->get();
     }
 
+    /**
+     * 这些订单里上游返回不明确的：还在处理中的提交带着说明（如「下单未确认受理」「查单未拿到明确结果」），正常受理的不带。
+     *
+     * @param list<int> $orderIds
+     * @return array<int, string> order_id => 说明
+     */
+    public function unclearProcessing(array $orderIds): array
+    {
+        if ($orderIds === []) {
+            return [];
+        }
+
+        return $this->newQuery()
+            ->whereIn('order_id', $orderIds)
+            ->where('status', OrderAttempt::STATUS_PROCESSING)
+            ->whereNotNull('message')
+            ->where('message', '<>', '')
+            ->orderBy('id')
+            ->pluck('message', 'order_id')
+            ->all();
+    }
+
     public function findForSupplier(int $supplierId, ?string $attemptNo, ?string $supplierOrderNo): ?OrderAttempt
     {
         if ($attemptNo !== null && $attemptNo !== '') {

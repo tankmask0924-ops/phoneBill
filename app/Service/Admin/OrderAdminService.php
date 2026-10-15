@@ -13,6 +13,7 @@ declare(strict_types=1);
 namespace App\Service\Admin;
 
 use App\Dao\AdminOperationLogDao;
+use App\Dao\AdminRolePermissionDao;
 use App\Dao\MerchantBalanceLogDao;
 use App\Dao\MerchantDao;
 use App\Dao\OrderAttemptDao;
@@ -23,6 +24,7 @@ use App\Dao\SupplierDao;
 use App\Dao\SupplierProductDao;
 use App\Enum\Operator;
 use App\Enum\Province;
+use App\Exception\InsufficientBalanceException;
 use App\Model\AdminUser;
 use App\Model\MerchantBalanceLog;
 use App\Model\Order;
@@ -46,8 +48,8 @@ use Hyperf\HttpMessage\Exception\HttpException;
  *
  * - 置成功 / 置失败只对异常订单；冲正只对成功订单，要单独权限；三者都必须写备注，都记操作日志；
  * - 置失败、冲正都会退款并通知商户；人工处理单（提交时接口异常）不自动通知，人工手动回调；
- * - 手动回调对所有订单都可以：推商户当前看到的状态（没出结果的是 processing），开新一轮通知，之前排队的通知作废；
- *   成功 / 失败的订单回调过之后上游结果只记录、不再推给商户，没出结果的订单回调后照常自动处理；
+ * - 手动回调对所有订单都可以（也能批量）：人工选成功或失败、写备注，订单按选的结果改（失败退款，失败改成功重新扣款，
+ *   成功改失败要冲正权限），再开新一轮通知，之前排队的通知作废；回调过之后上游结果只记录、不再改订单和推给商户；
  * - 手动补单只对异常订单：同一笔订单重新提交给指定的供应商商品，不新建订单、不重复扣款；
  *   原来还在处理中的提交记为「人工确认上游未成功」，补单前必须先到上游确认原单没有充上，否则会重复充值。
  */
@@ -62,6 +64,8 @@ class OrderAdminService extends AbstractService
     private const MAX_PER_PAGE = 100;
 
     private const MAX_EXPORT = 10000;
+
+    private const MAX_BATCH_NOTIFY = 100;
 
     private const STATUSES = [Order::STATUS_PENDING, Order::STATUS_PROCESSING, Order::STATUS_ABNORMAL, Order::STATUS_SUCCESS, Order::STATUS_FAILED];
 
@@ -103,6 +107,9 @@ class OrderAdminService extends AbstractService
 
     #[Inject]
     protected AdminOperationLogDao $operationLogDao;
+
+    #[Inject]
+    protected AdminRolePermissionDao $rolePermissionDao;
 
     /**
      * 筛选下拉框。
@@ -158,7 +165,7 @@ class OrderAdminService extends AbstractService
             $lines[] = [
                 $r['order_no'] . "\t", $r['merchant_order_no'] . "\t", $r['merchant_name'], $r['product_name'], $r['mobile'] . "\t",
                 Operator::tryFrom($r['operator'])?->label() ?? $r['operator'], $r['province'], $r['face_value'], $r['sale_price'],
-                $r['cost_price'] ?? '', $r['profit'] ?? '', $r['supplier_name'] ?? '', $statusLabels[$r['status']] ?? $r['status'], $r['fail_reason'] ?? '',
+                $r['cost_price'] ?? '', $r['profit'] ?? '', $r['supplier_name'] ?? '', ($statusLabels[$r['status']] ?? $r['status']) . ($r['abnormal'] && $r['status'] !== Order::STATUS_ABNORMAL ? '（异常）' : ''), $r['fail_reason'] ?? '',
                 $r['created_at'], $r['finished_at'] ?? '', $r['duration'] ?? '',
             ];
         }
@@ -301,26 +308,47 @@ class OrderAdminService extends AbstractService
     }
 
     /**
-     * 手动回调：把商户当前看到的订单状态推给商户（从第 1 次开始，失败按间隔重试），所有订单都可以。
-     * 开新一轮通知，之前排队的通知作废。
-     *
-     * 只有成功 / 失败的订单才记「已手动回调」：之后上游再来的结果只记录、不再推给商户，人工处理单也从这时起给商户看结果。
-     * 没出结果的订单推 processing，不记，否则订单会被冻住、出结果也不再自动更新；它出结果后照常自动通知（人工处理单除外）。
+     * 手动回调：人工选成功或失败，订单按选的结果改（任何状态都可以，见 OrderProcessService::settleManually()），再推给商户。
      *
      * @return array<string, mixed>
      */
-    public function manualNotify(AdminUser $operator, int $id, ?string $ip): array
+    public function manualNotify(AdminUser $operator, int $id, mixed $result, mixed $remark, ?string $ip): array
     {
-        $order = $this->findOrFail($id);
-        $this->orderDao->newQuery()->where('id', $order->id)->increment('notify_round', 1, array_filter([
-            'manual_notified_at' => $order->isFinal() ? date('Y-m-d H:i:s') : null,
-            'notify_status' => Order::NOTIFY_PENDING,
-        ]));
-        $round = (int) $this->findOrFail($order->id)->notify_round;
-        $this->dispatcher->notify($order->id, 1, 0, $round);
-        $this->operationLogDao->record($operator->id, self::MODULE, 'manual_notify_order', 'order', $order->id, null, ['status' => $order->status, 'round' => $round], $ip);
+        $to = $this->notifyResult($result);
+        $remark = $this->requiredString($remark, '备注', 200);
+        $this->settleAndNotify($operator, $this->findOrFail($id), $to, $remark, $ip);
 
-        return $this->detail($order->id);
+        return $this->detail($id);
+    }
+
+    /**
+     * 批量手动回调：同一个结果、同一条备注，逐笔处理，单笔失败不影响其他的。
+     *
+     * @return array{total: int, succeeded: int, failures: list<array{id: int, order_no: null|string, message: string}>}
+     */
+    public function batchManualNotify(AdminUser $operator, mixed $ids, mixed $result, mixed $remark, ?string $ip): array
+    {
+        $to = $this->notifyResult($result);
+        $remark = $this->requiredString($remark, '备注', 200);
+        $ids = is_array($ids) ? array_values(array_unique(array_map('intval', array_filter($ids, 'is_numeric')))) : [];
+        if ($ids === [] || count($ids) > self::MAX_BATCH_NOTIFY) {
+            throw new HttpException(422, '请选择订单，一次最多 ' . self::MAX_BATCH_NOTIFY . ' 笔');
+        }
+        $orders = $this->orderDao->newQuery()->whereIn('id', $ids)->get()->keyBy('id');
+        $failures = [];
+        foreach ($ids as $id) {
+            $order = $orders->get($id);
+            try {
+                if ($order === null) {
+                    throw new HttpException(404, '订单不存在');
+                }
+                $this->settleAndNotify($operator, $order, $to, $remark, $ip);
+            } catch (HttpException $e) {
+                $failures[] = ['id' => $id, 'order_no' => $order?->order_no, 'message' => $e->getMessage()];
+            }
+        }
+
+        return ['total' => count($ids), 'succeeded' => count($ids) - count($failures), 'failures' => $failures];
     }
 
     /**
@@ -395,7 +423,7 @@ class OrderAdminService extends AbstractService
     /**
      * 当前筛选条件下全部订单（不只是这一页）的汇总：成功率 = 成功 /（成功 + 失败），成本、利润、扣款合计和平均耗时只算成功的订单。
      *
-     * @return array{order_count: int, success_count: int, failed_count: int, processing_count: int, success_rate: null|string, amount: string, cost: string, profit: string, avg_duration: null|int}
+     * @return array{order_count: int, success_count: int, failed_count: int, processing_count: int, abnormal_count: int, success_rate: null|string, amount: string, cost: string, profit: string, avg_duration: null|int}
      */
     private function summary(Builder $builder): array
     {
@@ -403,6 +431,7 @@ class OrderAdminService extends AbstractService
             "count(*) as order_count,
             coalesce(sum(status = 'success'), 0) as success_count,
             coalesce(sum(status = 'failed'), 0) as failed_count,
+            coalesce(sum(status = 'abnormal'), 0) as abnormal_count,
             coalesce(sum(case when status = 'success' then sale_price end), 0) as amount,
             coalesce(sum(case when status = 'success' then cost_price end), 0) as cost,
             coalesce(sum(case when status = 'success' then profit end), 0) as profit,
@@ -418,12 +447,64 @@ class OrderAdminService extends AbstractService
             'failed_count' => $failed,
             // 充值中、等待中、异常
             'processing_count' => $orders - $success - $failed,
+            'abnormal_count' => (int) $row->abnormal_count,
             'success_rate' => ProductStatsService::rate($success, $failed),
             'amount' => bcadd((string) $row->amount, '0', 2),
             'cost' => bcadd((string) $row->cost, '0', 2),
             'profit' => bcadd((string) $row->profit, '0', 2),
             'avg_duration' => $row->avg_duration === null ? null : (int) round((float) $row->avg_duration),
         ];
+    }
+
+    private function notifyResult(mixed $result): string
+    {
+        if (! in_array($result, [Order::STATUS_SUCCESS, Order::STATUS_FAILED], true)) {
+            throw new HttpException(422, '请选择回调成功还是失败');
+        }
+
+        return $result;
+    }
+
+    /**
+     * 按选的结果改订单，再开新一轮通知（从第 1 次开始，失败按间隔重试），之前排队的通知作废。
+     * 成功改失败相当于冲正，要有冲正权限。和提交任务用同一把锁，防止正好有提交在进行。
+     */
+    private function settleAndNotify(AdminUser $operator, Order $order, string $to, string $remark, ?string $ip): void
+    {
+        if ($order->status === Order::STATUS_SUCCESS && $to === Order::STATUS_FAILED && ! $this->rolePermissionDao->roleHasPermission($operator->role_id, 'order.reverse')) {
+            throw new HttpException(403, '成功的订单回调失败（冲正）需要订单冲正权限');
+        }
+        $token = $this->lock->acquire("order:submit:{$order->id}", 60);
+        if ($token === null) {
+            throw new HttpException(422, '订单正在提交给供应商，请稍后再试');
+        }
+        try {
+            if (! $this->processService->settleManually($order, $to, $remark)) {
+                throw new HttpException(422, '订单状态已经变化，请刷新后再操作');
+            }
+        } catch (InsufficientBalanceException $e) {
+            throw new HttpException(422, '失败改为成功要重新扣款，商户' . $e->getMessage());
+        } finally {
+            $this->lock->release("order:submit:{$order->id}", $token);
+        }
+        $this->orderDao->newQuery()->where('id', $order->id)->increment('notify_round', 1, [
+            'manual_notified_at' => date('Y-m-d H:i:s'),
+            'notify_status' => Order::NOTIFY_PENDING,
+        ]);
+        $round = (int) $this->findOrFail($order->id)->notify_round;
+        $this->dispatcher->notify($order->id, 1, 0, $round);
+
+        $money = match (true) {
+            $order->status === $to => [],
+            $to === Order::STATUS_FAILED => ['refund' => $order->sale_price],
+            $order->status === Order::STATUS_FAILED => ['charge' => $order->sale_price],
+            default => [],
+        };
+        $this->operationLogDao->record($operator->id, self::MODULE, 'manual_notify_order', 'order', $order->id, ['status' => $order->status], [
+            'status' => $to,
+            'round' => $round,
+            'remark' => $remark,
+        ] + $money, $ip);
     }
 
     private function findOrFail(int $id): Order
@@ -478,6 +559,7 @@ class OrderAdminService extends AbstractService
     {
         $merchants = $this->merchantDao->newQuery()->whereIn('id', array_unique(array_map(static fn (Order $o) => $o->merchant_id, $orders)))->pluck('name', 'id');
         $suppliers = $this->supplierDao->namesWithTrashed(array_values(array_filter(array_unique(array_map(static fn (Order $o) => $o->supplier_id, $orders)))));
+        $unclear = $this->attemptDao->unclearProcessing(array_map(static fn (Order $o) => $o->id, $orders));
 
         return array_map(static fn (Order $o) => [
             'id' => $o->id,
@@ -499,6 +581,13 @@ class OrderAdminService extends AbstractService
             'supplier_id' => $o->supplier_id,
             'supplier_name' => $o->supplier_id ? ($suppliers[$o->supplier_id] ?? null) : null,
             'status' => $o->status,
+            // 列表标「异常」：已转异常，或还在充值中但上游返回不明确；abnormal_reason 说明原因
+            'abnormal' => $o->flaggedAbnormal(isset($unclear[$o->id])),
+            'abnormal_reason' => match (true) {
+                $o->status === Order::STATUS_ABNORMAL => $o->manual_only ? '提交给供应商时接口异常，转人工处理' : '下单后长时间没有结果，转人工处理',
+                $o->flaggedAbnormal(isset($unclear[$o->id])) => '上游返回不明确：' . $unclear[$o->id],
+                default => null,
+            },
             'fail_reason' => $o->fail_reason,
             'notify_url' => $o->notify_url,
             'notify_status' => $o->notify_status,

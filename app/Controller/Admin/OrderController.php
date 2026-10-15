@@ -120,7 +120,16 @@ class OrderController extends AbstractController
     #[PostMapping(path: '{id:\d+}/notify')]
     public function manualNotify(int $id): array
     {
-        return $this->orderAdminService->manualNotify($this->admin(), $id, $this->clientIp());
+        return $this->orderAdminService->manualNotify($this->admin(), $id, $this->request->input('result'), $this->request->input('remark'), $this->clientIp());
+    }
+
+    #[Middleware(AdminAuthMiddleware::class)]
+    #[Middleware(AdminPermissionMiddleware::class)]
+    #[RequiresPermission('order.manage')]
+    #[PostMapping(path: 'batch-notify')]
+    public function batchManualNotify(): array
+    {
+        return $this->orderAdminService->batchManualNotify($this->admin(), $this->request->input('ids'), $this->request->input('result'), $this->request->input('remark'), $this->clientIp());
     }
 
     #[Middleware(AdminAuthMiddleware::class)]

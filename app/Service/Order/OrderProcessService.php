@@ -14,6 +14,7 @@ namespace App\Service\Order;
 
 use App\Dao\OrderAttemptDao;
 use App\Dao\OrderDao;
+use App\Exception\InsufficientBalanceException;
 use App\Model\MerchantBalanceLog;
 use App\Model\Order;
 use App\Model\OrderAttempt;
@@ -324,6 +325,63 @@ class OrderProcessService extends AbstractService
     public function reverse(Order $order, string $note): bool
     {
         return $this->fail($order, [Order::STATUS_SUCCESS], "冲正：{$note}");
+    }
+
+    /**
+     * 手动回调前按人工选的结果改订单，任何状态都可以；不通知商户，由调用方开新一轮手动回调。
+     * 改状态时一并记「已手动回调」，之后上游再来的结果只记录、不再改订单（见 Order::holdsUpstreamResults()）。
+     *
+     * - 置成功：以最后一次提交的供应商和成本记账，还在处理中的那次提交记为成功；失败（已退款）的订单重新扣款；
+     * - 置失败：退款，还在处理中的提交一并置为失败；成功的订单相当于冲正；
+     * - 已经是这个结果的不改。
+     *
+     * @param string $to Order::STATUS_SUCCESS / Order::STATUS_FAILED
+     * @return bool 订单现在是不是 $to；false 表示订单状态在这期间被别处改了
+     * @throws InsufficientBalanceException 失败改成功、商户余额不够重新扣款时
+     */
+    public function settleManually(Order $order, string $to, string $note): bool
+    {
+        if ($order->status === $to) {
+            return true;
+        }
+        $now = date('Y-m-d H:i:s');
+        $marked = ['manual_notified_at' => $now, 'finished_at' => $now, 'notify_status' => Order::NOTIFY_PENDING];
+        $note = $to === Order::STATUS_SUCCESS ? "手动回调置为成功：{$note}" : "手动回调置为失败：{$note}";
+
+        return Db::transaction(function () use ($order, $to, $note, $now, $marked) {
+            $attempts = $this->attemptDao->forOrder($order->id);
+            if ($to === Order::STATUS_FAILED) {
+                if (! $this->orderDao->transition($order->id, [$order->status], Order::STATUS_FAILED, ['profit' => null, 'fail_reason' => mb_substr($note, 0, 255)] + $marked)) {
+                    return false;
+                }
+                foreach ($attempts as $attempt) {
+                    $this->attemptDao->transition($attempt->id, OrderAttempt::STATUS_PROCESSING, OrderAttempt::STATUS_FAILED, ['message' => mb_substr($note, 0, 255), 'finished_at' => $now]);
+                }
+                $this->balanceService->change($order->merchant_id, MerchantBalanceLog::TYPE_ORDER_REFUND, $order->sale_price, $order->id, '手动回调置为失败退款');
+
+                return true;
+            }
+
+            $attempt = $attempts->last();
+            $booked = $attempt === null ? [] : [
+                'supplier_id' => $attempt->supplier_id,
+                'supplier_product_id' => $attempt->supplier_product_id,
+                'cost_price' => $attempt->cost_price,
+                'profit' => self::profit($order, $attempt),
+            ];
+            if (! $this->orderDao->transition($order->id, [$order->status], Order::STATUS_SUCCESS, ['fail_reason' => null] + $booked + $marked)) {
+                return false;
+            }
+            if ($attempt !== null) {
+                $this->attemptDao->transition($attempt->id, OrderAttempt::STATUS_PROCESSING, OrderAttempt::STATUS_SUCCESS, ['message' => mb_substr($note, 0, 255), 'finished_at' => $now]);
+            }
+            if ($order->status === Order::STATUS_FAILED) {
+                // 失败时已经退过款，改成功要重新扣；余额不够会抛异常，整个事务回滚
+                $this->balanceService->change($order->merchant_id, MerchantBalanceLog::TYPE_ORDER_PAY, bcmul($order->sale_price, '-1', 2), $order->id, '手动回调失败改为成功，重新扣款');
+            }
+
+            return true;
+        });
     }
 
     /**

@@ -126,6 +126,23 @@ class Order extends Model
     }
 
     /**
+     * 列表上标「异常」：已经转异常的；或者还在充值中、但上游返回不明确的（见 OrderAttemptDao::unclearProcessing()）。
+     */
+    public function flaggedAbnormal(bool $unclearReply): bool
+    {
+        return $this->status === self::STATUS_ABNORMAL
+            || ($unclearReply && in_array($this->status, [self::STATUS_PENDING, self::STATUS_PROCESSING], true));
+    }
+
+    /**
+     * 商户看到的是「充值中」、但平台这边是异常的：比 flaggedAbnormal() 多了人工处理单置了结果、还没手动回调的。
+     */
+    public function abnormalForMerchant(bool $unclearReply): bool
+    {
+        return ! $this->resultVisibleToMerchant() && ($this->manual_only || $this->flaggedAbnormal($unclearReply));
+    }
+
+    /**
      * 上游的结果只记录、不改订单、不推给商户：人工处理单，或者已经手动回调过的订单。
      */
     public function holdsUpstreamResults(): bool

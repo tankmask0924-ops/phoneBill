@@ -7,6 +7,7 @@ import { Download } from '@element-plus/icons-vue'
 import { computed, onMounted, ref } from 'vue'
 import {
   downloadOrders,
+  type NotifyResult,
   type Order,
   orderApi,
   type OrderDetail,
@@ -188,23 +189,78 @@ async function reverse() {
   }
 }
 
-async function manualNotify() {
-  const d = detail.value!
-  const final = ['success', 'failed'].includes(d.status)
-  const result = d.status === 'success' ? '成功' : d.status === 'failed' ? `失败（${d.fail_reason ?? ''}）` : '处理中'
-  const after = final
-    ? '回调之后，上游再来的结果都只记录、不会再推给商户。'
-    : '订单还没有结果，不影响后续处理：出结果后照常自动更新' + (d.manual_only ? '（人工处理单仍要人工置为成功 / 失败后再手动回调）。' : '并自动通知商户。')
-  try {
-    await ElMessageBox.confirm(
-      `将把「${result}」推送给商户（没收到 success 会按间隔重试）。${after}确定回调吗？`,
-      '手动回调',
-      { type: 'warning' },
-    )
-  } catch {
+// ---- 手动回调（单笔从详情进，批量从列表勾选进）----
+const notifyVisible = ref(false)
+const notifyOrders = ref<Order[]>([])
+const notifyForm = ref<{ result: NotifyResult | undefined; remark: string }>({ result: undefined, remark: '' })
+/** 从详情打开的单笔回调：完成后刷新详情 */
+const notifyFromDetail = ref(false)
+
+function openNotify(orders: Order[], fromDetail: boolean) {
+  notifyOrders.value = orders
+  notifyFromDetail.value = fromDetail
+  notifyForm.value = { result: undefined, remark: '' }
+  notifyVisible.value = true
+}
+
+/** 按选的结果，告诉管理员这些订单会怎么变 */
+const notifyEffects = computed(() => {
+  const result = notifyForm.value.result
+  if (!result) {
+    return []
+  }
+  const count = (statuses: string[]) => notifyOrders.value.filter((o) => statuses.includes(o.status)).length
+  const unfinished = count(['pending', 'processing', 'abnormal'])
+  const lines: string[] = []
+  if (result === 'success') {
+    if (unfinished) lines.push(`${unfinished} 笔没出结果的改为成功（按最后一次提交的供应商和成本记账），不动余额`)
+    if (count(['failed'])) lines.push(`${count(['failed'])} 笔失败（已退款）的改为成功，重新扣商户的款，余额不够的会处理不了`)
+  } else {
+    if (unfinished) lines.push(`${unfinished} 笔没出结果的改为失败，退款给商户`)
+    if (count(['success'])) lines.push(`${count(['success'])} 笔成功的改为失败（冲正），退款给商户，需要冲正权限`)
+  }
+  const same = count([result])
+  if (same) lines.push(`${same} 笔已经是${result === 'success' ? '成功' : '失败'}，只推送，不动余额`)
+  lines.push('推送给商户后没收到 success 会按间隔重试；之后上游再来的结果只记录，不会再改订单和推给商户')
+  return lines
+})
+
+async function submitNotify() {
+  const { result, remark } = notifyForm.value
+  if (!result || !remark.trim()) {
+    ElMessage.warning('请选择回调成功还是失败，并填写备注')
     return
   }
-  await act(() => orderApi.manualNotify(d.id), '已推送给商户')
+  notifyVisible.value = false
+  if (notifyFromDetail.value) {
+    await act(() => orderApi.manualNotify(detail.value!.id, result, remark.trim()), '已按选的结果回调商户')
+    return
+  }
+  acting.value = true
+  let outcome
+  try {
+    outcome = await orderApi.batchNotify(notifyOrders.value.map((o) => o.id), result, remark.trim())
+    await list.load()
+  } finally {
+    acting.value = false
+  }
+  if (outcome.failures.length === 0) {
+    ElMessage.success(`已回调 ${outcome.succeeded} 笔`)
+    return
+  }
+  const lines = outcome.failures.map((f) => `${f.order_no ?? f.id}：${f.message}`)
+  await ElMessageBox.alert([`成功 ${outcome.succeeded} 笔，没处理成 ${outcome.failures.length} 笔：`, ...lines].join('\n'), '批量手动回调', {
+    type: 'warning',
+    customStyle: { whiteSpace: 'pre-line' },
+  }).catch(() => undefined)
+}
+
+// ---- 列表勾选 ----
+const selected = ref<Order[]>([])
+
+/** 异常的行整行标红底 */
+function rowClass({ row }: { row: Order }): string {
+  return row.abnormal ? 'abnormal-row' : ''
 }
 
 // ---- 手动补单 ----
@@ -318,6 +374,9 @@ onMounted(async () => {
       <el-form-item>
         <el-button type="primary" native-type="submit">查询</el-button>
         <el-button :icon="Download" :loading="exporting" @click="exportCsv">导出</el-button>
+        <el-button v-if="canManage" type="primary" plain :disabled="selected.length === 0" @click="openNotify(selected, false)">
+          批量手动回调{{ selected.length ? `（${selected.length}）` : '' }}
+        </el-button>
       </el-form-item>
     </el-form>
 
@@ -325,7 +384,10 @@ onMounted(async () => {
       <div class="summary-item">
         <div class="summary-label">订单数</div>
         <div class="summary-value">{{ summary.order_count }}</div>
-        <div class="summary-sub">成功 {{ summary.success_count }} · 失败 {{ summary.failed_count }} · 处理中 {{ summary.processing_count }}</div>
+        <div class="summary-sub">
+          成功 {{ summary.success_count }} · 失败 {{ summary.failed_count }} · 处理中 {{ summary.processing_count }}
+          <span v-if="summary.abnormal_count" class="loss">（异常 {{ summary.abnormal_count }}）</span>
+        </div>
       </div>
       <div class="summary-item">
         <div class="summary-label">成功率</div>
@@ -349,7 +411,14 @@ onMounted(async () => {
       </div>
     </div>
 
-    <el-table v-loading="loading" :data="rows" border>
+    <el-table
+      v-loading="loading || acting"
+      :data="rows"
+      border
+      :row-class-name="rowClass"
+      @selection-change="(rows: Order[]) => (selected = rows)"
+    >
+      <el-table-column v-if="canManage" type="selection" width="44" fixed="left" />
       <el-table-column prop="order_no" label="平台订单号" width="210" />
       <el-table-column prop="merchant_name" label="商户" min-width="110" />
       <el-table-column prop="merchant_order_no" label="商户订单号" min-width="150" />
@@ -374,10 +443,15 @@ onMounted(async () => {
       <el-table-column label="供应商" min-width="110">
         <template #default="{ row }">{{ row.supplier_name ?? '-' }}</template>
       </el-table-column>
-      <el-table-column label="状态" width="120">
+      <el-table-column label="状态" width="150">
         <template #default="{ row }">
-          <StatusTag :map="orderStatusLabels" :value="row.status" />
-          <el-tag v-if="row.manual_only" type="danger" size="small" class="manual-tag">人工</el-tag>
+          <el-tooltip :disabled="!row.abnormal_reason" :content="row.abnormal_reason ?? ''" placement="top">
+            <span>
+              <StatusTag :map="orderStatusLabels" :value="row.status" />
+              <el-tag v-if="row.abnormal && row.status !== 'abnormal'" type="danger" effect="dark" size="small" class="manual-tag">异常</el-tag>
+              <el-tag v-if="row.manual_only" type="danger" size="small" class="manual-tag">人工</el-tag>
+            </span>
+          </el-tooltip>
         </template>
       </el-table-column>
       <el-table-column prop="created_at" label="下单时间" width="170" />
@@ -414,7 +488,7 @@ onMounted(async () => {
           </template>
           <el-button v-if="canReverse && detail.status === 'success'" type="danger" plain @click="reverse">冲正</el-button>
           <el-button v-if="canManage && detail.status === 'abnormal'" type="primary" plain @click="openResupply">手动补单</el-button>
-          <el-button v-if="canManage" type="primary" plain @click="manualNotify">手动回调</el-button>
+          <el-button v-if="canManage" type="primary" plain @click="openNotify([detail], true)">手动回调</el-button>
         </div>
 
         <el-alert v-for="w in detail.warnings" :key="w" type="error" :closable="false" show-icon :title="w" class="warning" />
@@ -424,7 +498,9 @@ onMounted(async () => {
           <el-descriptions-item label="商户订单号">{{ detail.merchant_order_no }}</el-descriptions-item>
           <el-descriptions-item label="状态">
             <StatusTag :map="orderStatusLabels" :value="detail.status" />
+            <el-tag v-if="detail.abnormal && detail.status !== 'abnormal'" type="danger" effect="dark" size="small" class="manual-tag">异常</el-tag>
             <el-tag v-if="detail.manual_only" type="danger" size="small" class="manual-tag">人工处理单</el-tag>
+            <div v-if="detail.abnormal_reason" class="muted">{{ detail.abnormal_reason }}</div>
           </el-descriptions-item>
           <el-descriptions-item label="商户">{{ detail.merchant_name }}</el-descriptions-item>
           <el-descriptions-item label="商品">{{ detail.product_name }}（{{ detail.product_code }}）</el-descriptions-item>
@@ -505,6 +581,32 @@ onMounted(async () => {
     </div>
   </el-drawer>
 
+  <el-dialog v-model="notifyVisible" :title="notifyFromDetail ? '手动回调' : `批量手动回调（${notifyOrders.length} 笔）`" width="620px">
+    <el-alert type="warning" :closable="false" show-icon class="warning">
+      订单会按你选的结果改，再推送给商户。<b>请先到上游核实充值结果</b>，选错会造成资损。
+    </el-alert>
+    <el-form label-width="96px">
+      <el-form-item label="回调结果" required>
+        <el-radio-group v-model="notifyForm.result">
+          <el-radio-button value="success">成功</el-radio-button>
+          <el-radio-button value="failed">失败（退款）</el-radio-button>
+        </el-radio-group>
+      </el-form-item>
+      <el-form-item v-if="notifyEffects.length" label="会发生什么">
+        <ul class="effects">
+          <li v-for="line in notifyEffects" :key="line">{{ line }}</li>
+        </ul>
+      </el-form-item>
+      <el-form-item label="备注" required>
+        <el-input v-model="notifyForm.remark" type="textarea" :rows="2" maxlength="200" placeholder="必填，如：上游后台确认已到账" />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="notifyVisible = false">取消</el-button>
+      <el-button type="primary" @click="submitNotify">确认回调</el-button>
+    </template>
+  </el-dialog>
+
   <el-dialog v-model="resupplyVisible" title="手动补单" width="620px">
     <el-alert type="warning" :closable="false" show-icon class="warning">
       补单会把这笔订单（同一个订单号、不重复扣款）重新提交给下面选的供应商商品。
@@ -559,6 +661,16 @@ onMounted(async () => {
 
 .manual-tag {
   margin-left: 4px;
+}
+
+.effects {
+  margin: 0;
+  padding-left: 18px;
+  line-height: 1.8;
+}
+
+:deep(.abnormal-row) {
+  --el-table-tr-bg-color: #fef0f0;
 }
 
 .gain {

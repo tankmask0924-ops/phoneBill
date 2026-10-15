@@ -27,6 +27,10 @@ export interface Order {
   supplier_name: string | null
   /** pending / processing / abnormal / success / failed */
   status: string
+  /** 列表标「异常」：已转异常，或还在充值中但上游返回不明确 */
+  abnormal: boolean
+  /** 为什么标异常，没标时为 null */
+  abnormal_reason: string | null
   fail_reason: string | null
   notify_url: string | null
   notify_status: string
@@ -48,6 +52,8 @@ export interface OrderSummary {
   failed_count: number
   /** 充值中、等待中、异常 */
   processing_count: number
+  /** 其中已转异常的 */
+  abnormal_count: number
   success_rate: string | null
   amount: string
   cost: string
@@ -109,6 +115,15 @@ export interface OrderFilterOptions {
   face_values: number[]
 }
 
+/** 手动回调的结果 */
+export type NotifyResult = 'success' | 'failed'
+
+export interface BatchNotifyResult {
+  total: number
+  succeeded: number
+  failures: { id: number; order_no: string | null; message: string }[]
+}
+
 export const orderApi = {
   /** summary 是当前筛选条件下全部订单（不只这一页）的汇总 */
   list: (params: Query) => http.get<Paged<Order> & { summary: OrderSummary }>('/admin/orders', params),
@@ -120,8 +135,12 @@ export const orderApi = {
   confirmSuccess: (id: number, remark: string) => http.post<OrderDetail>(`/admin/orders/${id}/success`, { remark }),
   confirmFailed: (id: number, remark: string) => http.post<OrderDetail>(`/admin/orders/${id}/fail`, { remark }),
   reverse: (id: number, remark: string) => http.post<OrderDetail>(`/admin/orders/${id}/reverse`, { remark }),
-  /** 手动回调：把当前结果推给商户 */
-  manualNotify: (id: number) => http.post<OrderDetail>(`/admin/orders/${id}/notify`),
+  /** 手动回调：订单按选的结果改（失败退款，失败改成功重新扣款），再推给商户 */
+  manualNotify: (id: number, result: NotifyResult, remark: string) =>
+    http.post<OrderDetail>(`/admin/orders/${id}/notify`, { result, remark }),
+  /** 批量手动回调：逐笔处理，failures 是没处理成的 */
+  batchNotify: (ids: number[], result: NotifyResult, remark: string) =>
+    http.post<BatchNotifyResult>('/admin/orders/batch-notify', { ids, result, remark }),
   resupplyOptions: (id: number) => http.get<ResupplyOption[]>(`/admin/orders/${id}/resupply-options`),
   /** 手动补单：同一笔订单重新提交给指定的供应商商品 */
   resupply: (id: number, supplierProductId: number, remark: string) =>

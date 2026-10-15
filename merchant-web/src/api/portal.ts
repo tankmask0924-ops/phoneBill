@@ -31,6 +31,8 @@ export interface Order {
   amount: string
   /** processing 充值中 / success 成功 / failed 失败（已退款） */
   status: string
+  /** 充值中但平台这边处理异常（上游返回不明确、超时或接口异常），平台正在人工核实；只有订单列表和详情返回 */
+  abnormal?: boolean
   fail_reason: string | null
   created_at: string | null
   finished_at: string | null

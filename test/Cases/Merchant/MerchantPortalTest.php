@@ -103,6 +103,7 @@ class MerchantPortalTest extends HttpTestCase
         $this->assertSame(2, $orders['total']);
         $this->assertNotContains($theirOrder->id, array_column($orders['data'], 'id'));
         $this->assertSame(['processing', 'success'], array_column($orders['data'], 'status'), '异常订单对商户显示为充值中');
+        $this->assertSame([true, false], array_column($orders['data'], 'abnormal'), '另外标出异常');
         foreach (['cost_price', 'supplier_id', 'supplier_name', 'merchant_id'] as $internal) {
             $this->assertArrayNotHasKey($internal, $orders['data'][0]);
         }
@@ -111,6 +112,7 @@ class MerchantPortalTest extends HttpTestCase
 
         $detail = $this->body($this->jsonRequest('GET', "/merchant/orders/{$myOrder->id}", $token));
         $this->assertSame($myOrder->order_no, $detail['order_no']);
+        $this->assertFalse($detail['abnormal']);
         $this->assertSame(['order_pay'], array_column($detail['balance_logs'], 'type'));
         $this->assertSame(404, $this->jsonRequest('GET', "/merchant/orders/{$theirOrder->id}", $token)->getStatusCode(), '看不到别人的订单');
 
