@@ -30,9 +30,9 @@ use RuntimeException;
  * - 我们是它的商户：merchant_order_no 传提交单号 attempt_no，product_id 传供应商商品编码；
  * - 签名：除 sign 外全部参数（空值也算）按参数名升序拼 k=v&...，AppSecret 做 HMAC-SHA256；
  * - 上游不识别运营商，一个上游商品只对应一个运营商，供应商商品要按运营商分开建；
- * - 同一个 merchant_order_no 重复提交只会返回第一次的订单，所以查单查不到时用原单号补提交是安全的；
- * - 首次下单：code=0 按返回的状态处理；上游有返回、code 是别的一律判失败换下一家；网络异常、HTTP 出错、
- *   返回无法解析（没有拿到返回值）按接口异常处理，订单立即转异常人工处理（2026-10-15 定）。
+ * - 下单：code=0 按返回的状态处理；上游有返回、code 是别的一律判失败换下一家；网络异常、HTTP 出错、
+ *   返回无法解析（没有拿到返回值）按接口异常处理，订单立即转异常人工处理（2026-10-15 定）；
+ * - 查单返回订单不存在（42005）只记录，订单状态不动，不补提交（下单受理了就以下单为准，2026-10-15 定）。
  */
 class OpenPlatformDriver implements SupplierDriverInterface, ProvidesUpstreamProducts
 {
@@ -69,7 +69,22 @@ class OpenPlatformDriver implements SupplierDriverInterface, ProvidesUpstreamPro
 
     public function recharge(RechargeRequest $request): RechargeResult
     {
-        return $this->submit($request, true);
+        [$params, $response] = $this->call($request->config, 'POST', '/orders/recharge', [
+            'merchant_order_no' => $request->attemptNo,
+            'product_id' => $request->externalCode,
+            'recharge_account' => $request->mobile,
+            'callback_url' => $request->config['notify_url'] ?? '',
+        ], 10.0);
+        $body = $this->decode($response['body']);
+        if ($body === null) {
+            // HTTP 出错、返回无法解析：没有拿到返回值，不知道建没建单，转异常人工处理
+            return RechargeResult::callFailed('下单没有拿到上游返回，转异常人工处理：' . $this->describe($body, $response), $this->encode($params), $response['body']);
+        }
+        if ((int) $body['code'] !== 0) {
+            return RechargeResult::failed('上游拒单：' . $this->describe($body, []), $request->supplierOrderNo, $this->encode($params), $response['body']);
+        }
+
+        return $this->toResult($body, $request->supplierOrderNo, $params, $response['body'], $response['status']);
     }
 
     public function query(RechargeRequest $request): RechargeResult
@@ -77,8 +92,8 @@ class OpenPlatformDriver implements SupplierDriverInterface, ProvidesUpstreamPro
         [$params, $response] = $this->call($request->config, 'GET', '/order', ['merchant_order_no' => $request->attemptNo]);
         $body = $this->decode($response['body']);
         if ($body !== null && (int) $body['code'] === self::CODE_ORDER_NOT_FOUND) {
-            // 上游没有这笔单，多半是提交时网络超时没送到；用原单号补提交，就算其实送到了也不会重复下单
-            return $this->submit($request, false);
+            // 下单时上游已经受理，查不到只记到这次提交上，订单状态不动（没结果的到时转异常人工处理）
+            return RechargeResult::processing($request->supplierOrderNo, '查单：上游没有这笔订单，只记录：' . $this->describe($body, []), $this->encode($params), $response['body']);
         }
 
         return $this->toResult($body, $request->supplierOrderNo, $params, $response['body']);
@@ -167,35 +182,6 @@ class OpenPlatformDriver implements SupplierDriverInterface, ProvidesUpstreamPro
         }
 
         return hash_hmac('sha256', implode('&', $pairs), $secret);
-    }
-
-    /**
-     * 提交话费下单。
-     *
-     * @param bool $trustRejection 上游拒单时是否判失败。查单补提交时传 false：上游先做什么校验我们不知道，
-     *                             万一原单其实存在、只是商品已下架之类被拒，判失败会换供应商重复充值，所以只认 code=0
-     */
-    private function submit(RechargeRequest $request, bool $trustRejection): RechargeResult
-    {
-        [$params, $response] = $this->call($request->config, 'POST', '/orders/recharge', [
-            'merchant_order_no' => $request->attemptNo,
-            'product_id' => $request->externalCode,
-            'recharge_account' => $request->mobile,
-            'callback_url' => $request->config['notify_url'] ?? '',
-        ], 10.0);
-        $body = $this->decode($response['body']);
-        if (! $trustRejection && ($body === null || (int) $body['code'] !== 0)) {
-            return RechargeResult::processing($request->supplierOrderNo, '补提交未受理，等待人工核对：' . $this->describe($body, $response), $this->encode($params), $response['body']);
-        }
-        if ($body === null) {
-            // HTTP 出错、返回无法解析：没有拿到返回值，不知道建没建单，转异常人工处理
-            return RechargeResult::callFailed('下单没有拿到上游返回，转异常人工处理：' . $this->describe($body, $response), $this->encode($params), $response['body']);
-        }
-        if ((int) $body['code'] !== 0) {
-            return RechargeResult::failed('上游拒单：' . $this->describe($body, []), $request->supplierOrderNo, $this->encode($params), $response['body']);
-        }
-
-        return $this->toResult($body, $request->supplierOrderNo, $params, $response['body'], $response['status']);
     }
 
     /**

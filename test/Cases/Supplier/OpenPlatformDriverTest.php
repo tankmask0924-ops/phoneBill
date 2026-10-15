@@ -122,7 +122,7 @@ class OpenPlatformDriverTest extends HttpTestCase
         $this->assertStringContainsString('没有拿到上游返回', $result->message);
     }
 
-    public function testQueryMapsStatusAndResubmitsWhenUpstreamHasNoOrder()
+    public function testQueryMapsStatusAndOnlyRecordsMissingOrder()
     {
         $this->respond(['code' => 0, 'message' => 'ok', 'data' => $this->order('success')]);
         $result = $this->driver()->query($this->request());
@@ -136,24 +136,14 @@ class OpenPlatformDriverTest extends HttpTestCase
             $this->assertSame(RechargeStatus::Failed, $this->driver()->query($this->request())->status, $status);
         }
 
-        // 上游查不到：用原单号补提交
+        // 上游查不到：只记录，状态不动，不补提交
         $this->http->requests = [];
-        $this->http->responses = [
-            $this->json(['code' => 42005, 'message' => '订单不存在', 'data' => null]),
-            $this->json(['code' => 0, 'message' => 'ok', 'data' => $this->order('processing')]),
-        ];
-        $this->assertSame(RechargeStatus::Processing, $this->driver()->query($this->request())->status);
-        $this->assertSame(['GET', 'POST_FORM'], array_column($this->http->requests, 'method'));
-        $this->assertSame('A0001', $this->http->requests[1]['payload']['merchant_order_no']);
-
-        // 补提交被拒：不判失败（原单可能其实存在），保持处理中，到时转异常人工处理
-        $this->http->responses = [
-            $this->json(['code' => 42005, 'message' => '订单不存在', 'data' => null]),
-            $this->json(['code' => 42002, 'message' => '商品未上架', 'data' => null]),
-        ];
+        $this->respond(['code' => 42005, 'message' => '订单不存在', 'data' => null]);
         $result = $this->driver()->query($this->request());
         $this->assertSame(RechargeStatus::Processing, $result->status);
-        $this->assertStringContainsString('42002', $result->message);
+        $this->assertFalse($result->callFailed);
+        $this->assertStringContainsString('[42005] 订单不存在', $result->message);
+        $this->assertSame(['GET'], array_column($this->http->requests, 'method'), '不补提交');
     }
 
     public function testUpstreamProductsMapOperatorFaceValueAndPrice()
