@@ -23,9 +23,10 @@ export function labelOf(map: LabelMap, value: string | null | undefined): string
   return map[value]?.label ?? value
 }
 
-/** 订单状态（商户视角） */
+/** 订单状态（商户视角）。abnormal 只在商户后台显示，开放接口查单、回调仍然是 processing */
 export const orderStatusLabels: LabelMap = {
   processing: { label: '充值中', type: 'primary' },
+  abnormal: { label: '异常', type: 'danger' },
   success: { label: '成功', type: 'success' },
   failed: { label: '失败（已退款）', type: 'warning' },
 }

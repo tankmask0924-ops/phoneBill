@@ -36,7 +36,8 @@ use Hyperf\HttpMessage\Exception\HttpException;
  * 商户后台（只读）：首页、订单记录、资金流水、账户（docs/project.md 5.1）。
  *
  * 所有查询都按调用方传入的 Merchant 过滤（来自登录态，见 MerchantAuthMiddleware）；
- * 不返回成本、供应商等平台内部信息，订单状态按商户视角显示（等待中、异常都是 processing），异常的另外标 abnormal。
+ * 不返回成本、供应商等平台内部信息，订单状态按商户视角显示（等待中是 processing），异常的显示为 abnormal（见 presentOrders()）。
+ * 异常只在商户后台显示：开放接口查单、回调商户仍然是 processing（见 OrderService::present()）。
  */
 class MerchantPortalService extends AbstractService
 {
@@ -116,10 +117,9 @@ class MerchantPortalService extends AbstractService
         $builder = $this->filteredOrders($merchant, $query);
         $summary = $this->orderSummary($builder);
         $orders = $builder->orderByDesc('id')->forPage($page, $perPage)->get();
-        $unclear = $this->attemptDao->unclearProcessing($orders->pluck('id')->all());
 
         return [
-            'data' => $orders->map(fn (Order $o) => $this->presentOrder($o) + ['abnormal' => $o->abnormalForMerchant(isset($unclear[$o->id]))])->values()->all(),
+            'data' => $this->presentOrders($orders->all()),
             'total' => $summary['order_count'],
             'page' => $page,
             'per_page' => $perPage,
@@ -170,8 +170,7 @@ class MerchantPortalService extends AbstractService
             throw new HttpException(404, '订单不存在');
         }
 
-        return $this->presentOrder($order) + [
-            'abnormal' => $order->abnormalForMerchant($this->attemptDao->unclearProcessing([$order->id]) !== []),
+        return $this->presentOrders([$order])[0] + [
             'balance_logs' => $this->balanceLogDao->newQuery()->where('merchant_id', $merchant->id)->where('order_id', $order->id)->orderBy('id')->get()
                 ->map(static fn (MerchantBalanceLog $l) => [
                     'type' => $l->type,
@@ -304,11 +303,24 @@ class MerchantPortalService extends AbstractService
     }
 
     /**
-     * @return array<string, mixed>
+     * 商户后台（列表、详情、导出）看到的订单：平台这边异常、商户这边还没出结果的，状态显示为 abnormal（见 Order::abnormalForMerchant()）。
+     * 只用于商户后台；开放接口查单、回调用 OrderService::present()，异常仍然是 processing。
+     *
+     * @param list<Order> $orders
+     * @return list<array<string, mixed>>
      */
-    public function presentOrder(Order $order): array
+    public function presentOrders(array $orders): array
     {
-        return ['id' => $order->id, 'product_name' => $order->product_name, 'province' => $order->province] + $this->orderService->present($order);
+        $unclear = $this->attemptDao->unclearProcessing(array_map(static fn (Order $o) => $o->id, $orders));
+
+        return array_map(function (Order $o) use ($unclear) {
+            $presented = ['id' => $o->id, 'product_name' => $o->product_name, 'province' => $o->province] + $this->orderService->present($o);
+            if ($o->abnormalForMerchant(isset($unclear[$o->id]))) {
+                $presented['status'] = 'abnormal';
+            }
+
+            return $presented;
+        }, $orders);
     }
 
     /**

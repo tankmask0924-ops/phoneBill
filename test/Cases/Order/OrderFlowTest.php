@@ -23,6 +23,7 @@ use App\Model\Product;
 use App\Model\Supplier;
 use App\Network\HttpClient;
 use App\Security\OpenApiSigner;
+use App\Service\MerchantPortal\MerchantPortalService;
 use App\Service\Order\MerchantNotifyService;
 use App\Service\Order\OrderDispatcher;
 use App\Service\Order\OrderProcessService;
@@ -169,6 +170,13 @@ class OrderFlowTest extends HttpTestCase
         $this->assertSame(Order::STATUS_ABNORMAL, Order::find($order->id)->status);
         $this->assertSame([], $this->dispatcher->notifies);
         $this->assertSame('processing', make(OrderService::class)->present(Order::find($order->id))['status']);
+
+        // 异常只在后台显示：开放接口查单、回调商户都是 processing，不出现 abnormal
+        $queried = $this->api($merchant, 'GET', '/open/v1/order', ['order_no' => $order->order_no]);
+        $this->assertSame('OK', $queried['code']);
+        $this->assertSame('processing', $queried['data']['status']);
+        $this->assertStringNotContainsString('abnormal', json_encode($queried, JSON_UNESCAPED_UNICODE));
+        $this->assertSame('abnormal', make(MerchantPortalService::class)->presentOrders([Order::find($order->id)])[0]['status'], '商户后台显示异常');
 
         // 人工置为成功也不自动通知，商户查单仍是处理中，等手动回调
         $this->assertTrue($this->process()->confirmSuccess(Order::find($order->id), '上游核实已到账'));

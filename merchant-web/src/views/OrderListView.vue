@@ -28,6 +28,13 @@ function toParams(params: Record<string, unknown>): Record<string, unknown> {
 /** 当前筛选条件下全部订单的汇总，跟列表一起返回 */
 const summary = ref<OrderSummary | null>(null)
 
+const ABNORMAL_TIP = '订单处理异常，平台正在人工核实，结果出来后会回调通知'
+
+/** 筛选「充值中」时包含异常的订单（异常也还没有结果） */
+const statusOptions = toOptions(orderStatusLabels)
+  .filter((o) => o.value !== 'abnormal')
+  .map((o) => (o.value === 'processing' ? { ...o, label: '充值中（含异常）' } : o))
+
 const list = usePagedList<Order, Filters>(
   (params) =>
     portalApi.orders(toParams(params)).then((result) => {
@@ -105,7 +112,7 @@ onMounted(async () => {
       </el-form-item>
       <el-form-item>
         <el-select v-model="filters.status" placeholder="全部状态" clearable style="width: 130px">
-          <el-option v-for="o in toOptions(orderStatusLabels)" :key="o.value" v-bind="o" />
+          <el-option v-for="o in statusOptions" :key="o.value" v-bind="o" />
         </el-select>
       </el-form-item>
       <el-form-item>
@@ -162,10 +169,9 @@ onMounted(async () => {
       </el-table-column>
       <el-table-column label="状态" width="150">
         <template #default="{ row }">
-          <StatusTag :map="orderStatusLabels" :value="row.status" />
-          <template v-if="row.abnormal">
-            <el-tooltip content="订单处理异常，平台正在人工核实，结果出来后会回调通知" placement="top"><el-tag type="danger" effect="dark" size="small" class="abnormal-tag">异常</el-tag></el-tooltip>
-          </template>
+          <el-tooltip :disabled="row.status !== 'abnormal'" :content="ABNORMAL_TIP" placement="top">
+            <span><StatusTag :map="orderStatusLabels" :value="row.status" /></span>
+          </el-tooltip>
         </template>
       </el-table-column>
       <el-table-column prop="created_at" label="下单时间" width="170" />
@@ -204,9 +210,7 @@ onMounted(async () => {
           <el-descriptions-item label="扣款">{{ detail.amount }} 元</el-descriptions-item>
           <el-descriptions-item label="状态">
             <StatusTag :map="orderStatusLabels" :value="detail.status" />
-            <template v-if="detail.abnormal">
-              <el-tooltip content="订单处理异常，平台正在人工核实，结果出来后会回调通知" placement="top"><el-tag type="danger" effect="dark" size="small" class="abnormal-tag">异常</el-tag></el-tooltip>
-            </template>
+            <div v-if="detail.status === 'abnormal'" class="muted">{{ ABNORMAL_TIP }}</div>
           </el-descriptions-item>
           <el-descriptions-item label="完成时间">{{ detail.finished_at ?? '-' }}</el-descriptions-item>
           <el-descriptions-item v-if="detail.fail_reason" label="失败原因" :span="2">{{ detail.fail_reason }}</el-descriptions-item>
@@ -226,10 +230,6 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.abnormal-tag {
-  margin-left: 4px;
-}
-
 .summary {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

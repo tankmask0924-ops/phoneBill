@@ -469,12 +469,14 @@ class OrderControllerTest extends HttpTestCase
         $summary = $this->body($this->jsonRequest('GET', "/admin/orders?merchant_id={$merchant->id}", $token))['summary'];
         $this->assertSame(1, $summary['abnormal_count']);
 
-        // 商户看到的都是充值中，上游不明确的和异常的另外标出来
-        $merchantRows = array_column(make(MerchantPortalService::class)->orders(Merchant::find($merchant->id), [])['data'], null, 'id');
-        $this->assertSame(['processing', 'processing', 'processing'], array_values(array_map(static fn ($r) => $r['status'], $merchantRows)));
-        $this->assertFalse($merchantRows[$normal->id]['abnormal']);
-        $this->assertTrue($merchantRows[$unclear->id]['abnormal']);
-        $this->assertTrue($merchantRows[$abnormal->id]['abnormal']);
+        // 商户后台：上游不明确的和异常的显示为异常；开放接口查单、回调仍是 processing
+        $merchantRows = array_column(make(MerchantPortalService::class)->orders(Merchant::find($merchant->id), [])['data'], 'status', 'id');
+        $this->assertSame('processing', $merchantRows[$normal->id]);
+        $this->assertSame('abnormal', $merchantRows[$unclear->id]);
+        $this->assertSame('abnormal', $merchantRows[$abnormal->id]);
+        foreach ([$unclear, $abnormal] as $o) {
+            $this->assertSame('processing', make(OrderService::class)->present(Order::find($o->id))['status']);
+        }
     }
 
     public function testManualOnlyOrderNeedsManualNotifyAndLaterUpstreamResultsAreHeld()

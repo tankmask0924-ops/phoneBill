@@ -58,7 +58,7 @@ class MerchantExportService extends AbstractService
         MerchantExport::TYPE_BALANCE_LOGS => ['type', 'order_no', 'created_from', 'created_to'],
     ];
 
-    private const ORDER_STATUS_LABELS = ['processing' => '充值中', 'success' => '成功', 'failed' => '失败（已退款）'];
+    private const ORDER_STATUS_LABELS = ['processing' => '充值中', 'abnormal' => '异常', 'success' => '成功', 'failed' => '失败（已退款）'];
 
     private const BALANCE_TYPE_LABELS = [
         MerchantBalanceLog::TYPE_RECHARGE => '加款',
@@ -263,8 +263,9 @@ class MerchantExportService extends AbstractService
             if ($export->type === MerchantExport::TYPE_ORDERS) {
                 $this->putRow($out, ['平台订单号', '商户订单号', '商品', '手机号', '运营商', '省份', '面值', '扣款金额', '状态', '失败原因', '下单时间', '完成时间', '耗时（秒）']);
                 $builder->chunkByIdDesc(self::CHUNK, function (Collection $orders) use ($out, &$rows) {
-                    foreach ($orders as $order) {
-                        $this->putRow($out, $this->orderRow($order));
+                    $presented = $this->portalService->presentOrders($orders->all());
+                    foreach ($orders->values() as $i => $order) {
+                        $this->putRow($out, $this->orderRow($order, $presented[$i]));
                         ++$rows;
                     }
                 });
@@ -288,11 +289,11 @@ class MerchantExportService extends AbstractService
     }
 
     /**
+     * @param array<string, mixed> $o MerchantPortalService::presentOrders() 的一行
      * @return list<int|string>
      */
-    private function orderRow(Order $order): array
+    private function orderRow(Order $order, array $o): array
     {
-        $o = $this->portalService->presentOrder($order);
         $duration = $o['finished_at'] !== null && $order->created_at !== null && $order->finished_at !== null
             ? max(0, $order->finished_at->getTimestamp() - $order->created_at->getTimestamp())
             : '';
