@@ -30,7 +30,8 @@ use RuntimeException;
  * - out_trade_num 传提交单号 attempt_no，product_id 传供应商商品编码，amount 传面值让上游校验；
  * - 全部接口都是表单 POST；签名：参数按名升序拼 k=v&...（不做 URL 编码），末尾拼 &apikey=，md5 转大写；
  * - 回调带签名，按收到的全部参数验签并核对 userid，通过才采用；
- * - 下单 errno 非 0 文档写的是「提交失败」，按没建单处理；拿不到可解析的返回时不知道建没建单，按处理中等查单；
+ * - 下单 errno 非 0 文档写的是「提交失败」，按没建单处理（HTTP 非 200 但带着可解析的错误也算）；网络异常、
+ *   返回无法解析（没有拿到返回值）按接口异常处理，订单立即转异常人工处理（2026-10-15 定）；
  * - state 3 部分成功不能按成功也不能全额退款，保持处理中，到时转异常人工处理。
  */
 class DayuanrenDriver implements SupplierDriverInterface, ProvidesUpstreamProducts
@@ -80,12 +81,12 @@ class DayuanrenDriver implements SupplierDriverInterface, ProvidesUpstreamProduc
             'amount' => (string) $request->faceValue,
         ], 10.0);
         $body = $this->decode($response['body']);
-        if ($body === null || $response['status'] !== 200) {
-            // 文档：HTTP 非 200、没有响应体时无法判断是否下单成功，只能等查单确认
-            return RechargeResult::processing($request->supplierOrderNo, '下单返回无法解析，等待查单：' . $this->describe($body, $response), $sent, $response['body']);
-        }
-        if ($body['errno'] !== self::ERRNO_OK) {
+        if ($body !== null && $body['errno'] !== self::ERRNO_OK) {
             return RechargeResult::failed('上游拒单：' . $this->describe($body, $response), $request->supplierOrderNo, $sent, $response['body']);
+        }
+        if ($body === null || $response['status'] !== 200) {
+            // 没有响应体、返回无法解析，或者 HTTP 非 200 却说成功：无法判断是否下单成功，转异常人工处理
+            return RechargeResult::callFailed('下单没有拿到上游返回，转异常人工处理：' . $this->describe($body, $response), $sent, $response['body']);
         }
         $orderNo = is_array($body['data'] ?? null) && is_scalar($body['data']['order_number'] ?? null) && $body['data']['order_number'] !== ''
             ? (string) $body['data']['order_number']

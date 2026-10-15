@@ -30,7 +30,9 @@ use RuntimeException;
  * - 我们是它的商户：merchant_order_no 传提交单号 attempt_no，product_id 传供应商商品编码；
  * - 签名：除 sign 外全部参数（空值也算）按参数名升序拼 k=v&...，AppSecret 做 HMAC-SHA256；
  * - 上游不识别运营商，一个上游商品只对应一个运营商，供应商商品要按运营商分开建；
- * - 同一个 merchant_order_no 重复提交只会返回第一次的订单，所以查单查不到时用原单号补提交是安全的。
+ * - 同一个 merchant_order_no 重复提交只会返回第一次的订单，所以查单查不到时用原单号补提交是安全的；
+ * - 首次下单：code=0 按返回的状态处理；上游有返回、code 是别的一律判失败换下一家；网络异常、HTTP 出错、
+ *   返回无法解析（没有拿到返回值）按接口异常处理，订单立即转异常人工处理（2026-10-15 定）。
  */
 class OpenPlatformDriver implements SupplierDriverInterface, ProvidesUpstreamProducts
 {
@@ -184,6 +186,13 @@ class OpenPlatformDriver implements SupplierDriverInterface, ProvidesUpstreamPro
         $body = $this->decode($response['body']);
         if (! $trustRejection && ($body === null || (int) $body['code'] !== 0)) {
             return RechargeResult::processing($request->supplierOrderNo, '补提交未受理，等待人工核对：' . $this->describe($body, $response), $this->encode($params), $response['body']);
+        }
+        if ($body === null) {
+            // HTTP 出错、返回无法解析：没有拿到返回值，不知道建没建单，转异常人工处理
+            return RechargeResult::callFailed('下单没有拿到上游返回，转异常人工处理：' . $this->describe($body, $response), $this->encode($params), $response['body']);
+        }
+        if ((int) $body['code'] !== 0) {
+            return RechargeResult::failed('上游拒单：' . $this->describe($body, []), $request->supplierOrderNo, $this->encode($params), $response['body']);
         }
 
         return $this->toResult($body, $request->supplierOrderNo, $params, $response['body'], $response['status']);

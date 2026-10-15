@@ -109,11 +109,17 @@ class DayuanrenDriverTest extends HttpTestCase
         $this->assertSame(RechargeStatus::Failed, $result->status);
         $this->assertStringContainsString('[1] 产品不存在', $result->message);
 
-        // HTTP 非 200、返回无法解析：不知道建没建单，处理中
+        // HTTP 非 200 但带着可解析的错误：有返回值，失败
         $this->respond(['errno' => '1', 'errmsg' => 'x'], 500);
-        $this->assertSame(RechargeStatus::Processing, $this->driver()->recharge($this->request())->status);
+        $this->assertSame(RechargeStatus::Failed, $this->driver()->recharge($this->request())->status);
+
+        // 没有响应体、返回无法解析：没有拿到返回值，转异常人工处理
         $this->http->responses = [['status' => 200, 'body' => '']];
-        $this->assertSame(RechargeStatus::Processing, $this->driver()->recharge($this->request())->status);
+        $result = $this->driver()->recharge($this->request());
+        $this->assertTrue($result->callFailed);
+        $this->assertStringContainsString('没有拿到上游返回', $result->message);
+        $this->http->responses = [['status' => 502, 'body' => '<html>Bad Gateway</html>']];
+        $this->assertTrue($this->driver()->recharge($this->request())->callFailed);
     }
 
     public function testQueryMapsStates()

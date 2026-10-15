@@ -116,9 +116,11 @@ class ShangtengDriverTest extends HttpTestCase
         $this->respond(['status' => 500, 'msg' => '系统错误'], 500);
         $this->assertSame(RechargeStatus::Failed, $this->driver()->recharge($this->request())->status);
 
-        // 返回无法解析：不知道建没建单，处理中，等查单
+        // 返回无法解析：没有拿到返回值，转异常人工处理
         $this->http->responses = [['status' => 502, 'body' => '<html>Bad Gateway</html>']];
-        $this->assertSame(RechargeStatus::Processing, $this->driver()->recharge($this->request())->status);
+        $result = $this->driver()->recharge($this->request());
+        $this->assertTrue($result->callFailed);
+        $this->assertStringContainsString('没有拿到上游返回', $result->message);
     }
 
     public function testQueryMapsStatuses()

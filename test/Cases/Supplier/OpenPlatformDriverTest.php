@@ -109,11 +109,17 @@ class OpenPlatformDriverTest extends HttpTestCase
         $this->respond(['code' => 40005, 'message' => '签名错误', 'data' => null], 401);
         $this->assertSame(RechargeStatus::Failed, $this->driver()->recharge($this->request())->status);
 
-        // 拿不准有没有建单的：处理中，之后查单
+        // 上游有返回、code 不是 0（含系统繁忙）：失败
         $this->respond(['code' => 50000, 'message' => '系统繁忙', 'data' => null], 500);
-        $this->assertSame(RechargeStatus::Processing, $this->driver()->recharge($this->request())->status);
+        $result = $this->driver()->recharge($this->request());
+        $this->assertSame(RechargeStatus::Failed, $result->status);
+        $this->assertSame('上游拒单：[50000] 系统繁忙', $result->message);
+
+        // 没有拿到返回值：转异常人工处理
         $this->http->responses = [['status' => 502, 'body' => '<html>Bad Gateway</html>']];
-        $this->assertSame(RechargeStatus::Processing, $this->driver()->recharge($this->request())->status);
+        $result = $this->driver()->recharge($this->request());
+        $this->assertTrue($result->callFailed);
+        $this->assertStringContainsString('没有拿到上游返回', $result->message);
     }
 
     public function testQueryMapsStatusAndResubmitsWhenUpstreamHasNoOrder()

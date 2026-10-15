@@ -122,27 +122,24 @@ class PikoudaiDriverTest extends HttpTestCase
         $this->respond(['code' => 1004, 'message' => '']);
         $this->assertStringContainsString('[1004] 额度不足', $this->driver()->recharge($this->request())->message);
 
-        // 订单号重复、系统繁忙、文档外的错误码、HTTP 出错：不知道建没建单，处理中
-        $this->respond(['code' => 1003, 'message' => '订单号重复']);
-        $result = $this->driver()->recharge($this->request());
-        $this->assertSame(RechargeStatus::Processing, $result->status);
-        $this->assertStringContainsString('之前已提交过', $result->message);
-        $this->respond(['code' => 9999, 'message' => 'x']);
-        $result = $this->driver()->recharge($this->request());
-        $this->assertSame(RechargeStatus::Processing, $result->status);
-        $this->assertFalse($result->callFailed);
+        // 上游有返回、不是 1000：订单号重复、系统繁忙、文档外的错误码也都判失败
+        foreach (['1003', '1007', '9999'] as $code) {
+            $this->respond(['code' => (int) $code, 'message' => '']);
+            $result = $this->driver()->recharge($this->request());
+            $this->assertSame(RechargeStatus::Failed, $result->status, $code);
+            $this->assertFalse($result->callFailed, $code);
+            $this->assertStringContainsString("[{$code}]", $result->message);
+        }
+        $this->respond(['code' => 1007, 'message' => '']);
+        $this->assertStringContainsString('[1007] 系统繁忙', $this->driver()->recharge($this->request())->message);
 
-        // 系统繁忙：按接口异常处理，带上原始报文
-        $this->respond(['code' => 1007, 'message' => '系统繁忙']);
-        $result = $this->driver()->recharge($this->request());
-        $this->assertSame(RechargeStatus::Processing, $result->status);
-        $this->assertTrue($result->callFailed);
-        $this->assertStringContainsString('[1007] 系统繁忙', $result->message);
-        $this->assertStringContainsString('1007', $result->response);
-        $this->assertStringContainsString('A0001', $result->request);
-
+        // HTTP 出错、返回无法解析：没有拿到返回值，按接口异常处理，带上原始报文
         $this->http->responses = [['status' => 502, 'body' => 'Bad Gateway']];
-        $this->assertSame(RechargeStatus::Processing, $this->driver()->recharge($this->request())->status);
+        $result = $this->driver()->recharge($this->request());
+        $this->assertTrue($result->callFailed);
+        $this->assertStringContainsString('没有拿到上游返回', $result->message);
+        $this->assertStringContainsString('Bad Gateway', $result->response);
+        $this->assertStringContainsString('A0001', $result->request);
     }
 
     public function testQueryMapsStatuses()
@@ -239,11 +236,11 @@ class PikoudaiDriverTest extends HttpTestCase
         $this->assertSame('200.00', Merchant::find($merchant->id)->balance);
     }
 
-    public function testBusyMarksOrderAbnormal()
+    public function testNoReplyMarksOrderAbnormal()
     {
         [$merchant, $product, $mobile] = $this->scenario();
 
-        $this->respond(['code' => 1007, 'message' => '系统繁忙']);
+        $this->http->responses = [['status' => 502, 'body' => 'Bad Gateway']];
         $order = $this->placeOrder($merchant, $product, $mobile);
         $this->process()->submit($order->id);
 
@@ -251,8 +248,8 @@ class PikoudaiDriverTest extends HttpTestCase
         $this->assertSame(Order::STATUS_ABNORMAL, $order->status);
         $this->assertTrue((bool) $order->manual_only);
         $attempt = OrderAttempt::where('order_id', $order->id)->first();
-        $this->assertStringContainsString('系统繁忙', $attempt->message);
-        $this->assertStringContainsString('1007', $attempt->response);
+        $this->assertStringContainsString('没有拿到上游返回', $attempt->message);
+        $this->assertStringContainsString('Bad Gateway', $attempt->response);
         $this->assertSame(1, OrderAttempt::where('order_id', $order->id)->count(), '不换下一家');
     }
 

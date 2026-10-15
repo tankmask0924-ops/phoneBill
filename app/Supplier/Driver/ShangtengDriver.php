@@ -32,7 +32,8 @@ use Throwable;
  * - external_orderno 传提交单号 attempt_no，product_id 传供应商商品编码；
  * - 签名：参数按名升序转 JSON（不转义斜杠和中文），sha1(秒级时间戳 + JSON + ApiKey)，放在 Sign / Timestamp / Userid 请求头；
  * - 回调不带签名，不能信：只取订单号，结果以主动查单为准；查单没拿到明确结果时回 fail 让上游重推；
- * - 下单返回 status 非 200 表示没建单（已和上游确认），直接失败；没拿到可解析的返回时不知道建没建单，按处理中等查单；
+ * - 下单返回 status 非 200 表示没建单（已和上游确认），直接失败；网络异常、HTTP 出错、返回无法解析（没有拿到返回值）
+ *   按接口异常处理，订单立即转异常人工处理（2026-10-15 定）；
  * - 文档没说查不到订单时返回什么，所以查单只认明确状态，其余一律处理中，到时转异常人工处理。
  */
 class ShangtengDriver implements SupplierDriverInterface, ProvidesUpstreamProducts
@@ -104,8 +105,8 @@ class ShangtengDriver implements SupplierDriverInterface, ProvidesUpstreamProduc
         ]);
         $body = $this->decode($response['body']);
         if ($body === null) {
-            // HTTP 5xx 页面、返回乱码：不知道建没建单，只能等查单确认
-            return RechargeResult::processing($request->supplierOrderNo, '下单返回无法解析，等待查单：' . $this->describe($body, $response), $sent, $response['body']);
+            // HTTP 5xx 页面、返回乱码：没有拿到返回值，不知道建没建单，转异常人工处理
+            return RechargeResult::callFailed('下单没有拿到上游返回，转异常人工处理：' . $this->describe($body, $response), $sent, $response['body']);
         }
         if ($body['status'] !== self::STATUS_OK) {
             return RechargeResult::failed('上游拒单：' . $this->describe($body, $response), $request->supplierOrderNo, $sent, $response['body']);

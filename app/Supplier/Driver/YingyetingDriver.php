@@ -27,8 +27,8 @@ use Psr\Http\Message\ServerRequestInterface;
  *   上游按它扣我们的预存款），notify_url 每单传；不传 province / city，按上游号段库识别；
  * - 鉴权在请求头 X-Api-Key / X-Timestamp / X-Sign；签名：业务参数加 timestamp，去掉空值，按名升序拼 k=v&...
  *   （不做 URL 编码），末尾拼 &key=密钥，md5 转大写；
- * - 下单 code=0 受理；文档列出的校验、鉴权、地区、额度类错误码没有建单，判失败换下一家；
- *   500、10000 和其他不确定的返回不知道建没建单，按接口异常处理，订单立即转异常人工处理；
+ * - 下单只有 code=0 算受理；上游有返回、code 是别的（含 500、10000、文档外的码）一律判失败换下一家；
+ *   网络异常、HTTP 出错、返回无法解析（没有拿到返回值）按接口异常处理，订单立即转异常人工处理（2026-10-15 定）；
  * - 查单只能按上游订单号查，下单时没拿到上游订单号的提交查不了（不能拿同一单号再下一次单来「查」，
  *   第一次没到上游的话就是真的下了一单）；
  * - 没有余额、商品列表接口。
@@ -39,7 +39,7 @@ class YingyetingDriver implements SupplierDriverInterface
 
     private const CODE_OK = '0';
 
-    /** 下单时上游明确拒单（没有建单）的错误码 */
+    /** 下单错误码的文档说明：上游没给描述时用；除了 0 都按失败处理 */
     private const REJECT_CODES = [
         '10001' => '参数错误',
         '10002' => '数据不存在',
@@ -93,12 +93,12 @@ class YingyetingDriver implements SupplierDriverInterface
             'notify_url' => $request->config['notify_url'] ?? '',
         ], static fn ($v) => $v !== ''), 10.0);
         $body = $this->decode($response['body']);
-        if ($body !== null && isset(self::REJECT_CODES[$body['code']])) {
-            return RechargeResult::failed('上游拒单：' . $this->describe($body, $response), $request->supplierOrderNo, $sent, $response['body']);
+        if ($body === null) {
+            // HTTP 出错、返回无法解析：没有拿到返回值，不知道建没建单，转异常人工处理
+            return RechargeResult::callFailed('下单没有拿到上游返回，转异常人工处理：' . $this->describe($body, $response), $sent, $response['body']);
         }
-        if ($body === null || $body['code'] !== self::CODE_OK) {
-            // 500、10000、表外错误码、HTTP 出错、返回无法解析：不知道建没建单，转异常人工处理
-            return RechargeResult::callFailed('上游返回不确定，转异常人工处理：' . $this->describe($body, $response), $sent, $response['body']);
+        if ($body['code'] !== self::CODE_OK) {
+            return RechargeResult::failed('上游拒单：' . $this->describe($body, $response), $request->supplierOrderNo, $sent, $response['body']);
         }
         $data = is_array($body['data'] ?? null) ? $body['data'] : [];
         $orderNo = $this->orderNo($data) ?? $request->supplierOrderNo;

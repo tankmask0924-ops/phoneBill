@@ -129,17 +129,21 @@ class YingyetingDriverTest extends HttpTestCase
         $this->respond(['code' => 40109, 'message' => '', 'data' => null]);
         $this->assertStringContainsString('[40109] 平台余额不足', $this->driver()->recharge($this->request())->message);
 
-        // 500、10000、表外错误码、返回无法解析：转异常，带上原始报文
+        // 上游有返回、不是 0：500、10000、表外错误码也都判失败
         foreach ([['code' => 500, 'message' => '服务器内部错误'], ['code' => 10000, 'message' => '操作失败'], ['code' => 12345, 'message' => 'x']] as $body) {
             $this->respond($body);
             $result = $this->driver()->recharge($this->request());
-            $this->assertSame(RechargeStatus::Processing, $result->status, json_encode($body));
-            $this->assertTrue($result->callFailed, json_encode($body));
-            $this->assertStringContainsString((string) $body['code'], $result->response);
-            $this->assertStringContainsString('A0001', $result->request);
+            $this->assertSame(RechargeStatus::Failed, $result->status, json_encode($body));
+            $this->assertFalse($result->callFailed, json_encode($body));
+            $this->assertStringContainsString("[{$body['code']}] {$body['message']}", $result->message);
         }
+
+        // HTTP 出错、返回无法解析：没有拿到返回值，转异常，带上原始报文
         $this->http->responses = [['status' => 502, 'body' => 'Bad Gateway']];
-        $this->assertTrue($this->driver()->recharge($this->request())->callFailed);
+        $result = $this->driver()->recharge($this->request());
+        $this->assertTrue($result->callFailed);
+        $this->assertStringContainsString('Bad Gateway', $result->response);
+        $this->assertStringContainsString('A0001', $result->request);
     }
 
     public function testQueryUsesUpstreamOrderNo()
@@ -224,11 +228,11 @@ class YingyetingDriverTest extends HttpTestCase
         $this->assertSame(Order::STATUS_FAILED, Order::find($second->id)->status);
     }
 
-    public function testUncertainReplyMarksOrderAbnormal()
+    public function testNoReplyMarksOrderAbnormal()
     {
         [$merchant, $product, $mobile] = $this->scenario();
 
-        $this->respond(['code' => 500, 'message' => '服务器内部错误', 'data' => null]);
+        $this->http->responses = [['status' => 502, 'body' => 'Bad Gateway']];
         $order = $this->placeOrder($merchant, $product, $mobile);
         $this->process()->submit($order->id);
 

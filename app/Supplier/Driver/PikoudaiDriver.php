@@ -26,8 +26,8 @@ use RuntimeException;
  *
  * - merchant_order_no 传提交单号 attempt_no，product_no 传供应商商品编码，equity_number 传手机号，num 固定 1；
  * - 全部接口 POST JSON；签名：除 sign 外参数按名 ASCII 升序拼 键值键值...（无分隔符，空值也参与），末尾拼密钥，md5 小写；
- * - 下单 code=1000 受理、1003 订单号重复（之前提交过）都是处理中；验签、IP、额度、参数、商户号、产品等校验类错误码
- *   是上游明确拒单，判失败换下一家；1007 系统繁忙按接口异常处理，订单立即转异常人工处理；文档外的错误码处理中等查单；
+ * - 下单只有 code=1000 算受理；上游有返回、code 是别的（含 1003 订单号重复、1007 系统繁忙、文档外的码）一律判失败换下一家；
+ *   网络异常、HTTP 出错、返回无法解析（没有拿到返回值）按接口异常处理，订单立即转异常人工处理（2026-10-15 定）；
  * - 查单 2001 查不到订单按失败处理（查单在提交几分钟后才开始，不会查到上游还没落库的单）；
  * - 响应里的 sign 怎么算（data 是嵌套对象）文档没说，不验。
  */
@@ -41,17 +41,13 @@ class PikoudaiDriver implements SupplierDriverInterface
 
     private const CODE_OK = '1000';
 
-    /** 订单号重复：之前已经提交过，绝不能当失败 */
-    private const CODE_DUPLICATE = '1003';
-
-    /** 系统繁忙：不知道建没建单，按接口异常处理，订单立即转异常人工处理 */
-    private const CODE_BUSY = '1007';
-
     /** 查单时查不到订单：上游没有这笔单 */
     private const CODE_NOT_FOUND = '2001';
 
-    /** 下单时上游明确拒单（校验没过，没有建单）的错误码 */
+    /** 下单错误码的文档说明：上游没给描述时用；除了 1000 都按失败处理 */
     private const REJECT_CODES = [
+        '1003' => '订单号重复',
+        '1007' => '系统繁忙',
         '1001' => '验签失败',
         '1002' => 'IP不正确',
         '1004' => '额度不足',
@@ -94,18 +90,12 @@ class PikoudaiDriver implements SupplierDriverInterface
             'notify_url' => $request->config['notify_url'] ?? '',
         ], 10.0);
         $body = $this->decode($response['body']);
-        if ($body !== null && isset(self::REJECT_CODES[$body['code']])) {
+        if ($body === null) {
+            // HTTP 出错、返回无法解析：没有拿到返回值，不知道建没建单，转异常人工处理
+            return RechargeResult::callFailed('下单没有拿到上游返回，转异常人工处理：' . $this->describe($body, $response), $sent, $response['body']);
+        }
+        if ($body['code'] !== self::CODE_OK) {
             return RechargeResult::failed('上游拒单：' . $this->describe($body, $response), $request->supplierOrderNo, $sent, $response['body']);
-        }
-        if ($body !== null && $body['code'] === self::CODE_DUPLICATE) {
-            return RechargeResult::processing($request->supplierOrderNo, '上游订单号已存在（之前已提交过），等待结果', $sent, $response['body']);
-        }
-        if ($body !== null && $body['code'] === self::CODE_BUSY) {
-            return RechargeResult::callFailed('上游系统繁忙，转异常人工处理：' . $this->describe($body, $response), $sent, $response['body']);
-        }
-        if ($body === null || $body['code'] !== self::CODE_OK) {
-            // 不知道建没建单，判失败可能导致退款后上游又充上，只能等查单确认
-            return RechargeResult::processing($request->supplierOrderNo, '下单未确认受理，等待查单：' . $this->describe($body, $response), $sent, $response['body']);
         }
 
         return RechargeResult::processing($this->orderNo($body['data'] ?? null) ?? $request->supplierOrderNo, null, $sent, $response['body']);
