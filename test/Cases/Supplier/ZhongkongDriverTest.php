@@ -108,15 +108,22 @@ class ZhongkongDriverTest extends HttpTestCase
         $this->assertSame(RechargeStatus::Processing, $result->status);
         $this->assertStringContainsString('已存在', $result->message);
 
-        // code=500 不知道建没建单、数字 code、返回无法解析：都是处理中，等查单
-        $this->respond(['code' => '500', 'msg' => '产品已下架']);
+        // 上游明确返回错误（code=500 等）：没进单，判失败换下一家
+        $this->respond(['msg' => '商品河北电信10元，江苏，不能进单', 'code' => 500]);
         $result = $this->driver()->recharge($this->request());
-        $this->assertSame(RechargeStatus::Processing, $result->status);
-        $this->assertStringContainsString('[500] 产品已下架', $result->message);
+        $this->assertSame(RechargeStatus::Failed, $result->status);
+        $this->assertFalse($result->callFailed);
+        $this->assertStringContainsString('[500] 商品河北电信10元，江苏，不能进单', $result->message);
+        $this->respond(['code' => '9', 'msg' => '其他错误']);
+        $this->assertSame(RechargeStatus::Failed, $this->driver()->recharge($this->request())->status);
+
+        // 数字 code 0 也算受理；HTTP 出错、返回无法解析：不知道建没建单，处理中等查单
         $this->respond(['code' => 0, 'msg' => 'success']);
         $this->assertNull($this->driver()->recharge($this->request())->message);
         $this->http->responses = [['status' => 502, 'body' => '<html>Bad Gateway</html>']];
-        $this->assertSame(RechargeStatus::Processing, $this->driver()->recharge($this->request())->status);
+        $result = $this->driver()->recharge($this->request());
+        $this->assertSame(RechargeStatus::Processing, $result->status);
+        $this->assertStringContainsString('下单未确认受理', $result->message);
     }
 
     public function testQueryMapsStatuses()

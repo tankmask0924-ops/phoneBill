@@ -31,8 +31,8 @@ use RuntimeException;
  * - 接口路径文档里没写，中控另行提供：下单 /app/agent/order、查单 /app/agent/checkOrder、余额 /app/agent/checkAgent、
  *   可售商品 /app/agent/checkAgentProducts；
  * - 文档里时间戳格式前后矛盾，做成可选项；
- * - 文档没说清下单 code=500 时是否建了单、查不到订单时返回什么，所以下单只有 code 为 0 / 1 才算受理，
- *   其余一律处理中，结果只认查单和验签通过的回调。
+ * - 下单 code 为 0 / 1 算受理；上游明确返回了其他 code（如 500「商品河北电信10元，江苏，不能进单」）就是拒单，
+ *   判失败换下一家；HTTP 出错、返回无法解析时不知道建没建单，处理中等查单。结果只认查单和验签通过的回调。
  */
 class ZhongkongDriver implements SupplierDriverInterface, ProvidesUpstreamProducts
 {
@@ -106,7 +106,12 @@ class ZhongkongDriver implements SupplierDriverInterface, ProvidesUpstreamProduc
             return RechargeResult::processing($request->supplierOrderNo, '上游订单号已存在（之前已提交过），等待结果', $sent, $response['body']);
         }
 
-        // 包括 code=500：文档没说失败时一定没建单，判失败可能导致退款后上游又充上，只能等查单确认
+        if ($body !== null) {
+            // 上游明确返回了错误（文档：500 提交失败，原因见 msg），没进单，换下一家
+            return RechargeResult::failed('上游拒单：' . $this->describe($body, $response), $request->supplierOrderNo, $sent, $response['body']);
+        }
+
+        // HTTP 出错、返回无法解析：不知道建没建单，只能等查单确认
         return RechargeResult::processing($request->supplierOrderNo, '下单未确认受理，等待查单：' . $this->describe($body, $response), $sent, $response['body']);
     }
 
