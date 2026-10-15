@@ -28,7 +28,7 @@ use RuntimeException;
  * - 全部接口 POST JSON；签名：除 sign 外参数按名 ASCII 升序拼 键值键值...（无分隔符，空值也参与），末尾拼密钥，md5 小写；
  * - 下单只有 code=1000 算受理；上游有返回、code 是别的（含 1003 订单号重复、1007 系统繁忙、文档外的码）一律判失败换下一家；
  *   网络异常、HTTP 出错、返回无法解析（没有拿到返回值）按接口异常处理，订单立即转异常人工处理（2026-10-15 定）；
- * - 查单 2001 查不到订单按失败处理（查单在提交几分钟后才开始，不会查到上游还没落库的单）；
+ * - 查单 2001 查不到订单只记录，订单状态不动（下单受理了就以下单为准，2026-10-15 定）；
  * - 响应里的 sign 怎么算（data 是嵌套对象）文档没说，不验。
  */
 class PikoudaiDriver implements SupplierDriverInterface
@@ -41,7 +41,7 @@ class PikoudaiDriver implements SupplierDriverInterface
 
     private const CODE_OK = '1000';
 
-    /** 查单时查不到订单：上游没有这笔单 */
+    /** 查单时查不到订单：只记录，订单状态不动 */
     private const CODE_NOT_FOUND = '2001';
 
     /** 下单错误码的文档说明：上游没给描述时用；除了 1000 都按失败处理 */
@@ -106,7 +106,7 @@ class PikoudaiDriver implements SupplierDriverInterface
         [$sent, $response] = $this->call($request->config, self::PATH_QUERY, ['merchant_order_no' => $request->attemptNo]);
         $body = $this->decode($response['body']);
         if ($body !== null && $body['code'] === self::CODE_NOT_FOUND) {
-            return RechargeResult::failed('上游查不到订单：' . $this->describe($body, $response), $request->supplierOrderNo, $sent, $response['body']);
+            return RechargeResult::processing($request->supplierOrderNo, '查单：上游查不到这笔订单，只记录：' . $this->describe($body, $response), $sent, $response['body']);
         }
         $data = $body !== null && $body['code'] === self::CODE_OK && is_array($body['data'] ?? null) ? $body['data'] : null;
         if ($data === null || ! is_string($data['orderStatus'] ?? null) || ! $this->sameOrder($data, $request->attemptNo)) {

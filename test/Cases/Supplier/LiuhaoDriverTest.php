@@ -142,10 +142,11 @@ class LiuhaoDriverTest extends HttpTestCase
         $this->respond(['ResultCode' => '0000', 'ResultMessage' => '号码已停机', 'OrderStatus' => '3000']);
         $this->assertSame('号码已停机', $this->driver()->query($this->request())->message);
 
-        // 订单不存在：失败
+        // 订单不存在：只记录，订单状态不动
         $this->respond(['ResultCode' => '2222', 'ResultMessage' => '订单不存在']);
         $result = $this->driver()->query($this->request());
-        $this->assertSame(RechargeStatus::Failed, $result->status);
+        $this->assertSame(RechargeStatus::Processing, $result->status);
+        $this->assertFalse($result->callFailed);
         $this->assertStringContainsString('[2222] 订单不存在', $result->message);
 
         // 调用验证失败、没有状态、无法解析：处理中

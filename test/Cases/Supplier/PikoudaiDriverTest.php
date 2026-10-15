@@ -156,10 +156,11 @@ class PikoudaiDriverTest extends HttpTestCase
         $this->assertSame(['merchant_order_no', 'merchant_no', 'sign'], array_keys($sent['payload']));
         $this->assertSame(PikoudaiDriver::sign($sent['payload'], 'pkd_secret'), $sent['payload']['sign']);
 
-        // 查不到订单：失败
+        // 查不到订单：只记录，订单状态不动
         $this->respond(['code' => 2001, 'message' => '查不到订单']);
         $result = $this->driver()->query($this->request());
-        $this->assertSame(RechargeStatus::Failed, $result->status);
+        $this->assertSame(RechargeStatus::Processing, $result->status);
+        $this->assertFalse($result->callFailed);
         $this->assertStringContainsString('[2001] 查不到订单', $result->message);
 
         // 出错、单号对不上、没有状态：处理中

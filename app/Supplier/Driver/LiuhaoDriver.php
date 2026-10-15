@@ -52,7 +52,7 @@ class LiuhaoDriver implements SupplierDriverInterface
         '9545' => '订单号重复',
     ];
 
-    /** 查单时订单不存在（文档：可处理失败） */
+    /** 查单时订单不存在：只记录，订单状态不动（下单受理了就以下单为准，2026-10-15 定） */
     private const CODE_NOT_FOUND = '2222';
 
     private const STATUS_SUCCESS = '2000';
@@ -189,7 +189,7 @@ class LiuhaoDriver implements SupplierDriverInterface
         ]);
         $body = $this->decode($response['body']);
         if ($body !== null && $body['ResultCode'] === self::CODE_NOT_FOUND) {
-            return RechargeResult::failed('上游订单不存在：' . $this->describe($body, $response), $supplierOrderNo, $sent, $response['body']);
+            return RechargeResult::processing($supplierOrderNo, '查单：上游订单不存在，只记录：' . $this->describe($body, $response), $sent, $response['body']);
         }
         $status = $body !== null && $body['ResultCode'] === self::CODE_OK && is_scalar($body['OrderStatus'] ?? null) ? (string) $body['OrderStatus'] : null;
 
