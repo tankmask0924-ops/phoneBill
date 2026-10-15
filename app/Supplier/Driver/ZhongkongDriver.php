@@ -32,7 +32,8 @@ use RuntimeException;
  *   可售商品 /app/agent/checkAgentProducts；
  * - 文档里时间戳格式前后矛盾，做成可选项；
  * - 下单 code 为 0 / 1 算受理；上游明确返回了其他 code（如 500「商品河北电信10元，江苏，不能进单」）就是拒单，
- *   判失败换下一家；HTTP 出错、返回无法解析时不知道建没建单，处理中等查单。结果只认查单和验签通过的回调。
+ *   判失败换下一家；网络异常、HTTP 出错、返回无法解析（没有拿到返回值）时不知道建没建单，按接口异常处理，
+ *   订单立即转异常人工处理。结果只认查单和验签通过的回调。
  */
 class ZhongkongDriver implements SupplierDriverInterface, ProvidesUpstreamProducts
 {
@@ -111,8 +112,8 @@ class ZhongkongDriver implements SupplierDriverInterface, ProvidesUpstreamProduc
             return RechargeResult::failed('上游拒单：' . $this->describe($body, $response), $request->supplierOrderNo, $sent, $response['body']);
         }
 
-        // HTTP 出错、返回无法解析：不知道建没建单，只能等查单确认
-        return RechargeResult::processing($request->supplierOrderNo, '下单未确认受理，等待查单：' . $this->describe($body, $response), $sent, $response['body']);
+        // HTTP 出错、返回无法解析：没有拿到返回值，不知道建没建单，转异常人工处理
+        return RechargeResult::callFailed('下单没有拿到上游返回，转异常人工处理：' . $this->describe($body, $response), $sent, $response['body']);
     }
 
     public function query(RechargeRequest $request): RechargeResult

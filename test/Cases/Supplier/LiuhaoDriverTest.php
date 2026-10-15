@@ -99,35 +99,29 @@ class LiuhaoDriverTest extends HttpTestCase
         // network、area 不参与签名
         $this->assertSame(md5('method=charge&user=test&custom_number=A0001&mobile=13800138000&product=100AAAAAA'), $sent['payload']['sign']);
 
-        // 文档列出的失败码：失败；BOM 也能解析
-        foreach (['9522', '9500', '9511', '9533', '9555'] as $code) {
+        // 除了 0000 一律失败（含订单号重复、其他原因、表外的码）；BOM 也能解析
+        foreach (['9522', '9500', '9511', '9533', '9555', '1111', '9545', '8888'] as $code) {
             $this->http->responses = [['status' => 200, 'body' => "\xEF\xBB\xBF" . json_encode(['ResultCode' => $code, 'ResultMessage' => '拒单' . $code], JSON_UNESCAPED_UNICODE)]];
             $result = $this->driver()->recharge($this->request());
             $this->assertSame(RechargeStatus::Failed, $result->status, $code);
+            $this->assertFalse($result->callFailed, $code);
             $this->assertStringContainsString("[{$code}] 拒单{$code}", $result->message);
         }
+        // 上游没给描述时用文档说明，带上原始报文
         $this->respond(['ResultCode' => '9555', 'ResultMessage' => '']);
         $this->assertStringContainsString('[9555] 余额不足', $this->driver()->recharge($this->request())->message);
-
-        // 其他原因：按接口异常处理，带上原始报文；describe 在上游没给描述时用文档说明
         $this->respond(['ResultCode' => '1111', 'ResultMessage' => '']);
         $result = $this->driver()->recharge($this->request());
-        $this->assertSame(RechargeStatus::Processing, $result->status);
-        $this->assertTrue($result->callFailed);
-        $this->assertStringContainsString('[1111]', $result->message);
+        $this->assertStringContainsString('[1111] 其他原因', $result->message);
         $this->assertStringContainsString('1111', $result->response);
         $this->assertStringContainsString('A0001', $result->request);
 
-        // 订单号重复、表外响应码、HTTP 出错：处理中
-        $this->respond(['ResultCode' => '9545', 'ResultMessage' => '订单号重复']);
-        $result = $this->driver()->recharge($this->request());
-        $this->assertSame(RechargeStatus::Processing, $result->status);
-        $this->assertFalse($result->callFailed);
-        $this->assertStringContainsString('之前已提交过', $result->message);
-        $this->respond(['ResultCode' => '8888', 'ResultMessage' => 'x']);
-        $this->assertSame(RechargeStatus::Processing, $this->driver()->recharge($this->request())->status);
+        // HTTP 出错、返回无法解析：没有拿到返回值，按接口异常处理（订单转异常人工处理）
         $this->http->responses = [['status' => 500, 'body' => 'Server Error']];
-        $this->assertSame(RechargeStatus::Processing, $this->driver()->recharge($this->request())->status);
+        $result = $this->driver()->recharge($this->request());
+        $this->assertTrue($result->callFailed);
+        $this->assertStringContainsString('没有拿到上游返回', $result->message);
+        $this->assertStringContainsString('Server Error', $result->response);
 
         // 不认识的运营商不传 network
         $this->respond(['ResultCode' => '0000', 'ResultMessage' => '受理成功']);
@@ -230,21 +224,23 @@ class LiuhaoDriverTest extends HttpTestCase
         $this->assertSame('200.00', Merchant::find($merchant->id)->balance);
     }
 
-    public function testOtherReasonMarksOrderAbnormal()
+    public function testOtherReasonFailsOver()
     {
         [$merchant, $product, $mobile] = $this->scenario();
+        $balance = Merchant::find($merchant->id)->balance;
 
+        // 1111 其他原因：按失败处理；只有这一家时订单失败并退款，不转异常
         $this->respond(['ResultCode' => '1111', 'ResultMessage' => '其他原因']);
         $order = $this->placeOrder($merchant, $product, $mobile);
         $this->process()->submit($order->id);
 
         $order = Order::find($order->id);
-        $this->assertSame(Order::STATUS_ABNORMAL, $order->status);
-        $this->assertTrue((bool) $order->manual_only);
+        $this->assertSame(Order::STATUS_FAILED, $order->status);
+        $this->assertFalse((bool) $order->manual_only);
+        $this->assertStringContainsString('[1111] 其他原因', $order->fail_reason);
         $attempt = OrderAttempt::where('order_id', $order->id)->first();
-        $this->assertStringContainsString('[1111] 其他原因', $attempt->message);
-        $this->assertStringContainsString('1111', $attempt->response);
-        $this->assertSame(1, OrderAttempt::where('order_id', $order->id)->count(), '不换下一家');
+        $this->assertSame(OrderAttempt::STATUS_FAILED, $attempt->status);
+        $this->assertSame($balance, Merchant::find($merchant->id)->balance, '退款');
     }
 
     /**

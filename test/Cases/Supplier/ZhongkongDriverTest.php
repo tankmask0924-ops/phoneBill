@@ -117,13 +117,14 @@ class ZhongkongDriverTest extends HttpTestCase
         $this->respond(['code' => '9', 'msg' => '其他错误']);
         $this->assertSame(RechargeStatus::Failed, $this->driver()->recharge($this->request())->status);
 
-        // 数字 code 0 也算受理；HTTP 出错、返回无法解析：不知道建没建单，处理中等查单
+        // 数字 code 0 也算受理
         $this->respond(['code' => 0, 'msg' => 'success']);
         $this->assertNull($this->driver()->recharge($this->request())->message);
+        // HTTP 出错、返回无法解析：没有拿到返回值，按接口异常处理（订单转异常人工处理）
         $this->http->responses = [['status' => 502, 'body' => '<html>Bad Gateway</html>']];
         $result = $this->driver()->recharge($this->request());
-        $this->assertSame(RechargeStatus::Processing, $result->status);
-        $this->assertStringContainsString('下单未确认受理', $result->message);
+        $this->assertTrue($result->callFailed);
+        $this->assertStringContainsString('没有拿到上游返回', $result->message);
     }
 
     public function testQueryMapsStatuses()
