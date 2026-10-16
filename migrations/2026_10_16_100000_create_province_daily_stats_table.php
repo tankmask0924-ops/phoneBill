@@ -33,7 +33,7 @@ return new class extends Migration {
             $table->decimal('profit', 14, 2)->default(0)->comment('成功订单利润合计');
             $table->dateTime('computed_at');
 
-            $table->unique(['stat_date', 'province', 'operator', 'supplier_id']);
+            $table->unique(['stat_date', 'province', 'operator', 'supplier_id'], 'province_daily_stats_day_unique');
         });
     }
 
