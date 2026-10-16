@@ -382,6 +382,7 @@ app/Supplier/
     ├── LiuhaoDriver.php          # 刘浩话费 API（docs/充值API.md）
     ├── YingyetingDriver.php      # 营业厅话费 API（docs/营业厅.md）
     ├── ChongyidaDriver.php       # 充易达话费 API（docs/充易达.md）
+    ├── XuanjieDriver.php         # 炫捷话费 API（docs/炫捷.md）
     └── XxxDriver.php             # 每家供应商一个
 ```
 
@@ -498,6 +499,15 @@ app/Supplier/
 - 签名：每次带 `userNo` 和毫秒 `timestamp`，去掉 `sign` 和空值按名 ASCII 升序拼 `k=v&...`（不做 URL 编码），末尾拼 `&secretKey=`，md5 转大写；空值参数不传。
 - 结果判定：下单只有 `code=0` 算受理；其他 code（含 `3001` 订单号重复、表外的码）判失败换下一家；没拿到返回（网络异常、HTTP 出错、返回无法解析）立即转异常并标为人工处理单（见 2.5）。查单 `orderStatus` `SUCCESS` 成功、`FAILED` 失败、其他处理中；`2003` 未查询到数据只记录、订单状态不动。
 - 上游商品列表：`carrier` 1 移动、**2 联通、3 电信**；带面值和售价；没有上下架字段，全部按在售。
+
+### 7.9 炫捷（驱动 `xuanjie`）
+
+上游文档 `docs/炫捷.md`（最后是对接方式和结果判定表）：下单、查单、余额、回调，全部表单 POST、返回 JSON（每次带 `szFormat=json`）。只接话费。
+
+- 接口参数：接口地址（`http://IP:端口`，路径 `/plat/api/old/...` 写在驱动里）、客户ID（`szAgentId`）、密钥（`szKey`）；回调地址自动生成，每单随下单传 `szNotifyUrl`（见 4.2）。
+- 字段对应：`szOrderId` = 提交单号 `attempt_no`，`szPhoneNum` = 手机号，`nMoney` = 整数面值，`nSortType` 1 移动、2 联通、3 电信（其他运营商不提交，直接失败换下一家），`nProductClass` / `nProductType` 固定 `1`，常规话费不传 `szProductId`（供应商商品编码不发给上游）。上游没有自己的订单号，供应商订单号留空。
+- 签名：按文档给的固定顺序拼 `k=v&...`，末尾拼 `&szKey=`，md5 小写；`szTimeStamp` 用北京时间 `yyyy-MM-dd HH:mm:ss`（晚于上游 1 分钟算过期）。回调按 `szAgentId`、`szOrderId`、`szPhoneNum`、`nDemo`、`fSalePrice`、`nFlag` 验签（`szRtnMsg` 不参与）并核对 `szAgentId`，通过回 `ok`。
+- 结果判定（严格按上游文档 2.2）：下单 `0` 受理；`1000`、`1001`、`1003`、`1004`、`1006`、`2001`～`2003`、`2020`、`2021`、`2030` 判失败换下一家；`3003` 订单号重复处理中，等回调 / 查单；表外的码上游写明「未确认（人工核实）」不能判失败，和没拿到返回（网络异常、HTTP 出错、返回无法解析）一样立即转异常并标为人工处理单（见 2.5）。查单 `5012` 成功、`5013` 失败、`5011` 处理中；`5005` 订单不存在只记录、订单状态不动；`5002` 查询频繁、`5003`、`5004` 和表外的码不处理订单。回调 `nFlag` 2 成功、3 失败、其他不处理订单。
 
 ## 8. 权限
 
