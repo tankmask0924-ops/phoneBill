@@ -103,9 +103,6 @@ onMounted(async () => {
           <span v-else>{{ formatDuration(row.avg_duration) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="订单数" width="90" align="right">
-        <template #default="{ row }">{{ row.order_count }}</template>
-      </el-table-column>
     </el-table>
   </el-card>
 </template>
