@@ -381,6 +381,7 @@ app/Supplier/
     ├── PikoudaiDriver.php        # 皮口袋话费 API（docs/话费接口.md）
     ├── LiuhaoDriver.php          # 刘浩话费 API（docs/充值API.md）
     ├── YingyetingDriver.php      # 营业厅话费 API（docs/营业厅.md）
+    ├── ChongyidaDriver.php       # 充易达话费 API（docs/充易达.md）
     └── XxxDriver.php             # 每家供应商一个
 ```
 
@@ -395,7 +396,7 @@ app/Supplier/
 - 供应商回调地址：`/notify/supplier/{supplier_code}`。
 - 请求和响应完整记到 `order_attempts`，同时写日志渠道 `supplier`。
 - 接入新供应商：写驱动类 → 注册驱动编码 → 后台新增供应商时选驱动、填参数。
-- 供应商提供了商品查询接口时，驱动再实现 `ProvidesUpstreamProducts`：后台建 / 编辑供应商商品时可以从上游商品列表里选，自动填写编码、名称、成本价，上游给了的话还有面值和运营商；下架的不能选，本供应商下已建过的标「已添加」。实时查上游，不缓存，出错时仍可手动填编码。已实现：`open_platform`、`shangteng`（逐页取完）、`zhongkong`、`dayuanren`、`mock`。
+- 供应商提供了商品查询接口时，驱动再实现 `ProvidesUpstreamProducts`：后台建 / 编辑供应商商品时可以从上游商品列表里选，自动填写编码、名称、成本价，上游给了的话还有面值和运营商；下架的不能选，本供应商下已建过的标「已添加」。实时查上游，不缓存，出错时仍可手动填编码。已实现：`open_platform`、`shangteng`（逐页取完）、`zhongkong`、`dayuanren`、`chongyida`、`mock`。
 
 ### 7.1 开放平台（驱动 `open_platform`）
 
@@ -487,6 +488,16 @@ app/Supplier/
 - 签名放在请求头 `X-Api-Key` / `X-Timestamp` / `X-Sign`：业务参数加 `timestamp`，去掉空值，按名升序拼 `k=v&...`（不做 URL 编码），末尾拼 `&key=密钥`，md5 转大写。下单用表单提交。回调按全部字段验签（JSON 数字按报文原样），通过回 `success`。
 - 结果判定：下单 `code=0` 按 `data.status` 判断；其他 code（含 `500`、`10000` 和表外的码）判失败换下一家；没拿到返回（网络异常、HTTP 出错、返回无法解析）立即转异常并标为人工处理单（见 2.5）（2026-10-15 定：上游有返回、不是成功码就判失败；没拿到返回就转异常）。查单 / 回调 `status` 3 成功，5 已拒绝、6 已退单失败，7 已冲正按成功后撤销处理（订单不自动改，人工冲正），其他处理中；查单 `40100` 处理中。
 - 价格和上游配置的结算价对不上时上游拒单，按拒单错误码判失败换下一家。上游已确认压单不超过 2 小时，不会先在我们这边转异常。
+
+### 7.8 充易达（驱动 `chongyida`）
+
+上游文档 `docs/充易达.md`（最后是对接方式、结果判定表和待确认事项）：账户信息（余额）、商品列表、下单、查单，全部 POST JSON。只接话费，**暂不接异步回调**，结果靠查单。
+
+- 接口参数：接口域名（路径 `/open/v1/...` 写在驱动里）、用户编号（`userNo`）、密钥（`secretKey`）；回调地址自动生成，因为 `notifyUrl` 必填照常每单传，但回调一律回 `fail` 不采用。
+- 字段对应：`clientOrderNo` = 提交单号 `attempt_no`，`productId` = 供应商商品编码，`phone` = 手机号。上游 `orderNo` 存为供应商订单号。
+- 签名：每次带 `userNo` 和毫秒 `timestamp`，去掉 `sign` 和空值按名 ASCII 升序拼 `k=v&...`（不做 URL 编码），末尾拼 `&secretKey=`，md5 转大写；空值参数不传。
+- 结果判定：下单只有 `code=0` 算受理；其他 code（含 `3001` 订单号重复、表外的码）判失败换下一家；没拿到返回（网络异常、HTTP 出错、返回无法解析）立即转异常并标为人工处理单（见 2.5）。查单 `orderStatus` `SUCCESS` 成功、`FAILED` 失败、其他处理中；`2003` 未查询到数据只记录、订单状态不动。
+- 上游商品列表：`carrier` 1 移动、**2 联通、3 电信**；带面值和售价；没有上下架字段，全部按在售。
 
 ## 8. 权限
 
