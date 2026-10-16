@@ -143,22 +143,15 @@ class XuanjieDriverTest extends HttpTestCase
 
     public function testRechargeMapsDocumentCodes()
     {
-        // 文档 2.2 明确下单失败的码：失败换下一家
-        foreach (['1000', '1001', '1003', '1004', '2001', '2002', '2003', '2020', '2021', '1006', '2030'] as $code) {
+        // 文档 2.2 明确下单失败的码，加上 3003 订单号重复：失败换下一家
+        foreach (['1000', '1001', '1003', '1004', '2001', '2002', '2003', '2020', '2021', '1006', '2030', '3003'] as $code) {
             $this->respond(['nRtn' => (int) $code, 'szOrderId' => 'A0001', 'szRtnCode' => '']);
             $result = $this->driver()->recharge($this->request());
             $this->assertSame(RechargeStatus::Failed, $result->status, "nRtn {$code}");
             $this->assertFalse($result->callFailed, "nRtn {$code}");
             $this->assertStringContainsString("[{$code}]", $result->message);
         }
-        $this->assertStringContainsString('产品没有配置或关闭', $result->message);
-
-        // 3003 订单号重复：等待回调或查单
-        $this->respond(['nRtn' => 3003, 'szOrderId' => 'A0001', 'szRtnCode' => '订单号重复']);
-        $result = $this->driver()->recharge($this->request());
-        $this->assertSame(RechargeStatus::Processing, $result->status);
-        $this->assertFalse($result->callFailed);
-        $this->assertStringContainsString('等待回调或查单', $result->message);
+        $this->assertStringContainsString('[3003] 订单号重复', $result->message);
 
         // 表外的码：未确认，不能判失败，转异常人工处理
         foreach (['1', '999', '5011'] as $code) {

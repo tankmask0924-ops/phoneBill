@@ -30,9 +30,10 @@ use RuntimeException;
  *   nProductClass / nProductType 固定 1，常规话费不传 szProductId；上游没有自己的订单号；
  * - 全部接口表单 POST，带 szFormat=json；签名：按文档给的固定顺序拼 k=v&...，末尾拼 &szKey=，md5 小写；
  *   szTimeStamp 是北京时间 yyyy-MM-dd HH:mm:ss，晚于上游 1 分钟算过期；
- * - 下单按文档 2.2：0 受理；1000、1001、1003、1004、1006、2001～2003、2020、2021、2030 上游明确下单失败，换下一家；
- *   3003 订单号重复是「等待回调或者查询结果」，按处理中；表外的码文档写的是「未确认（人工核实）」，不能判失败，
- *   和网络异常、HTTP 出错、返回无法解析（没有拿到返回值）一样按接口异常处理，订单立即转异常人工处理；
+ * - 下单：0 受理；1000、1001、1003、1004、1006、2001～2003、2020、2021、2030 上游明确下单失败，换下一家；
+ *   3003 订单号重复按回复规则判失败换下一家（文档写的是等待结果，2026-10-16 定按失败处理）；表外的码文档写的是
+ *   「未确认（人工核实）」，不能判失败，和网络异常、HTTP 出错、返回无法解析（没有拿到返回值）一样按接口异常处理，
+ *   订单立即转异常人工处理；
  * - 查单 5012 成功、5013 失败、5011 处理中；5005 订单不存在只记录，订单状态不动（下单受理了就以下单为准）；
  *   5002 查询频繁、5003 / 5004、表外的码都不处理订单，按处理中；
  * - 回调按文档字段验签（szRtnMsg 不参与）并核对 szAgentId，nFlag 2 成功、3 失败、其他不处理订单，验签通过回 ok。
@@ -47,10 +48,7 @@ class XuanjieDriver implements SupplierDriverInterface
 
     private const CODE_OK = '0';
 
-    /** 下单订单号重复：之前已经提交过，等待回调或查单结果 */
-    private const CODE_DUPLICATE = '3003';
-
-    /** 下单时上游明确下单失败（没有建单）的码 */
+    /** 下单判失败、换下一家的码：文档 2.2 的下单失败码，加上 3003 订单号重复（2026-10-16 定按失败处理） */
     private const REJECT_CODES = [
         '1000' => '系统接口维护',
         '1001' => '时间格式错误或非表单请求',
@@ -63,6 +61,7 @@ class XuanjieDriver implements SupplierDriverInterface
         '2021' => '用户不存在',
         '1006' => '余额不足',
         '2030' => '产品没有配置或关闭',
+        '3003' => '订单号重复',
     ];
 
     private const QUERY_PROCESSING = '5011';
@@ -138,9 +137,6 @@ class XuanjieDriver implements SupplierDriverInterface
         }
         if (isset(self::REJECT_CODES[$body['nRtn']])) {
             return RechargeResult::failed('上游拒单：' . $this->describe($body, $response), $request->supplierOrderNo, $sent, $response['body']);
-        }
-        if ($body['nRtn'] === self::CODE_DUPLICATE) {
-            return RechargeResult::processing($request->supplierOrderNo, '上游订单号重复（之前已提交过），等待回调或查单：' . $this->describe($body, $response), $sent, $response['body']);
         }
         if ($body['nRtn'] !== self::CODE_OK) {
             // 文档：其他返回是「未确认（人工核实）」，不能判失败
