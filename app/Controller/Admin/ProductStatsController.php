@@ -23,7 +23,7 @@ use Hyperf\HttpServer\Annotation\GetMapping;
 use Hyperf\HttpServer\Annotation\Middleware;
 
 /**
- * 商品中心 - 商品统计（每日成功率、耗时），只读。
+ * 商品中心 - 商品统计（每日成功率、耗时；按省份、供应商的订单统计），只读。
  */
 #[Controller(prefix: '/admin/product-stats')]
 class ProductStatsController extends AbstractController
@@ -38,5 +38,15 @@ class ProductStatsController extends AbstractController
     public function index(): array
     {
         return $this->statsAdminService->list($this->request->all());
+    }
+
+    #[Middleware(AdminAuthMiddleware::class)]
+    #[Middleware(AdminPermissionMiddleware::class)]
+    // 有成功金额和利润，跟订单列表、首页汇总一样要 order.view
+    #[RequiresPermission('order.view')]
+    #[GetMapping(path: 'provinces')]
+    public function provinces(): array
+    {
+        return $this->statsAdminService->provinces($this->request->all());
     }
 }

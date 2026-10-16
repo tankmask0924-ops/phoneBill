@@ -50,6 +50,40 @@ class OrderDao extends AbstractDao
     }
 
     /**
+     * 一段时间内下单的订单，按「省份 + 运营商 + 最终供应商」汇总：成功的取成交供应商，其余取最后一次提交的，没提交过记 0。
+     *
+     * @return list<array{province: string, operator: string, supplier_id: int, order_count: int, success_count: int, failed_count: int, success_amount: string, profit: string}>
+     */
+    public function provinceSupplierTotals(string $from, string $to): array
+    {
+        $rows = $this->newQuery()
+            ->whereBetween('created_at', [$from, $to])
+            ->selectRaw(
+                "province, operator,
+                coalesce(supplier_id, (select a.supplier_id from order_attempts a where a.order_id = orders.id order by a.id desc limit 1), 0) as final_supplier_id,
+                count(*) as order_count,
+                coalesce(sum(status = 'success'), 0) as success_count,
+                coalesce(sum(status = 'failed'), 0) as failed_count,
+                coalesce(sum(case when status = 'success' then sale_price end), 0) as success_amount,
+                coalesce(sum(case when status = 'success' then profit end), 0) as profit"
+            )
+            ->groupBy('province', 'operator', 'final_supplier_id')
+            ->toBase()
+            ->get();
+
+        return $rows->map(static fn ($row) => [
+            'province' => (string) $row->province,
+            'operator' => (string) $row->operator,
+            'supplier_id' => (int) $row->final_supplier_id,
+            'order_count' => (int) $row->order_count,
+            'success_count' => (int) $row->success_count,
+            'failed_count' => (int) $row->failed_count,
+            'success_amount' => bcadd((string) $row->success_amount, '0', 2),
+            'profit' => bcadd((string) $row->profit, '0', 2),
+        ])->values()->all();
+    }
+
+    /**
      * 这个平台商品还有没有没出结果的订单（等待中、充值中、异常），删除商品前检查。
      */
     public function hasUnfinishedForProduct(int $productId): bool

@@ -234,6 +234,43 @@ export const productStatsApi = {
     http.get<Paged<ProductStat> & { summary: StatSummary & { unfinished_count: number } }>('/admin/product-stats', params),
 }
 
+/** 省份统计：GET /admin/product-stats/provinces，每小时整点重算当天 */
+export interface ProvinceStatTotals {
+  order_count: number
+  success_count: number
+  failed_count: number
+  /** 统计时还没出结果的（待提交、处理中、异常） */
+  unfinished_count: number
+  /** 成功 / (成功 + 失败) 的百分比，两位小数；没有出结果的单时为 null */
+  success_rate: string | null
+  /** 成功订单售价合计 */
+  success_amount: string
+  profit: string
+}
+
+export interface ProvinceSupplierStat extends ProvinceStatTotals {
+  /** 0 = 没提交过供应商 */
+  supplier_id: number
+  supplier_name: string | null
+}
+
+export interface ProvinceStat extends ProvinceStatTotals {
+  province: string
+  suppliers: ProvinceSupplierStat[]
+}
+
+export interface ProvinceStatsResult {
+  stat_date: string
+  /** 这一天最近一次统计的时间，还没统计过为 null */
+  computed_at: string | null
+  summary: ProvinceStatTotals
+  provinces: ProvinceStat[]
+}
+
+export const provinceStatsApi = {
+  get: (params: Query) => http.get<ProvinceStatsResult>('/admin/product-stats/provinces', params),
+}
+
 /** 号段查询：App\Controller\Admin\SegmentController */
 export interface RouteCandidate {
   supplier_product_id: number

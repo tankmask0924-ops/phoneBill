@@ -70,6 +70,13 @@ docker exec pb php bin/hyperf.php segment:import docs/recharge_phone_prefix_info
 docker exec pb php bin/hyperf.php stats:product-daily 2026-10-05 --days=7   # 2026-09-29 到 2026-10-05，覆盖原结果
 ```
 
+省份统计（按省份、运营商、最终供应商的成功率、成功金额、利润）每小时整点重算当天，0～3 点顺带重算前一天；手动重算：
+
+```bash
+docker exec pb php bin/hyperf.php stats:province-daily                        # 默认今天
+docker exec pb php bin/hyperf.php stats:province-daily 2026-10-05 --days=7    # 覆盖原结果
+```
+
 新增 `#[RequiresPermission('xxx.yyy')]` 后，把编码加进 `App\Service\Admin\AdminBootstrapService::KNOWN_PERMISSIONS`，
 部署后执行 `docker exec pb php bin/hyperf.php admin:sync-permissions`，超级管理员才能拿到新权限。
 
@@ -139,7 +146,7 @@ npm run build        # 产物在 merchant-web/dist，部署在 /merchant/ 路径
 | POST/PUT | `/admin/merchants`、`/{id}`、`/{id}/status`、`/{id}/secret` | `merchant.manage` |
 | PUT | `/admin/merchants/{id}/products/{productId}` | `merchant.price` |
 | POST | `/admin/merchants/{id}/balance` | `merchant.balance` |
-| GET | `/admin/orders`、`/filter-options`、`/export`、`/{id}`；`/admin/dashboard`（首页汇总，含销售额和利润） | `order.view` |
+| GET | `/admin/orders`、`/filter-options`、`/export`、`/{id}`；`/admin/dashboard`（首页汇总，含销售额和利润）；`/admin/product-stats/provinces`（省份统计，含成功金额和利润） | `order.view` |
 | GET/POST | `/admin/orders/{id}/query`、`/{id}/success`、`/{id}/fail`、`/{id}/notify`（手动回调，选成功 / 失败，订单按选的结果改；成功改失败还要 `order.reverse`）、`/batch-notify`（批量手动回调）、`/{id}/resupply-options`、`/{id}/resupply`（手动补单） | `order.manage` |
 | POST | `/admin/orders/{id}/reverse` | `order.reverse` |
 | GET/POST | `/open/v1/recharge`、`/order`、`/balance`、`/products` | 商户签名，见 [docs/api.md](docs/api.md) |
