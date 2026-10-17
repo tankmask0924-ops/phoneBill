@@ -51,7 +51,7 @@ class YingyetingDriverTest extends HttpTestCase
 
     private const CONFIG = [
         'api_url' => 'https://yyt.test/',
-        'api_key' => 'ak_7f3c9b21e8d5460a',
+        'api_key' => 'test-api-key',
         'secret' => 'abcdef1234567890',
         'notify_url' => 'https://pb.test/notify/supplier/yyt',
     ];
@@ -101,7 +101,7 @@ class YingyetingDriverTest extends HttpTestCase
         parse_str($sent['payload']['body'], $form);
         $this->assertSame(['upstream_order_no' => 'A0001', 'phone' => '13800138000', 'face_value' => '100', 'price' => '98.80', 'notify_url' => self::CONFIG['notify_url']], $form);
         $headers = $sent['payload']['headers'];
-        $this->assertSame('ak_7f3c9b21e8d5460a', $headers['X-Api-Key']);
+        $this->assertSame('test-api-key', $headers['X-Api-Key']);
         $this->assertSame('application/x-www-form-urlencoded', $headers['Content-Type']);
         $this->assertSame(YingyetingDriver::sign($form + ['timestamp' => $headers['X-Timestamp']], 'abcdef1234567890'), $headers['X-Sign']);
 
