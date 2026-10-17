@@ -476,7 +476,7 @@ onMounted(async () => {
     />
   </el-card>
 
-  <el-drawer v-model="detailVisible" title="订单详情" size="920px">
+  <el-drawer v-model="detailVisible" title="订单详情" size="min(1200px, 96vw)">
     <div v-loading="detailLoading || acting">
       <template v-if="detail">
         <div class="actions">
@@ -534,7 +534,6 @@ onMounted(async () => {
               </div>
             </template>
           </el-table-column>
-          <el-table-column prop="attempt_no" label="提交单号" width="200" />
           <el-table-column label="供应商 / 商品" min-width="160">
             <template #default="{ row }">{{ row.supplier_name }} · {{ row.supplier_product_name }}</template>
           </el-table-column>
@@ -549,6 +548,7 @@ onMounted(async () => {
           <el-table-column label="供应商耗时" width="100" align="right">
             <template #default="{ row }">{{ formatDuration(row.duration) }}</template>
           </el-table-column>
+          <el-table-column prop="attempt_no" label="提交单号" width="200" />
         </el-table>
 
         <h4>资金变动</h4>
