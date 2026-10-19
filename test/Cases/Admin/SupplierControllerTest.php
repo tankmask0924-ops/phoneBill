@@ -148,12 +148,18 @@ class SupplierControllerTest extends HttpTestCase
 
         $this->assertSame(['supported' => true, 'balance' => '99999.00', 'error' => null], $this->body($this->jsonRequest('GET', "/admin/suppliers/{$supplier->id}/balance", $token)));
 
-        // 上游出错、驱动没登记：不报 500，错误放在 error 里
+        // 30 秒内重复查用上次的结果，不再调上游
         $this->setMockResult($supplier, 'timeout');
+        $this->assertSame('99999.00', $this->body($this->jsonRequest('GET', "/admin/suppliers/{$supplier->id}/balance", $token))['balance']);
+
+        // 后台改了接口参数就清掉缓存；上游出错、驱动没登记：不报 500，错误放在 error 里
+        $manager = $this->loginAs($this->createAdminWithPermissions(['supplier.view', 'supplier.manage']));
+        $this->assertSame(200, $this->jsonRequest('PUT', "/admin/suppliers/{$supplier->id}", $manager, ['config' => ['result' => 'timeout']])->getStatusCode());
         $failed = $this->body($this->jsonRequest('GET', "/admin/suppliers/{$supplier->id}/balance", $token));
         $this->assertNull($failed['balance']);
         $this->assertStringContainsString('模拟超时', $failed['error']);
         $supplier->update(['driver' => 'no_such_driver']);
+        make(SupplierGateway::class)->forgetBalance($supplier->id);
         $this->assertNotNull($this->body($this->jsonRequest('GET', "/admin/suppliers/{$supplier->id}/balance", $token))['error']);
 
         $this->assertSame(404, $this->jsonRequest('GET', '/admin/suppliers/999999999/balance', $token)->getStatusCode());

@@ -240,7 +240,16 @@ class XuanjieDriverTest extends HttpTestCase
             'szVerifyString' => md5('szAgentId=200000&szKey=xj_key'),
         ], $sent['payload']);
 
-        foreach ([['nRtn' => 1], ['nRtn' => 5002], ['nRtn' => 999], ['nRtn' => 0]] as $body) {
+        // 5002：30 秒只能查一次
+        $this->respond(['nRtn' => 5002, 'szAgentId' => '200000', 'fBalance' => 0.0, 'szRtnCode' => 'frequent_Queries']);
+        try {
+            $this->driver()->balance(self::CONFIG);
+            $this->fail('查询频繁应抛异常');
+        } catch (RuntimeException $e) {
+            $this->assertSame('查询太频繁，30 秒后再刷新', $e->getMessage());
+        }
+
+        foreach ([['nRtn' => 1], ['nRtn' => 999], ['nRtn' => 0]] as $body) {
             $this->respond($body);
             try {
                 $this->driver()->balance(self::CONFIG);

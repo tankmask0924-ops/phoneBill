@@ -37,6 +37,7 @@ use RuntimeException;
  * - 查单 5012 成功、5013 失败、5011 处理中；5005 订单不存在只记录，订单状态不动（下单受理了就以下单为准）；
  *   5002 查询频繁、5003 / 5004、表外的码都不处理订单，按处理中；
  * - 回调按文档字段验签（szRtnMsg 不参与）并核对 szAgentId，nFlag 2 成功、3 失败、其他不处理订单，验签通过回 ok。
+ * - 查余额 30 秒只能查一次，频繁时返回 5002（SupplierGateway 已把余额结果缓存 30 秒）。
  */
 class XuanjieDriver implements SupplierDriverInterface
 {
@@ -47,6 +48,9 @@ class XuanjieDriver implements SupplierDriverInterface
     private const PATH_BALANCE = '/plat/api/old/queryBalance';
 
     private const CODE_OK = '0';
+
+    /** 查单、查余额太频繁（30 秒只能查一次） */
+    private const CODE_FREQUENT = '5002';
 
     /** 下单判失败、换下一家的码：文档 2.2 的下单失败码，加上 3003 订单号重复（2026-10-16 定按失败处理） */
     private const REJECT_CODES = [
@@ -202,6 +206,9 @@ class XuanjieDriver implements SupplierDriverInterface
     {
         [, $response] = $this->call($config, self::PATH_BALANCE, ['szAgentId' => $config['agent_id'] ?? '']);
         $body = $this->decode($response['body']);
+        if ($body !== null && $body['nRtn'] === self::CODE_FREQUENT) {
+            throw new RuntimeException('查询太频繁，30 秒后再刷新');
+        }
         if ($body === null || $body['nRtn'] !== self::CODE_OK || ! is_scalar($body['fBalance'] ?? null)) {
             throw new RuntimeException('查询余额失败：' . mb_substr($response['body'], 0, 200));
         }

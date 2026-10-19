@@ -27,6 +27,8 @@ use App\Supplier\RechargeResult;
 use App\Supplier\SupplierDriverInterface;
 use App\Supplier\SupplierDriverRegistry;
 use App\Supplier\UpstreamProduct;
+use Hyperf\Cache\Annotation\Cacheable;
+use Hyperf\Cache\Annotation\CacheEvict;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\Logger\LoggerFactory;
 use Psr\Http\Message\ServerRequestInterface;
@@ -89,9 +91,11 @@ class SupplierGateway extends AbstractService
 
     /**
      * 查我们在供应商那边的余额。驱动不支持返回 supported=false；查询出错不抛异常，放在 error 里。
+     * 结果（含出错）按供应商缓存 30 秒：有的上游限频（炫捷 30 秒只能查一次），列表反复打开时直接用上次的结果。
      *
      * @return array{supported: bool, balance: null|string, error: null|string}
      */
+    #[Cacheable(prefix: 'supplier_balance', value: '#{supplier.id}', ttl: 30)]
     public function balance(Supplier $supplier): array
     {
         try {
@@ -103,6 +107,14 @@ class SupplierGateway extends AbstractService
         $this->logger()->info('balance', ['supplier' => $supplier->code] + $result);
 
         return $result;
+    }
+
+    /**
+     * 改了供应商的驱动或接口参数后清掉余额缓存，下次按新参数重新查。
+     */
+    #[CacheEvict(prefix: 'supplier_balance', value: '#{supplierId}')]
+    public function forgetBalance(int $supplierId): void
+    {
     }
 
     /**

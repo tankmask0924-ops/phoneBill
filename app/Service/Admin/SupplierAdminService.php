@@ -214,8 +214,9 @@ class SupplierAdminService extends AbstractService
 
             return $after;
         });
-        // 驱动、参数可能变了，事务提交后清选路缓存
+        // 驱动、参数可能变了，事务提交后清选路缓存和余额缓存
         $this->routeService->flushConfig();
+        $this->supplierGateway->forgetBalance($supplier->id);
 
         return $result;
     }
