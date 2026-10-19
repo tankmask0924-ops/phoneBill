@@ -422,7 +422,7 @@ onMounted(async () => {
       <el-table-column prop="order_no" label="平台订单号" width="210" />
       <el-table-column prop="merchant_name" label="商户" min-width="110" />
       <el-table-column prop="merchant_order_no" label="商户订单号" min-width="150" />
-      <el-table-column label="号码" width="170">
+      <el-table-column label="号码" width="210">
         <template #default="{ row }">
           {{ row.mobile }}
           <span class="muted">{{ labelOf(operatorLabels, row.operator) }} {{ row.province }}</span>
