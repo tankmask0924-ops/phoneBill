@@ -8,16 +8,18 @@ import {
   type FundingRequest,
   type FundingRequestDetail,
   fundingApi,
+  type OnlinePayment,
   type PayerAccount,
   type PaymentAccountInfo,
+  type TransferCandidate,
 } from '@/api/funding'
-import { fundingStatusLabels, toOptions } from '@/utils/labels'
+import { fundingStatusLabels, onlinePaymentStatusLabels, toOptions } from '@/utils/labels'
 import { usePermissionStore } from '@/stores/permission'
 
 const permission = usePermissionStore()
 const canReview = computed(() => permission.can('funding.review'))
 
-const tab = ref<'requests' | 'payers'>('requests')
+const tab = ref<'requests' | 'online' | 'payers'>('requests')
 const merchants = ref<{ id: number; name: string }[]>([])
 
 function accountText(a: PaymentAccountInfo): string {
@@ -129,9 +131,70 @@ async function rejectPayer(row: PayerAccount) {
   await payers.load()
 }
 
+// ---- 在线支付（支付宝扫码转账） ----
+type OnlineFilters = { status: string; merchant_id: number | ''; keyword: string; dates: [string, string] | null }
+const online = usePagedList<OnlinePayment, OnlineFilters>(
+  (params) => {
+    // 待支付的、按单号查的不限日期
+    const { dates, ...rest } = params as Record<string, unknown> & { dates?: [string, string] }
+    return fundingApi.onlinePayments(dates && rest.status !== 'pending' && !rest.keyword ? { ...rest, created_from: dates[0], created_to: dates[1] } : rest)
+  },
+  { status: '', merchant_id: '', keyword: '', dates: recentDays() },
+  20,
+)
+
+const paymentVisible = ref(false)
+const payment = ref<OnlinePayment | null>(null)
+const candidates = ref<TransferCandidate[] | null>(null)
+const paymentBusy = ref(false)
+
+function openPayment(row: OnlinePayment) {
+  payment.value = row
+  candidates.value = null
+  paymentVisible.value = true
+}
+
+async function findCandidates() {
+  paymentBusy.value = true
+  try {
+    candidates.value = await fundingApi.onlinePaymentCandidates(payment.value!.id)
+  } finally {
+    paymentBusy.value = false
+  }
+}
+
+async function confirmPayment(candidate: TransferCandidate | null) {
+  const p = payment.value!
+  let remark = ''
+  try {
+    const text = candidate
+      ? `按流水 ${candidate.account_log_id}（${candidate.trans_at ?? '-'} 收到 ${candidate.amount} 元）给「${p.merchant_name}」入账 ${p.pay_amount} 元？`
+      : `没有选到账记录，确认已在支付宝核实收到「${p.merchant_name}」的 ${p.pay_amount} 元？入账后不能撤回。`
+    const result = await ElMessageBox.prompt(text, '确认入账', {
+      type: 'warning',
+      inputPlaceholder: candidate ? '备注（选填）' : '必填：在哪里核实的到账，如支付宝账单流水号',
+      inputValidator: (v) => !!candidate || (!!v && v.trim() !== '') || '请写明在哪里核实的到账',
+      confirmButtonText: '确认入账',
+    })
+    remark = result.value?.trim() ?? ''
+  } catch {
+    return
+  }
+  paymentBusy.value = true
+  try {
+    payment.value = await fundingApi.confirmOnlinePayment(p.id, { account_log_id: candidate?.account_log_id, remark })
+    candidates.value = null
+    ElMessage.success('已入账')
+    await online.load()
+  } finally {
+    paymentBusy.value = false
+  }
+}
+
 onMounted(async () => {
   await permission.load()
   requests.load()
+  online.load()
   payers.load()
   merchants.value = await fundingApi.merchantOptions()
 })
@@ -203,6 +266,77 @@ onMounted(async () => {
         />
       </el-tab-pane>
 
+      <el-tab-pane label="在线支付" name="online">
+        <el-form inline @submit.prevent="online.search">
+          <el-form-item>
+            <el-select v-model="online.filters.status" placeholder="全部状态" clearable style="width: 110px">
+              <el-option v-for="o in toOptions(onlinePaymentStatusLabels)" :key="o.value" v-bind="o" />
+            </el-select>
+          </el-form-item>
+          <el-form-item>
+            <el-select v-model="online.filters.merchant_id" placeholder="全部商户" clearable filterable style="width: 180px">
+              <el-option v-for="m in merchants" :key="m.id" :label="m.name" :value="m.id" />
+            </el-select>
+          </el-form-item>
+          <el-form-item>
+            <el-input v-model="online.filters.keyword" placeholder="支付单号" clearable style="width: 210px" />
+          </el-form-item>
+          <el-form-item>
+            <el-date-picker
+              v-model="online.filters.dates"
+              type="daterange"
+              value-format="YYYY-MM-DD"
+              start-placeholder="发起日期（待支付不限）"
+              end-placeholder="结束日期"
+              style="width: 260px"
+            />
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" native-type="submit">查询</el-button>
+          </el-form-item>
+        </el-form>
+
+        <el-table v-loading="online.loading.value" :data="online.rows.value" border>
+          <el-table-column prop="order_no" label="支付单号" width="210" />
+          <el-table-column prop="merchant_name" label="商户" min-width="130" />
+          <el-table-column label="应付 / 输入金额" width="140" align="right">
+            <template #default="{ row }">
+              <b>{{ row.pay_amount }}</b>
+              <div class="muted">{{ row.amount }}</div>
+            </template>
+          </el-table-column>
+          <el-table-column label="状态" width="90">
+            <template #default="{ row }"><StatusTag :map="onlinePaymentStatusLabels" :value="row.status" /></template>
+          </el-table-column>
+          <el-table-column label="到账" min-width="200">
+            <template #default="{ row }">
+              <template v-if="row.status === 'paid'">
+                {{ row.confirm_type === 'auto' ? '自动' : `后台确认（${row.confirmer_name ?? '-'}）` }} · {{ row.paid_at }}
+                <div v-if="row.payer_account" class="muted">付款方 {{ row.payer_account }}</div>
+              </template>
+              <span v-else class="muted">-</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="created_at" label="发起时间" width="170" />
+          <el-table-column label="操作" width="90" fixed="right">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="openPayment(row as OnlinePayment)">
+                {{ canReview && row.status !== 'paid' ? '处理' : '详情' }}
+              </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <el-pagination
+          v-model:current-page="online.page.value"
+          v-model:page-size="online.perPage.value"
+          class="pagination"
+          layout="total, sizes, prev, pager, next"
+          :total="online.total.value"
+          @current-change="online.load"
+          @size-change="online.search"
+        />
+      </el-tab-pane>
+
       <el-tab-pane label="付款账号审核" name="payers">
         <el-form inline @submit.prevent="payers.search">
           <el-form-item>
@@ -262,6 +396,67 @@ onMounted(async () => {
       </el-tab-pane>
     </el-tabs>
   </el-card>
+
+  <el-drawer v-model="paymentVisible" title="在线支付（支付宝扫码转账）" size="760px">
+    <div v-if="payment" v-loading="paymentBusy">
+      <el-descriptions :column="2" border size="small">
+        <el-descriptions-item label="支付单号">{{ payment.order_no }}</el-descriptions-item>
+        <el-descriptions-item label="商户">{{ payment.merchant_name }}</el-descriptions-item>
+        <el-descriptions-item label="应付金额">
+          <b>{{ payment.pay_amount }}</b> 元（输入 {{ payment.amount }}）
+        </el-descriptions-item>
+        <el-descriptions-item label="状态">
+          <StatusTag :map="onlinePaymentStatusLabels" :value="payment.status" />
+        </el-descriptions-item>
+        <el-descriptions-item label="收款账号" :span="2">{{ payment.receive_account }} · {{ payment.receive_name }}</el-descriptions-item>
+        <el-descriptions-item label="发起时间">{{ payment.created_at }}</el-descriptions-item>
+        <el-descriptions-item label="二维码到期">{{ payment.expires_at }}</el-descriptions-item>
+        <el-descriptions-item label="自动核对到" :span="2">{{ payment.checking_until }}</el-descriptions-item>
+        <template v-if="payment.status === 'paid'">
+          <el-descriptions-item label="入账">
+            {{ payment.confirm_type === 'auto' ? '自动核对' : `后台确认（${payment.confirmer_name ?? '-'}）` }} · {{ payment.paid_at }}
+          </el-descriptions-item>
+          <el-descriptions-item label="支付宝入账时间">{{ payment.trans_at ?? '-' }}</el-descriptions-item>
+          <el-descriptions-item label="账务流水号">{{ payment.account_log_id ?? '-' }}</el-descriptions-item>
+          <el-descriptions-item label="支付宝订单号">{{ payment.alipay_order_no ?? '-' }}</el-descriptions-item>
+          <el-descriptions-item label="付款方">{{ payment.payer_account ?? '-' }}</el-descriptions-item>
+          <el-descriptions-item label="账务备注">{{ payment.trans_memo ?? '-' }}</el-descriptions-item>
+          <el-descriptions-item label="确认备注" :span="2">{{ payment.remark ?? '-' }}</el-descriptions-item>
+        </template>
+      </el-descriptions>
+
+      <template v-if="canReview && payment.status !== 'paid'">
+        <h4 class="section">处理</h4>
+        <el-alert type="info" :closable="false" show-icon class="tip">
+          自动核对只认核对期内金额完全相等的到账。过期、取消后才到账的，点「查找到账记录」从支付宝账务明细里找金额相等、
+          还没入过账的收入，确认是这个商户付的再入账；实在查不到但已在支付宝里核实到账，可以写明备注直接确认。
+        </el-alert>
+        <div class="actions">
+          <el-button type="primary" @click="findCandidates">查找到账记录</el-button>
+          <el-button @click="confirmPayment(null)">不选记录，直接确认入账</el-button>
+        </div>
+        <el-table v-if="candidates" :data="candidates" border size="small" empty-text="没有找到金额相等、还没入过账的到账记录">
+          <el-table-column prop="trans_at" label="入账时间" width="160" />
+          <el-table-column prop="amount" label="金额" width="100" align="right" />
+          <el-table-column label="付款方" min-width="140">
+            <template #default="{ row }">{{ row.payer_account ?? '-' }}</template>
+          </el-table-column>
+          <el-table-column label="备注" min-width="160">
+            <template #default="{ row }">
+              {{ row.memo ?? '-' }}
+              <el-tag v-if="row.memo_matches" type="success" size="small">是这个单号</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="account_log_id" label="流水号" min-width="150" />
+          <el-table-column label="操作" width="80" fixed="right">
+            <template #default="{ row }">
+              <el-button link type="success" @click="confirmPayment(row as TransferCandidate)">入账</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </template>
+    </div>
+  </el-drawer>
 
   <el-drawer v-model="detailVisible" title="加款申请" size="720px">
     <div v-loading="detailLoading || acting">
@@ -326,6 +521,10 @@ onMounted(async () => {
 
 .section {
   margin: 20px 0 12px;
+}
+
+.tip {
+  margin-bottom: 12px;
 }
 
 .vouchers {

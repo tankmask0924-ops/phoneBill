@@ -18,6 +18,7 @@ use App\Middleware\AdminAuthMiddleware;
 use App\Middleware\AdminPermissionMiddleware;
 use App\Model\AdminUser;
 use App\Network\ClientIpResolver;
+use App\Service\Admin\AlipayTransferSettingAdminService;
 use App\Service\Admin\NotifySettingAdminService;
 use App\Service\Admin\OrderSettingAdminService;
 use App\Service\Admin\StorageSettingAdminService;
@@ -29,7 +30,8 @@ use Hyperf\HttpServer\Annotation\PostMapping;
 use Hyperf\HttpServer\Annotation\PutMapping;
 
 /**
- * 系统配置：回调域名（NotifySettingAdminService）、下单设置（OrderSettingAdminService）、图片存储（腾讯云 COS，StorageSettingAdminService）。
+ * 系统配置：回调域名（NotifySettingAdminService）、下单设置（OrderSettingAdminService）、图片存储（腾讯云 COS，StorageSettingAdminService）、
+ * 支付宝转账加款（AlipayTransferSettingAdminService）。
  */
 #[Controller(prefix: '/admin/settings')]
 class SettingController extends AbstractController
@@ -42,6 +44,9 @@ class SettingController extends AbstractController
 
     #[Inject]
     protected OrderSettingAdminService $orderSettingService;
+
+    #[Inject]
+    protected AlipayTransferSettingAdminService $alipayTransferSettingService;
 
     #[Inject]
     protected ClientIpResolver $clientIpResolver;
@@ -71,6 +76,33 @@ class SettingController extends AbstractController
     public function testStorage(): array
     {
         return $this->storageSettingService->test();
+    }
+
+    #[Middleware(AdminAuthMiddleware::class)]
+    #[Middleware(AdminPermissionMiddleware::class)]
+    #[RequiresPermission('setting.manage')]
+    #[GetMapping(path: 'alipay-transfer')]
+    public function alipayTransfer(): array
+    {
+        return $this->alipayTransferSettingService->get();
+    }
+
+    #[Middleware(AdminAuthMiddleware::class)]
+    #[Middleware(AdminPermissionMiddleware::class)]
+    #[RequiresPermission('setting.manage')]
+    #[PutMapping(path: 'alipay-transfer')]
+    public function saveAlipayTransfer(): array
+    {
+        return $this->alipayTransferSettingService->save($this->admin(), $this->request->all(), $this->clientIp());
+    }
+
+    #[Middleware(AdminAuthMiddleware::class)]
+    #[Middleware(AdminPermissionMiddleware::class)]
+    #[RequiresPermission('setting.manage')]
+    #[PostMapping(path: 'alipay-transfer/test')]
+    public function testAlipayTransfer(): array
+    {
+        return $this->alipayTransferSettingService->test();
     }
 
     #[Middleware(AdminAuthMiddleware::class)]

@@ -180,6 +180,45 @@ export const fundingApi = {
   createRequest: (data: FundingRequestForm) => http.post<FundingRequest>('/merchant/funding-requests', data),
 }
 
+/** 支付宝扫码转账加款：App\Controller\Merchant\OnlinePaymentController */
+export interface OnlinePayment {
+  id: number
+  /** 支付单号，转账时必须填在备注里 */
+  order_no: string
+  /** 输入的金额 */
+  amount: string
+  /** 实际要转的金额（加了随机分），到账后按这个入账 */
+  pay_amount: string
+  receive_account: string
+  /** 收款人姓名，只露最后一个字 */
+  receive_name: string
+  /** pending / paid / expired / cancelled */
+  status: string
+  expires_at: string
+  /** 二维码已到期，但还在核对期内 */
+  expired_qr: boolean
+  /** 唤起支付宝转账页的链接，待支付时才有 */
+  qr_content: string | null
+  paid_at: string | null
+  created_at: string | null
+}
+
+export interface OnlinePaymentOptions {
+  enabled: boolean
+  min_amount: string | null
+  max_amount: string | null
+  expire_minutes: number | null
+}
+
+export const onlinePaymentApi = {
+  options: () => http.get<OnlinePaymentOptions>('/merchant/online-payments/options'),
+  list: (params: Query) => http.get<Paged<OnlinePayment>>('/merchant/online-payments', params),
+  create: (amount: string) => http.post<OnlinePayment>('/merchant/online-payments', { amount }),
+  detail: (id: number) => http.get<OnlinePayment>(`/merchant/online-payments/${id}`),
+  check: (id: number) => http.post<OnlinePayment>(`/merchant/online-payments/${id}/check`),
+  cancel: (id: number) => http.post<OnlinePayment>(`/merchant/online-payments/${id}/cancel`),
+}
+
 export interface BatchPreviewItem {
   mobile: string
   ok: boolean

@@ -106,6 +106,14 @@ export const fundingStatusLabels: LabelMap = {
   rejected: { label: '已驳回', type: 'danger' },
 }
 
+/** 在线支付（支付宝扫码转账）状态 */
+export const onlinePaymentStatusLabels: LabelMap = {
+  pending: { label: '待支付', type: 'warning' },
+  paid: { label: '已到账', type: 'success' },
+  expired: { label: '已过期', type: 'info' },
+  cancelled: { label: '已取消', type: 'info' },
+}
+
 /** 收款账户、付款账号类型，见 App\Enum\PaymentAccountType */
 export const paymentAccountTypeLabels: LabelMap = {
   alipay: { label: '支付宝' },

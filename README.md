@@ -135,10 +135,10 @@ npm run build        # 产物在 merchant-web/dist，部署在 /merchant/ 路径
 | GET | `/admin/products`、`/admin/products/supplier-product-options`、`/admin/product-stats`、`/admin/product-categories` | `product.view` |
 | POST/PUT/DELETE | `/admin/products`、`/{id}`、`/{id}/status`；`DELETE /{id}` 是软删除，没有商户开通着、没有充值中的单才能删 | `product.manage` |
 | POST/PUT/DELETE | `/admin/product-categories`、`/{id}` | `product.manage` |
-| GET | `/admin/funding/requests`、`/requests/{id}`、`/payer-accounts`、`/merchant-options`、`/admin/receiving-accounts`、`/admin/merchants/{id}/receiving-accounts` | `funding.view` |
-| POST | `/admin/funding/requests/{id}/approve`、`/requests/{id}/reject`、`/payer-accounts/{id}/approve`、`/payer-accounts/{id}/reject` | `funding.review` |
+| GET | `/admin/funding/requests`、`/requests/{id}`、`/payer-accounts`、`/merchant-options`、`/online-payments`、`/online-payments/{id}`、`/admin/receiving-accounts`、`/admin/merchants/{id}/receiving-accounts` | `funding.view` |
+| POST | `/admin/funding/requests/{id}/approve`、`/requests/{id}/reject`、`/payer-accounts/{id}/approve`、`/payer-accounts/{id}/reject`、`/online-payments/{id}/candidates`（查找到账记录）、`/online-payments/{id}/confirm`（确认入账） | `funding.review` |
 | POST/PUT | `/admin/receiving-accounts`、`/{id}`、`/{id}/status`、`/{id}/merchants`；`PUT /admin/merchants/{id}/receiving-accounts`（按商户配置） | `funding.config` |
-| GET/PUT/POST | `/admin/settings/notify`（回调域名）、`/admin/settings/order`（重复充值拦截分钟数，0 表示不拦截）、`/admin/settings/storage`、`/admin/settings/storage/test` | `setting.manage` |
+| GET/PUT/POST | `/admin/settings/notify`（回调域名）、`/admin/settings/order`（重复充值拦截分钟数，0 表示不拦截）、`/admin/settings/storage`、`/admin/settings/storage/test`、`/admin/settings/alipay-transfer`、`/admin/settings/alipay-transfer/test`（支付宝转账加款） | `setting.manage` |
 | GET | `/admin/segments/lookup` | `risk.view` |
 | GET | `/admin/risk/blacklist`、`/admin/risk/maintenances`、`/admin/risk/maintenances/options` | `risk.view` |
 | POST/DELETE | `/admin/risk/blacklist`、`/admin/risk/blacklist/{id}`、`/admin/risk/maintenances`、`/{id}/finish` | `risk.manage` |
@@ -159,7 +159,7 @@ npm run build        # 产物在 merchant-web/dist，部署在 /merchant/ 路径
 | PUT/POST | `/merchant/account/ip-whitelist`、`/merchant/account/reset-secret` | 商户登录，要再输一次登录密码 |
 | GET/POST | `/merchant/exports`（导出订单记录 / 资金流水，异步生成 CSV，保留 7 天）、`/merchant/exports/{id}/download` | 商户登录，只能看、下载自己的 |
 | POST | `/merchant/batch-orders/preview`（预览）、`/merchant/batch-orders`（提交） | 商户登录，商户停用时不能下单 |
-| GET/POST/PUT/DELETE | `/merchant/payer-accounts`、`/{id}`；`/merchant/receiving-accounts`；`/merchant/funding-vouchers`（上传凭证）；`/merchant/funding-requests`、`/{id}` | 商户登录，只能看、改自己的 |
+| GET/POST/PUT/DELETE | `/merchant/payer-accounts`、`/{id}`；`/merchant/receiving-accounts`；`/merchant/funding-vouchers`（上传凭证）；`/merchant/funding-requests`、`/{id}`；`/merchant/online-payments/options`、`/merchant/online-payments`、`/{id}`、`/{id}/check`（我已付款）、`/{id}/cancel`（支付宝转账加款） | 商户登录，只能看、改自己的 |
 
 ## 部署要点
 

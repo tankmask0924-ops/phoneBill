@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AlipayTransferDialog from '@/components/AlipayTransferDialog.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import { recentDays } from '@/utils/date'
 import { usePagedList } from '@/utils/paged'
@@ -9,11 +10,14 @@ import { useRouter } from 'vue-router'
 import {
   type FundingRequest,
   fundingApi,
+  type OnlinePayment,
+  type OnlinePaymentOptions,
+  onlinePaymentApi,
   type PayerAccount,
   type PaymentAccountInfo,
   type ReceivingAccount,
 } from '@/api/portal'
-import { fundingStatusLabels, toOptions } from '@/utils/labels'
+import { fundingStatusLabels, onlinePaymentStatusLabels, toOptions } from '@/utils/labels'
 
 const router = useRouter()
 
@@ -143,70 +147,158 @@ async function openDetail(row: FundingRequest) {
   detail.value = await fundingApi.request(row.id)
 }
 
-onMounted(list.load)
+// ---- 支付宝转账加款 ----
+const tab = ref<'offline' | 'online'>('offline')
+const onlineOptions = ref<OnlinePaymentOptions>({ enabled: false, min_amount: null, max_amount: null, expire_minutes: null })
+const online = usePagedList<OnlinePayment, { status: string; dates: [string, string] | null }>(
+  (params) => {
+    const { dates, ...rest } = params as Record<string, unknown> & { dates?: [string, string] }
+    return onlinePaymentApi.list(dates ? { ...rest, created_from: dates[0], created_to: dates[1] } : rest)
+  },
+  { status: '', dates: recentDays() },
+  20,
+)
+const transferVisible = ref(false)
+const transferPayment = ref<OnlinePayment | null>(null)
+
+function openTransfer(row: OnlinePayment | null) {
+  transferPayment.value = row
+  transferVisible.value = true
+}
+
+onMounted(async () => {
+  list.load()
+  onlineOptions.value = await onlinePaymentApi.options()
+  if (onlineOptions.value.enabled) {
+    online.load()
+  }
+})
 </script>
 
 <template>
   <el-card shadow="never">
-    <div class="toolbar">
-      <el-form inline @submit.prevent="list.search">
-        <el-form-item>
-          <el-select v-model="filters.status" placeholder="全部状态" clearable style="width: 110px">
-            <el-option v-for="o in toOptions(fundingStatusLabels)" :key="o.value" v-bind="o" />
-          </el-select>
-        </el-form-item>
-        <el-form-item>
-          <el-date-picker
-            v-model="filters.dates"
-            type="daterange"
-            value-format="YYYY-MM-DD"
-            start-placeholder="默认最近 7 天"
-            end-placeholder="结束日期"
-            style="width: 240px"
-          />
-        </el-form-item>
-        <el-form-item>
-          <el-button type="primary" native-type="submit">查询</el-button>
-        </el-form-item>
-      </el-form>
-      <el-button type="primary" :icon="Plus" @click="openCreate">申请加款</el-button>
-    </div>
+    <el-tabs v-model="tab">
+      <el-tab-pane label="线下打款" name="offline">
+        <div class="toolbar">
+          <el-form inline @submit.prevent="list.search">
+            <el-form-item>
+              <el-select v-model="filters.status" placeholder="全部状态" clearable style="width: 110px">
+                <el-option v-for="o in toOptions(fundingStatusLabels)" :key="o.value" v-bind="o" />
+              </el-select>
+            </el-form-item>
+            <el-form-item>
+              <el-date-picker
+                v-model="filters.dates"
+                type="daterange"
+                value-format="YYYY-MM-DD"
+                start-placeholder="默认最近 7 天"
+                end-placeholder="结束日期"
+                style="width: 240px"
+              />
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" native-type="submit">查询</el-button>
+            </el-form-item>
+          </el-form>
+          <el-button type="primary" :icon="Plus" @click="openCreate">申请加款</el-button>
+        </div>
 
-    <el-table v-loading="loading" :data="rows" border empty-text="还没有加款申请">
-      <el-table-column prop="created_at" label="提交时间" width="170" />
-      <el-table-column label="金额（元）" width="120" align="right">
-        <template #default="{ row }">{{ row.amount }}</template>
-      </el-table-column>
-      <el-table-column label="付款账号" min-width="200">
-        <template #default="{ row }">{{ accountText(row.payer) }}</template>
-      </el-table-column>
-      <el-table-column label="收款账户" min-width="200">
-        <template #default="{ row }">{{ accountText(row.receiving) }}</template>
-      </el-table-column>
-      <el-table-column prop="paid_at" label="打款时间" width="170" />
-      <el-table-column label="状态" min-width="150">
-        <template #default="{ row }">
-          <StatusTag :map="fundingStatusLabels" :value="row.status" />
-          <div v-if="row.status === 'rejected' && row.review_remark" class="reason">{{ row.review_remark }}</div>
-        </template>
-      </el-table-column>
-      <el-table-column label="操作" width="80" fixed="right">
-        <template #default="{ row }">
-          <el-button link type="primary" @click="openDetail(row as FundingRequest)">详情</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
+        <el-table v-loading="loading" :data="rows" border empty-text="还没有加款申请">
+          <el-table-column prop="created_at" label="提交时间" width="170" />
+          <el-table-column label="金额（元）" width="120" align="right">
+            <template #default="{ row }">{{ row.amount }}</template>
+          </el-table-column>
+          <el-table-column label="付款账号" min-width="200">
+            <template #default="{ row }">{{ accountText(row.payer) }}</template>
+          </el-table-column>
+          <el-table-column label="收款账户" min-width="200">
+            <template #default="{ row }">{{ accountText(row.receiving) }}</template>
+          </el-table-column>
+          <el-table-column prop="paid_at" label="打款时间" width="170" />
+          <el-table-column label="状态" min-width="150">
+            <template #default="{ row }">
+              <StatusTag :map="fundingStatusLabels" :value="row.status" />
+              <div v-if="row.status === 'rejected' && row.review_remark" class="reason">{{ row.review_remark }}</div>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="80" fixed="right">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="openDetail(row as FundingRequest)">详情</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
 
-    <el-pagination
-      v-model:current-page="page"
-      v-model:page-size="perPage"
-      class="pagination"
-      layout="total, sizes, prev, pager, next"
-      :total="total"
-      @current-change="list.load"
-      @size-change="list.search"
-    />
+        <el-pagination
+          v-model:current-page="page"
+          v-model:page-size="perPage"
+          class="pagination"
+          layout="total, sizes, prev, pager, next"
+          :total="total"
+          @current-change="list.load"
+          @size-change="list.search"
+        />
+      </el-tab-pane>
+
+      <el-tab-pane v-if="onlineOptions.enabled" label="支付宝转账" name="online">
+        <div class="toolbar">
+          <el-form inline @submit.prevent="online.search">
+            <el-form-item>
+              <el-select v-model="online.filters.status" placeholder="全部状态" clearable style="width: 110px">
+                <el-option v-for="o in toOptions(onlinePaymentStatusLabels)" :key="o.value" v-bind="o" />
+              </el-select>
+            </el-form-item>
+            <el-form-item>
+              <el-date-picker
+                v-model="online.filters.dates"
+                type="daterange"
+                value-format="YYYY-MM-DD"
+                start-placeholder="默认最近 7 天"
+                end-placeholder="结束日期"
+                style="width: 240px"
+              />
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" native-type="submit">查询</el-button>
+            </el-form-item>
+          </el-form>
+          <el-button type="primary" :icon="Plus" @click="openTransfer(null)">支付宝转账加款</el-button>
+        </div>
+        <el-alert type="info" :closable="false" show-icon class="block">
+          扫码用支付宝转账，金额一分不差、备注保持支付单号，系统核对到账后自动加款，一般 1～2 分钟内到账，不用上传凭证。
+        </el-alert>
+
+        <el-table v-loading="online.loading.value" :data="online.rows.value" border empty-text="还没有支付宝转账记录">
+          <el-table-column prop="created_at" label="发起时间" width="170" />
+          <el-table-column prop="order_no" label="支付单号" width="210" />
+          <el-table-column label="应付金额（元）" width="130" align="right">
+            <template #default="{ row }">{{ row.pay_amount }}</template>
+          </el-table-column>
+          <el-table-column label="状态" width="100">
+            <template #default="{ row }"><StatusTag :map="onlinePaymentStatusLabels" :value="row.status" /></template>
+          </el-table-column>
+          <el-table-column label="到账时间" min-width="170">
+            <template #default="{ row }">{{ row.paid_at ?? '-' }}</template>
+          </el-table-column>
+          <el-table-column label="操作" width="90" fixed="right">
+            <template #default="{ row }">
+              <el-button v-if="row.status === 'pending'" link type="primary" @click="openTransfer(row as OnlinePayment)">去付款</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <el-pagination
+          v-model:current-page="online.page.value"
+          v-model:page-size="online.perPage.value"
+          class="pagination"
+          layout="total, sizes, prev, pager, next"
+          :total="online.total.value"
+          @current-change="online.load"
+          @size-change="online.search"
+        />
+      </el-tab-pane>
+    </el-tabs>
   </el-card>
+
+  <AlipayTransferDialog v-model="transferVisible" :options="onlineOptions" :payment="transferPayment" @changed="online.load" />
 
   <el-dialog v-model="dialogVisible" title="申请加款" width="640px" :close-on-click-modal="false" @closed="formRef?.clearValidate()">
     <el-alert v-if="receivingAccounts.length === 0" type="warning" :closable="false" show-icon class="block">
