@@ -25,6 +25,8 @@ export interface Order {
   profit: string | null
   supplier_id: number | null
   supplier_name: string | null
+  supplier_product_id: number | null
+  supplier_product_name: string | null
   /** pending / processing / abnormal / success / failed */
   status: string
   /** 列表标「异常」：已转异常，或还在充值中但上游返回不明确 */

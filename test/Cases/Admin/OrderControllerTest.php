@@ -188,6 +188,7 @@ class OrderControllerTest extends HttpTestCase
         // 历史订单照常显示名字，订单筛选里还能选到（标「已删除」）
         $orders = $this->body($this->jsonRequest('GET', "/admin/orders?merchant_id={$merchant->id}&status=success", $token));
         $this->assertSame($supplier->name, $orders['data'][0]['supplier_name']);
+        $this->assertSame($sp->name, $orders['data'][0]['supplier_product_name']);
         $detail = $this->body($this->jsonRequest('GET', "/admin/orders/{$success->id}", $token));
         $this->assertSame($supplier->name, $detail['attempts'][0]['supplier_name']);
         $this->assertSame($sp->name, $detail['attempts'][0]['supplier_product_name']);

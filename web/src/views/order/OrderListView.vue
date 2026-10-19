@@ -443,6 +443,9 @@ onMounted(async () => {
       <el-table-column label="供应商" min-width="110">
         <template #default="{ row }">{{ row.supplier_name ?? '-' }}</template>
       </el-table-column>
+      <el-table-column label="供应商商品" min-width="130">
+        <template #default="{ row }">{{ row.supplier_product_name ?? '-' }}</template>
+      </el-table-column>
       <el-table-column label="状态" width="150">
         <template #default="{ row }">
           <el-tooltip :disabled="!row.abnormal_reason" :content="row.abnormal_reason ?? ''" placement="top">

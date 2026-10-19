@@ -559,6 +559,7 @@ class OrderAdminService extends AbstractService
     {
         $merchants = $this->merchantDao->newQuery()->whereIn('id', array_unique(array_map(static fn (Order $o) => $o->merchant_id, $orders)))->pluck('name', 'id');
         $suppliers = $this->supplierDao->namesWithTrashed(array_values(array_filter(array_unique(array_map(static fn (Order $o) => $o->supplier_id, $orders)))));
+        $supplierProducts = $this->supplierProductDao->namesWithTrashed(array_values(array_filter(array_unique(array_map(static fn (Order $o) => $o->supplier_product_id, $orders)))));
         $unclear = $this->attemptDao->unclearProcessing(array_map(static fn (Order $o) => $o->id, $orders));
 
         return array_map(static fn (Order $o) => [
@@ -580,6 +581,8 @@ class OrderAdminService extends AbstractService
             'profit' => $o->profit,
             'supplier_id' => $o->supplier_id,
             'supplier_name' => $o->supplier_id ? ($suppliers[$o->supplier_id] ?? null) : null,
+            'supplier_product_id' => $o->supplier_product_id,
+            'supplier_product_name' => $o->supplier_product_id ? ($supplierProducts[$o->supplier_product_id] ?? null) : null,
             'status' => $o->status,
             // 列表标「异常」：已转异常，或还在充值中但上游返回不明确；abnormal_reason 说明原因
             'abnormal' => $o->flaggedAbnormal(isset($unclear[$o->id])),
