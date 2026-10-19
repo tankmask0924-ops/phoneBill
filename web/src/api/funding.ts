@@ -171,6 +171,11 @@ export interface StorageSetting {
 }
 
 export const settingApi = {
+  /** 不用登录：系统名称（空字符串表示用默认名称） */
+  publicInfo: () => http.get<{ site_name: string }>('/admin/settings/public'),
+  /** 基本设置：系统名称，留空用默认名称 */
+  site: () => http.get<{ name: string }>('/admin/settings/site'),
+  saveSite: (name: string) => http.put<{ name: string }>('/admin/settings/site', { name }),
   storage: () => http.get<StorageSetting>('/admin/settings/storage'),
   saveStorage: (data: Omit<StorageSetting, 'secret_key_set'> & { secret_key: string }) =>
     http.put<StorageSetting>('/admin/settings/storage', data),

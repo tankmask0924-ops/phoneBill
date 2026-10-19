@@ -2,6 +2,24 @@
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { onMounted, reactive, ref } from 'vue'
 import { settingApi } from '@/api/funding'
+import { useSiteStore } from '@/stores/site'
+
+// ---- 基本设置 ----
+const site = useSiteStore()
+const siteName = ref('')
+const siteSaving = ref(false)
+const defaultName = import.meta.env.VITE_APP_TITLE
+
+async function saveSite() {
+  siteSaving.value = true
+  try {
+    siteName.value = (await settingApi.saveSite(siteName.value.trim())).name
+    site.set(siteName.value)
+    ElMessage.success(siteName.value ? '已保存，左上角和浏览器标题已更新' : '已保存，使用默认名称')
+  } finally {
+    siteSaving.value = false
+  }
+}
 
 // ---- 回调域名 ----
 const notifyBase = ref('')
@@ -163,12 +181,25 @@ async function test() {
 onMounted(async () => {
   load()
   loadAlipay()
+  settingApi.site().then((s) => (siteName.value = s.name))
   notifyBase.value = (await settingApi.notify()).base_url
   duplicateWindow.value = (await settingApi.order()).duplicate_window_minutes
 })
 </script>
 
 <template>
+  <el-card shadow="never" header="基本设置" class="block">
+    <el-form label-width="110px" style="max-width: 560px" @submit.prevent="saveSite">
+      <el-form-item label="系统名称">
+        <el-input v-model="siteName" maxlength="30" show-word-limit :placeholder="`留空使用默认名称：${defaultName}`" />
+        <div class="tip">显示在管理后台左上角、登录页和浏览器标题</div>
+      </el-form-item>
+      <el-form-item>
+        <el-button type="primary" :loading="siteSaving" native-type="submit">保存</el-button>
+      </el-form-item>
+    </el-form>
+  </el-card>
+
   <el-card shadow="never" header="回调域名" class="block">
     <el-form label-width="110px" style="max-width: 560px" @submit.prevent="saveNotify">
       <el-form-item label="回调域名">

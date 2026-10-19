@@ -6,12 +6,13 @@ import { login } from '@/api/auth'
 import type { LoginForm } from '@/types'
 import { useAuthStore } from '@/stores/auth'
 import { usePermissionStore } from '@/stores/permission'
+import { useSiteStore } from '@/stores/site'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const loading = ref(false)
-const title = import.meta.env.VITE_APP_TITLE
+const site = useSiteStore()
 
 async function onSubmit(form: LoginForm) {
   loading.value = true
@@ -29,5 +30,5 @@ async function onSubmit(form: LoginForm) {
 </script>
 
 <template>
-  <LoginPanel :title="title" :loading="loading" @submit="onSubmit" />
+  <LoginPanel :title="site.name" :loading="loading" @submit="onSubmit" />
 </template>

@@ -138,7 +138,8 @@ npm run build        # 产物在 merchant-web/dist，部署在 /merchant/ 路径
 | GET | `/admin/funding/requests`、`/requests/{id}`、`/payer-accounts`、`/merchant-options`、`/online-payments`、`/online-payments/{id}`、`/admin/receiving-accounts`、`/admin/merchants/{id}/receiving-accounts` | `funding.view` |
 | POST | `/admin/funding/requests/{id}/approve`、`/requests/{id}/reject`、`/payer-accounts/{id}/approve`、`/payer-accounts/{id}/reject`、`/online-payments/{id}/candidates`（查找到账记录）、`/online-payments/{id}/confirm`（确认入账） | `funding.review` |
 | POST/PUT | `/admin/receiving-accounts`、`/{id}`、`/{id}/status`、`/{id}/merchants`；`PUT /admin/merchants/{id}/receiving-accounts`（按商户配置） | `funding.config` |
-| GET/PUT/POST | `/admin/settings/notify`（回调域名）、`/admin/settings/order`（重复充值拦截分钟数，0 表示不拦截）、`/admin/settings/storage`、`/admin/settings/storage/test`、`/admin/settings/alipay-transfer`、`/admin/settings/alipay-transfer/test`（支付宝转账加款） | `setting.manage` |
+| GET | `/admin/settings/public`（系统名称，登录页用） | 不用登录 |
+| GET/PUT/POST | `/admin/settings/site`（系统名称）、`/admin/settings/notify`（回调域名）、`/admin/settings/order`（重复充值拦截分钟数，0 表示不拦截）、`/admin/settings/storage`、`/admin/settings/storage/test`、`/admin/settings/alipay-transfer`、`/admin/settings/alipay-transfer/test`（支付宝转账加款） | `setting.manage` |
 | GET | `/admin/segments/lookup` | `risk.view` |
 | GET | `/admin/risk/blacklist`、`/admin/risk/maintenances`、`/admin/risk/maintenances/options` | `risk.view` |
 | POST/DELETE | `/admin/risk/blacklist`、`/admin/risk/blacklist/{id}`、`/admin/risk/maintenances`、`/{id}/finish` | `risk.manage` |

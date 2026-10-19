@@ -21,6 +21,7 @@ use App\Network\ClientIpResolver;
 use App\Service\Admin\AlipayTransferSettingAdminService;
 use App\Service\Admin\NotifySettingAdminService;
 use App\Service\Admin\OrderSettingAdminService;
+use App\Service\Admin\SiteSettingAdminService;
 use App\Service\Admin\StorageSettingAdminService;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpServer\Annotation\Controller;
@@ -31,7 +32,9 @@ use Hyperf\HttpServer\Annotation\PutMapping;
 
 /**
  * 系统配置：回调域名（NotifySettingAdminService）、下单设置（OrderSettingAdminService）、图片存储（腾讯云 COS，StorageSettingAdminService）、
- * 支付宝转账加款（AlipayTransferSettingAdminService）。
+ * 支付宝转账加款（AlipayTransferSettingAdminService）、基本设置（系统名称，SiteSettingAdminService）。
+ *
+ * public 不用登录：登录页、后台框架要显示系统名称。
  */
 #[Controller(prefix: '/admin/settings')]
 class SettingController extends AbstractController
@@ -49,7 +52,34 @@ class SettingController extends AbstractController
     protected AlipayTransferSettingAdminService $alipayTransferSettingService;
 
     #[Inject]
+    protected SiteSettingAdminService $siteSettingService;
+
+    #[Inject]
     protected ClientIpResolver $clientIpResolver;
+
+    #[GetMapping(path: 'public')]
+    public function public(): array
+    {
+        return ['site_name' => $this->siteSettingService->get()['name']];
+    }
+
+    #[Middleware(AdminAuthMiddleware::class)]
+    #[Middleware(AdminPermissionMiddleware::class)]
+    #[RequiresPermission('setting.manage')]
+    #[GetMapping(path: 'site')]
+    public function site(): array
+    {
+        return $this->siteSettingService->get();
+    }
+
+    #[Middleware(AdminAuthMiddleware::class)]
+    #[Middleware(AdminPermissionMiddleware::class)]
+    #[RequiresPermission('setting.manage')]
+    #[PutMapping(path: 'site')]
+    public function saveSite(): array
+    {
+        return $this->siteSettingService->save($this->admin(), $this->request->all(), $this->clientIp());
+    }
 
     #[Middleware(AdminAuthMiddleware::class)]
     #[Middleware(AdminPermissionMiddleware::class)]

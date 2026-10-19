@@ -5,6 +5,7 @@ import { changePassword } from '@/api/auth'
 import ChangePasswordDialog from '@/components/ChangePasswordDialog.vue'
 import { useAuthStore } from '@/stores/auth'
 import { usePermissionStore } from '@/stores/permission'
+import { useSiteStore } from '@/stores/site'
 import { filterMenus } from '@/utils/menus'
 import AppLayout from './AppLayout.vue'
 import { menus } from './menus'
@@ -12,7 +13,7 @@ import { menus } from './menus'
 const auth = useAuthStore()
 const permission = usePermissionStore()
 const router = useRouter()
-const title = import.meta.env.VITE_APP_TITLE
+const site = useSiteStore()
 const passwordDialog = ref(false)
 
 // 权限加载完之前只显示不需要权限的菜单
@@ -29,7 +30,7 @@ onMounted(() => permission.load())
 
 <template>
   <AppLayout
-    :title="title"
+    :title="site.name"
     :menus="visibleMenus"
     :username="auth.username"
     @logout="logout"
