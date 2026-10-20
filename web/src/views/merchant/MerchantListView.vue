@@ -628,7 +628,7 @@ onMounted(async () => {
     </el-table>
   </el-drawer>
 
-  <el-dialog v-model="receivingVisible" :title="`收款配置 · ${receivingMerchant?.name ?? ''}`" width="620px">
+  <el-dialog v-model="receivingVisible" :title="`收款配置 · ${receivingMerchant?.name ?? ''}`" width="1220px">
     <h4 class="receiving-title">线下打款账户</h4>
     <div class="receiving-tip">勾选这个商户能看到的打款账户，商户提交加款申请时只能选这些；一个都不勾，商户就不能申请加款。</div>
     <el-empty v-if="receivingAccounts.length === 0" description="还没有收款账户，先到「商户中心 - 收款配置」新建" />
