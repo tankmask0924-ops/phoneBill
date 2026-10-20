@@ -299,6 +299,9 @@ onMounted(async () => {
         <el-table v-loading="online.loading.value" :data="online.rows.value" border>
           <el-table-column prop="order_no" label="支付单号" width="210" />
           <el-table-column prop="merchant_name" label="商户" min-width="130" />
+          <el-table-column label="收款账户" min-width="130">
+            <template #default="{ row }">{{ row.alipay_account_name ?? '-' }}</template>
+          </el-table-column>
           <el-table-column label="应付 / 输入金额" width="140" align="right">
             <template #default="{ row }">
               <b>{{ row.pay_amount }}</b>
@@ -408,7 +411,9 @@ onMounted(async () => {
         <el-descriptions-item label="状态">
           <StatusTag :map="onlinePaymentStatusLabels" :value="payment.status" />
         </el-descriptions-item>
-        <el-descriptions-item label="收款账号" :span="2">{{ payment.receive_account }} · {{ payment.receive_name }}</el-descriptions-item>
+        <el-descriptions-item label="收款账号" :span="2">
+          {{ payment.alipay_account_name ?? '-' }}：{{ payment.receive_account }} · {{ payment.receive_name }}
+        </el-descriptions-item>
         <el-descriptions-item label="发起时间">{{ payment.created_at }}</el-descriptions-item>
         <el-descriptions-item label="二维码到期">{{ payment.expires_at }}</el-descriptions-item>
         <el-descriptions-item label="自动核对到" :span="2">{{ payment.checking_until }}</el-descriptions-item>

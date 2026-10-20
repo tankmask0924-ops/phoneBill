@@ -18,6 +18,7 @@ use App\Middleware\AdminAuthMiddleware;
 use App\Middleware\AdminPermissionMiddleware;
 use App\Model\AdminUser;
 use App\Network\ClientIpResolver;
+use App\Service\Admin\AlipayAccountAdminService;
 use App\Service\Admin\MerchantAdminService;
 use App\Service\Admin\MerchantProductAdminService;
 use App\Service\Admin\MerchantUserAdminService;
@@ -46,6 +47,9 @@ class MerchantController extends AbstractController
 
     #[Inject]
     protected ReceivingAccountAdminService $receivingAccountService;
+
+    #[Inject]
+    protected AlipayAccountAdminService $alipayAccountService;
 
     #[Inject]
     protected ClientIpResolver $clientIpResolver;
@@ -200,6 +204,30 @@ class MerchantController extends AbstractController
     public function assignReceivingAccounts(int $id): array
     {
         return $this->receivingAccountService->assignToMerchant($this->admin(), $id, $this->request->input('receiving_account_ids'), $this->clientIp());
+    }
+
+    /**
+     * 商户的支付宝转账加款账户：指定的是哪个，和全部账户。
+     */
+    #[Middleware(AdminAuthMiddleware::class)]
+    #[Middleware(AdminPermissionMiddleware::class)]
+    #[RequiresPermission('funding.view')]
+    #[GetMapping(path: '{id:\d+}/alipay-account')]
+    public function alipayAccount(int $id): array
+    {
+        return $this->alipayAccountService->forMerchant($id);
+    }
+
+    /**
+     * 指定这个商户用哪个支付宝转账加款账户，alipay_account_id 为空表示不能用。
+     */
+    #[Middleware(AdminAuthMiddleware::class)]
+    #[Middleware(AdminPermissionMiddleware::class)]
+    #[RequiresPermission('funding.config')]
+    #[PutMapping(path: '{id:\d+}/alipay-account')]
+    public function bindAlipayAccount(int $id): array
+    {
+        return $this->alipayAccountService->bindMerchant($this->admin(), $id, $this->request->input('alipay_account_id'), $this->clientIp());
     }
 
     private function admin(): AdminUser

@@ -35,4 +35,19 @@ class MerchantDao extends AbstractDao
     {
         return $this->newQuery()->where('id', $id)->lockForUpdate()->first();
     }
+
+    /**
+     * 商户指定的支付宝转账加款账户（直接查库，不用缓存的商户对象）。
+     */
+    public function alipayAccountId(int $id): ?int
+    {
+        $value = $this->newQuery()->where('id', $id)->value('alipay_account_id');
+
+        return $value === null ? null : (int) $value;
+    }
+
+    public function setAlipayAccountId(int $id, ?int $accountId): void
+    {
+        $this->newQuery()->where('id', $id)->update(['alipay_account_id' => $accountId]);
+    }
 }

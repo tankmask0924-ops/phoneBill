@@ -21,9 +21,10 @@ use Carbon\Carbon;
  * @property string $order_no
  * @property int $merchant_id
  * @property null|int $merchant_user_id
+ * @property null|int $alipay_account_id 收款的支付宝账户
  * @property string $amount 商户输入的金额
  * @property string $pay_amount 应付金额（加了随机分），入账按这个
- * @property null|string $active_amount 占用中的应付金额，结束并过了核对期后清空
+ * @property null|string $active_amount 占用中的应付金额（同一个收款账户内唯一），结束并过了核对期后清空
  * @property string $receive_account
  * @property string $receive_name
  * @property string $status pending / paid / expired / cancelled
@@ -62,6 +63,7 @@ class MerchantOnlinePayment extends Model
         'order_no',
         'merchant_id',
         'merchant_user_id',
+        'alipay_account_id',
         'amount',
         'pay_amount',
         'active_amount',

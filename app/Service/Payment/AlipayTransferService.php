@@ -12,14 +12,17 @@ declare(strict_types=1);
 
 namespace App\Service\Payment;
 
+use App\Dao\AlipayAccountDao;
+use App\Dao\MerchantDao;
 use App\Dao\MerchantOnlinePaymentDao;
+use App\Model\AlipayAccount;
 use App\Model\MerchantBalanceLog;
 use App\Model\MerchantOnlinePayment;
 use App\Network\HttpClient;
 use App\Payment\AlipayClient;
+use App\Security\Encrypter;
 use App\Service\AbstractService;
 use App\Service\Merchant\MerchantBalanceService;
-use App\Service\Setting\SettingService;
 use App\Support\RedisLock;
 use Hyperf\Database\Exception\QueryException;
 use Hyperf\DbConnection\Db;
@@ -33,20 +36,18 @@ use Throwable;
 /**
  * 支付宝扫码转账加款（docs/project.md 4.6.2）：.
  *
- * - 商户发起时生成支付单号和应付金额：输入金额加 0.01～0.99 的随机分，在所有未结束的单之间唯一（active_amount 唯一索引），
- *   二维码唤起支付宝转账页，预填收款账号、应付金额、备注（支付单号）；
- * - 认到账：查收款账户的账务明细（alipay.data.bill.accountlog.query），收入、金额和应付金额完全相等、入账时间在这单的
+ * - 收款账户可以有多个（alipay_accounts），每个商户指定用一个（merchants.alipay_account_id），没指定或账户停用就不能用；
+ * - 商户发起时生成支付单号和应付金额：输入金额加 0.01～0.99 的随机分，在同一个收款账户的未结束单之间唯一
+ *   （(alipay_account_id, active_amount) 唯一索引），二维码唤起支付宝转账页，预填收款账号、应付金额、备注（支付单号）；
+ * - 认到账：按收款账户分别查账务明细（alipay.data.bill.accountlog.query），收入、金额和应付金额完全相等、入账时间在这单的
  *   核对期内、这条流水没入过账，就给这单入账。支付宝说明账务备注「不可依赖此字段进行对账」，所以备注不是必要条件，
  *   只在备注里写的是别的支付单号时不认；
  * - 入账：带条件把状态改成已到账、记下流水号（唯一索引，一条流水只能入一单），同一个事务里按应付金额给商户加款；
- * - 每分钟自动核对一次，商户点「我已付款」时立即核对（全局 5 秒最多一次）；二维码到期后再核对 10 分钟，还没到就过期，
- *   过期的单之后到账由后台查找到账记录确认入账。
+ * - 每分钟自动核对一次，商户点「我已付款」时立即核对这个账户（每个账户 5 秒最多一次）；二维码到期后再核对 10 分钟，
+ *   还没到就过期，过期的单之后到账由后台查找到账记录确认入账。账户停用后已发起的单照常核对。
  */
 class AlipayTransferService extends AbstractService
 {
-    /** 系统配置里的设置项 */
-    public const SETTING_KEY = 'payment.alipay_transfer';
-
     public const DEFAULT_EXPIRE_MINUTES = 15;
 
     public const DEFAULT_MIN_AMOUNT = '1.00';
@@ -69,13 +70,19 @@ class AlipayTransferService extends AbstractService
     private const MAX_QUERY_DAYS = 31;
 
     #[Inject]
-    protected SettingService $settingService;
+    protected AlipayAccountDao $accountDao;
+
+    #[Inject]
+    protected MerchantDao $merchantDao;
 
     #[Inject]
     protected MerchantOnlinePaymentDao $paymentDao;
 
     #[Inject]
     protected MerchantBalanceService $balanceService;
+
+    #[Inject]
+    protected Encrypter $encrypter;
 
     #[Inject]
     protected HttpClient $http;
@@ -87,67 +94,38 @@ class AlipayTransferService extends AbstractService
     protected LoggerFactory $loggerFactory;
 
     /**
-     * 已保存的配置（不管有没有启用），没保存过返回 null。
-     *
-     * @return null|array{enabled: bool, app_id: string, private_key: string, alipay_public_key: string, account: string, account_name: string, expire_minutes: int, min_amount: string, max_amount: string}
+     * 商户能用的收款账户：指定了、并且启用的。
      */
-    public function config(): ?array
+    public function merchantAccount(int $merchantId): ?AlipayAccount
     {
-        $config = $this->settingService->get(self::SETTING_KEY);
-        if ($config === null) {
-            return null;
-        }
+        $accountId = $this->merchantDao->alipayAccountId($merchantId);
+        $account = $accountId === null ? null : $this->accountDao->find($accountId);
 
-        return [
-            'enabled' => (bool) ($config['enabled'] ?? false),
-            'app_id' => (string) ($config['app_id'] ?? ''),
-            'private_key' => (string) ($config['private_key'] ?? ''),
-            'alipay_public_key' => (string) ($config['alipay_public_key'] ?? ''),
-            'account' => (string) ($config['account'] ?? ''),
-            'account_name' => (string) ($config['account_name'] ?? ''),
-            'expire_minutes' => (int) ($config['expire_minutes'] ?? self::DEFAULT_EXPIRE_MINUTES),
-            'min_amount' => (string) ($config['min_amount'] ?? self::DEFAULT_MIN_AMOUNT),
-            'max_amount' => (string) ($config['max_amount'] ?? self::DEFAULT_MAX_AMOUNT),
-        ];
+        return $account !== null && $account->status === AlipayAccount::STATUS_ACTIVE ? $account : null;
+    }
+
+    public function client(AlipayAccount $account): AlipayClient
+    {
+        return new AlipayClient($this->http, $account->app_id, $this->encrypter->decrypt($account->private_key), $account->alipay_public_key);
     }
 
     /**
-     * 启用了的配置，没启用返回 null。
-     *
-     * @return null|array<string, mixed> 同 config()
-     */
-    public function enabledConfig(): ?array
-    {
-        $config = $this->config();
-
-        return $config !== null && $config['enabled'] ? $config : null;
-    }
-
-    /**
-     * @param array<string, mixed> $config config() 的结果
-     */
-    public function client(array $config): AlipayClient
-    {
-        return new AlipayClient($this->http, $config['app_id'], $config['private_key'], $config['alipay_public_key']);
-    }
-
-    /**
-     * 新建一笔待支付单，金额校验由调用方做。
+     * 新建一笔待支付单，金额格式校验由调用方做。
      */
     public function create(int $merchantId, ?int $merchantUserId, string $amount): MerchantOnlinePayment
     {
-        $config = $this->enabledConfig();
-        if ($config === null) {
+        $account = $this->merchantAccount($merchantId);
+        if ($account === null) {
             throw new HttpException(422, '暂未开通支付宝在线加款');
         }
-        if (bccomp($amount, $config['min_amount'], 2) < 0 || bccomp($amount, $config['max_amount'], 2) > 0) {
-            throw new HttpException(422, "单笔金额需在 {$config['min_amount']} ~ {$config['max_amount']} 元之间");
+        if (bccomp($amount, $account->min_amount, 2) < 0 || bccomp($amount, $account->max_amount, 2) > 0) {
+            throw new HttpException(422, "单笔金额需在 {$account->min_amount} ~ {$account->max_amount} 元之间");
         }
         if ($this->paymentDao->pendingCountForMerchant($merchantId) >= self::MAX_PENDING_PER_MERCHANT) {
             throw new HttpException(422, '待支付的单太多了，请先完成或取消之前的单');
         }
         $now = time();
-        $expiresAt = $now + $config['expire_minutes'] * 60;
+        $expiresAt = $now + $account->expire_minutes * 60;
         for ($try = 1; $try <= 30; ++$try) {
             $payAmount = bcadd($amount, bcdiv((string) random_int(1, 99), '100', 2), 2);
             try {
@@ -155,17 +133,18 @@ class AlipayTransferService extends AbstractService
                     'order_no' => self::ORDER_NO_PREFIX . date('YmdHis', $now) . str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT),
                     'merchant_id' => $merchantId,
                     'merchant_user_id' => $merchantUserId,
+                    'alipay_account_id' => $account->id,
                     'amount' => $amount,
                     'pay_amount' => $payAmount,
                     'active_amount' => $payAmount,
-                    'receive_account' => $config['account'],
-                    'receive_name' => $config['account_name'],
+                    'receive_account' => $account->account,
+                    'receive_name' => $account->account_name,
                     'status' => MerchantOnlinePayment::STATUS_PENDING,
                     'expires_at' => date('Y-m-d H:i:s', $expiresAt),
                     'checking_until' => date('Y-m-d H:i:s', $expiresAt + self::GRACE_MINUTES * 60),
                 ]);
             } catch (QueryException $e) {
-                // 应付金额被别的未结束的单占着，或者支付单号撞了：换一个重试
+                // 应付金额被这个账户别的未结束的单占着，或者支付单号撞了：换一个重试
                 if (str_contains($e->getMessage(), 'active_amount_unique') || str_contains($e->getMessage(), 'order_no_unique')) {
                     continue;
                 }
@@ -187,57 +166,47 @@ class AlipayTransferService extends AbstractService
     }
 
     /**
-     * 商户点「我已付款」：立即核对一次，全局 5 秒内最多查一次支付宝。
+     * 商户点「我已付款」：立即核对这单的收款账户，每个账户 5 秒内最多查一次支付宝。
      */
-    public function checkNow(): void
+    public function checkNow(MerchantOnlinePayment $p): void
     {
-        if ($this->lock->once('alipay_transfer:check', 5)) {
-            $this->reconcile();
+        if ($p->alipay_account_id !== null && $this->lock->once('alipay_transfer:check:' . $p->alipay_account_id, 5)) {
+            $this->reconcile($p->alipay_account_id);
         }
     }
 
     /**
-     * 自动核对所有还在核对期内的待支付单，返回入账了几笔。没启用、没有待核对的单时不调支付宝。
+     * 自动核对还在核对期内的待支付单（按收款账户分别查账务明细），返回入账了几笔。没有待核对的单时不调支付宝；
+     * 一个账户查询失败只记日志，不影响其他账户。
+     *
+     * @param null|int $accountId 只核对这个账户，null 表示全部
      */
-    public function reconcile(): int
+    public function reconcile(?int $accountId = null): int
     {
-        $config = $this->enabledConfig();
-        if ($config === null) {
-            return 0;
-        }
-        $token = $this->lock->acquire('alipay_transfer:reconcile', 60);
+        $lockKey = 'alipay_transfer:reconcile:' . ($accountId ?? 'all');
+        $token = $this->lock->acquire($lockKey, 60);
         if ($token === null) {
             return 0;
         }
         try {
-            $now = date('Y-m-d H:i:s');
-            $orders = $this->paymentDao->checking($now);
-            if ($orders->isEmpty()) {
-                return 0;
-            }
-            $start = date('Y-m-d H:i:s', $orders->min(static fn (MerchantOnlinePayment $p) => $p->created_at->getTimestamp()) - self::CLOCK_TOLERANCE);
-            // 结束时间不包含，往后一秒把这一秒的流水也查进来
-            $entries = $this->entries($config, $start, date('Y-m-d H:i:s', time() + 1));
-            $used = $this->usedLogIds($entries);
-            $byAmount = [];
-            foreach ($orders as $order) {
-                $byAmount[$order->pay_amount] = $order;
-            }
+            $orders = $this->paymentDao->checking(date('Y-m-d H:i:s'))
+                ->filter(static fn (MerchantOnlinePayment $p) => $p->alipay_account_id !== null && ($accountId === null || $p->alipay_account_id === $accountId));
             $credited = 0;
-            foreach ($entries as $entry) {
-                $order = $byAmount[$entry['amount']] ?? null;
-                if ($order === null || isset($used[$entry['account_log_id']]) || ! $this->matches($order, $entry, true)) {
+            foreach ($orders->groupBy('alipay_account_id') as $id => $group) {
+                $account = $this->accountDao->find((int) $id);
+                if ($account === null) {
                     continue;
                 }
-                if ($this->credit($order, $entry, MerchantOnlinePayment::CONFIRM_AUTO, null, null)) {
-                    unset($byAmount[$entry['amount']]);
-                    ++$credited;
+                try {
+                    $credited += $this->reconcileAccount($account, array_values($group->all()));
+                } catch (RuntimeException) {
+                    // 已记日志（entries()），下次再查
                 }
             }
 
             return $credited;
         } finally {
-            $this->lock->release('alipay_transfer:reconcile', $token);
+            $this->lock->release($lockKey, $token);
         }
     }
 
@@ -254,20 +223,21 @@ class AlipayTransferService extends AbstractService
     }
 
     /**
-     * 后台查找这单可能的到账记录：从下单起（最长 31 天）金额相等、还没入过账的收入流水。备注是这单单号的排前面。
+     * 后台查找这单可能的到账记录：在这单的收款账户里，从下单起（最长 31 天）金额相等、还没入过账的收入流水。
+     * 备注是这单单号的排前面。
      *
      * @return list<array{account_log_id: string, amount: string, trans_at: null|string, alipay_order_no: null|string, payer_account: null|string, memo: null|string, memo_matches: bool}>
      */
     public function candidates(MerchantOnlinePayment $p): array
     {
-        $config = $this->config();
-        if ($config === null) {
-            throw new HttpException(422, '还没有配置支付宝转账参数');
+        $account = $p->alipay_account_id === null ? null : $this->accountDao->find($p->alipay_account_id);
+        if ($account === null) {
+            throw new HttpException(422, '这笔单的收款账户不存在');
         }
         $start = $p->created_at->getTimestamp() - self::CLOCK_TOLERANCE;
         $end = min(time() + 1, $start + self::MAX_QUERY_DAYS * 86400);
         try {
-            $entries = $this->entries($config, date('Y-m-d H:i:s', $start), date('Y-m-d H:i:s', $end));
+            $entries = $this->entries($account, date('Y-m-d H:i:s', $start), date('Y-m-d H:i:s', $end));
         } catch (RuntimeException $e) {
             throw new HttpException(422, $e->getMessage());
         }
@@ -327,17 +297,46 @@ class AlipayTransferService extends AbstractService
     }
 
     /**
+     * 核对一个收款账户的待支付单。
+     *
+     * @param list<MerchantOnlinePayment> $orders
+     */
+    private function reconcileAccount(AlipayAccount $account, array $orders): int
+    {
+        $start = date('Y-m-d H:i:s', min(array_map(static fn (MerchantOnlinePayment $p) => $p->created_at->getTimestamp(), $orders)) - self::CLOCK_TOLERANCE);
+        // 结束时间不包含，往后一秒把这一秒的流水也查进来
+        $entries = $this->entries($account, $start, date('Y-m-d H:i:s', time() + 1));
+        $used = $this->usedLogIds($entries);
+        $byAmount = [];
+        foreach ($orders as $order) {
+            $byAmount[$order->pay_amount] = $order;
+        }
+        $credited = 0;
+        foreach ($entries as $entry) {
+            $order = $byAmount[$entry['amount']] ?? null;
+            if ($order === null || isset($used[$entry['account_log_id']]) || ! $this->matches($order, $entry, true)) {
+                continue;
+            }
+            if ($this->credit($order, $entry, MerchantOnlinePayment::CONFIRM_AUTO, null, null)) {
+                unset($byAmount[$entry['amount']]);
+                ++$credited;
+            }
+        }
+
+        return $credited;
+    }
+
+    /**
      * 查账务明细，整理成收入流水（入账时间升序）。支出、没有流水号、金额不对的丢掉。
      *
-     * @param array<string, mixed> $config
      * @return list<array{account_log_id: string, amount: string, trans_at: null|string, alipay_order_no: null|string, payer_account: null|string, memo: null|string}>
      */
-    private function entries(array $config, string $start, string $end): array
+    private function entries(AlipayAccount $account, string $start, string $end): array
     {
         try {
-            $items = $this->client($config)->accountLogs($start, $end);
+            $items = $this->client($account)->accountLogs($start, $end);
         } catch (Throwable $e) {
-            $this->logger()->error('查询支付宝账务明细失败', ['start' => $start, 'end' => $end, 'error' => $e->getMessage()]);
+            $this->logger()->error('查询支付宝账务明细失败', ['alipay_account_id' => $account->id, 'start' => $start, 'end' => $end, 'error' => $e->getMessage()]);
             throw new RuntimeException($e->getMessage(), 0, $e);
         }
         $entries = [];

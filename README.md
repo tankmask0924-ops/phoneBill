@@ -135,11 +135,11 @@ npm run build        # 产物在 merchant-web/dist，部署在 /merchant/ 路径
 | GET | `/admin/products`、`/admin/products/supplier-product-options`、`/admin/product-stats`、`/admin/product-categories` | `product.view` |
 | POST/PUT/DELETE | `/admin/products`、`/{id}`、`/{id}/status`；`DELETE /{id}` 是软删除，没有商户开通着、没有充值中的单才能删 | `product.manage` |
 | POST/PUT/DELETE | `/admin/product-categories`、`/{id}` | `product.manage` |
-| GET | `/admin/funding/requests`、`/requests/{id}`、`/payer-accounts`、`/merchant-options`、`/online-payments`、`/online-payments/{id}`、`/admin/receiving-accounts`、`/admin/merchants/{id}/receiving-accounts` | `funding.view` |
+| GET | `/admin/funding/requests`、`/requests/{id}`、`/payer-accounts`、`/merchant-options`、`/online-payments`、`/online-payments/{id}`、`/admin/receiving-accounts`、`/admin/merchants/{id}/receiving-accounts`、`/admin/merchants/{id}/alipay-account` | `funding.view` |
 | POST | `/admin/funding/requests/{id}/approve`、`/requests/{id}/reject`、`/payer-accounts/{id}/approve`、`/payer-accounts/{id}/reject`、`/online-payments/{id}/candidates`（查找到账记录）、`/online-payments/{id}/confirm`（确认入账） | `funding.review` |
-| POST/PUT | `/admin/receiving-accounts`、`/{id}`、`/{id}/status`、`/{id}/merchants`；`PUT /admin/merchants/{id}/receiving-accounts`（按商户配置） | `funding.config` |
+| POST/PUT | `/admin/receiving-accounts`、`/{id}`、`/{id}/status`、`/{id}/merchants`；`PUT /admin/merchants/{id}/receiving-accounts`（按商户配置）、`PUT /admin/merchants/{id}/alipay-account`（指定支付宝转账加款账户） | `funding.config` |
 | GET | `/admin/settings/public`（系统名称，登录页用） | 不用登录 |
-| GET/PUT/POST | `/admin/settings/site`（系统名称）、`/admin/settings/notify`（回调域名）、`/admin/settings/order`（重复充值拦截分钟数，0 表示不拦截）、`/admin/settings/storage`、`/admin/settings/storage/test`、`/admin/settings/alipay-transfer`、`/admin/settings/alipay-transfer/test`（支付宝转账加款） | `setting.manage` |
+| GET/PUT/POST | `/admin/settings/site`（系统名称）、`/admin/settings/notify`（回调域名）、`/admin/settings/order`（重复充值拦截分钟数，0 表示不拦截）、`/admin/settings/storage`、`/admin/settings/storage/test`；`/admin/alipay-accounts`、`/{id}`、`/{id}/status`、`/{id}/test`（支付宝转账加款账户） | `setting.manage` |
 | GET | `/admin/segments/lookup` | `risk.view` |
 | GET | `/admin/risk/blacklist`、`/admin/risk/maintenances`、`/admin/risk/maintenances/options` | `risk.view` |
 | POST/DELETE | `/admin/risk/blacklist`、`/admin/risk/blacklist/{id}`、`/admin/risk/maintenances`、`/{id}/finish` | `risk.manage` |

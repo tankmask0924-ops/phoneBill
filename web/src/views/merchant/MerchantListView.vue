@@ -6,7 +6,7 @@ import { Plus, WarningFilled } from '@element-plus/icons-vue'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { type AvailableProduct, type Merchant, merchantApi, type MerchantProduct, type MerchantUser } from '@/api/merchant'
 import type { OperatorCode } from '@/api/product'
-import { type ReceivingAccount, receivingAccountApi } from '@/api/funding'
+import { alipayAccountApi, type MerchantAlipayAccount, type ReceivingAccount, receivingAccountApi } from '@/api/funding'
 import { labelOf, operatorLabels, supplierStatusLabels, toOptions } from '@/utils/labels'
 import { usePermissionStore } from '@/stores/permission'
 
@@ -25,20 +25,28 @@ const receivingMerchant = ref<Merchant | null>(null)
 const receivingAccounts = ref<ReceivingAccount[]>([])
 const receivingIds = ref<number[]>([])
 const receivingSaving = ref(false)
+// 支付宝转账加款：一个商户指定一个账户，空表示不能用
+const alipayAccounts = ref<MerchantAlipayAccount['accounts']>([])
+const alipayAccountId = ref<number | null>(null)
 
 async function openReceiving(row: Merchant) {
   receivingMerchant.value = row
-  const accounts = await receivingAccountApi.forMerchant(row.id)
+  const [accounts, alipay] = await Promise.all([receivingAccountApi.forMerchant(row.id), alipayAccountApi.forMerchant(row.id)])
   receivingAccounts.value = accounts
   receivingIds.value = accounts.filter((a) => a.assigned).map((a) => a.id)
+  alipayAccounts.value = alipay.accounts
+  alipayAccountId.value = alipay.alipay_account_id
   receivingVisible.value = true
 }
 
 async function saveReceiving() {
   receivingSaving.value = true
   try {
-    await receivingAccountApi.assignToMerchant(receivingMerchant.value!.id, receivingIds.value)
-    ElMessage.success('已保存，商户只能看到、选用勾选的账户')
+    await Promise.all([
+      receivingAccountApi.assignToMerchant(receivingMerchant.value!.id, receivingIds.value),
+      alipayAccountApi.bindMerchant(receivingMerchant.value!.id, alipayAccountId.value ?? null),
+    ])
+    ElMessage.success('已保存')
     receivingVisible.value = false
   } finally {
     receivingSaving.value = false
@@ -621,6 +629,7 @@ onMounted(async () => {
   </el-drawer>
 
   <el-dialog v-model="receivingVisible" :title="`收款配置 · ${receivingMerchant?.name ?? ''}`" width="620px">
+    <h4 class="receiving-title">线下打款账户</h4>
     <div class="receiving-tip">勾选这个商户能看到的打款账户，商户提交加款申请时只能选这些；一个都不勾，商户就不能申请加款。</div>
     <el-empty v-if="receivingAccounts.length === 0" description="还没有收款账户，先到「商户中心 - 收款配置」新建" />
     <el-checkbox-group v-else v-model="receivingIds" class="receiving-list">
@@ -629,6 +638,12 @@ onMounted(async () => {
         <el-tag v-if="a.status !== 'active'" size="small" type="info" class="receiving-tag">已停用，商户看不到</el-tag>
       </el-checkbox>
     </el-checkbox-group>
+
+    <h4 class="receiving-title">支付宝转账加款账户</h4>
+    <div class="receiving-tip">商户扫码转账到这个账户、自动到账；不选就看不到「支付宝转账」入口。账户在「系统管理 - 系统配置」里管理。</div>
+    <el-select v-model="alipayAccountId" placeholder="不开通支付宝转账加款" clearable style="width: 100%">
+      <el-option v-for="a in alipayAccounts" :key="a.id" :label="`${a.name} · ${a.account}${a.status !== 'active' ? '（已停用）' : ''}`" :value="a.id" />
+    </el-select>
     <template #footer>
       <el-button @click="receivingVisible = false">取消</el-button>
       <el-button type="primary" :loading="receivingSaving" @click="saveReceiving">保存</el-button>
@@ -637,6 +652,14 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.receiving-title {
+  margin: 0 0 8px;
+}
+
+.receiving-title:not(:first-child) {
+  margin-top: 20px;
+}
+
 .users-tip,
 .user-form {
   margin-bottom: 12px;

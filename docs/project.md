@@ -187,7 +187,7 @@ stateDiagram-v2
 | 风控 | 号段查询、号码黑名单、通道维护 | 一（号段查询） / 二 |
 | 商户中心 | 商户、商户商品与价格、资金流水、加款申请（含付款账号审核）、收款配置 | 二 |
 | 订单中心 | 订单列表、异常订单 | 二 |
-| 系统管理 | 管理员、角色权限、操作日志（已有）、系统配置（系统名称、回调域名、下单设置、支付宝转账加款、图片存储） | — |
+| 系统管理 | 管理员、角色权限、操作日志（已有）、系统配置（系统名称、回调域名、下单设置、支付宝转账加款账户、图片存储） | — |
 
 ### 4.2 供应商
 
@@ -270,14 +270,15 @@ flowchart LR
     D -->|"核对期过了还没认上"| F["已过期<br/>后台查找到账记录确认入账"]
 ```
 
-- **配置**（系统管理 - 系统配置，`setting.manage`）：启用开关、开放平台 AppID、应用私钥（不回显，留空不改）、支付宝公钥、收款支付宝账号和收款人姓名、二维码有效期（5～60 分钟，默认 15）、单笔最低 / 最高金额；「测试连接」查最近一小时的账务明细。应用必须建在**收款账号所在的企业支付宝账户**下（账务明细接口只能查应用所属账户），开通账务明细查询权限，接口加签方式用**公钥**模式（RSA2）。签名、验签按开放平台通用协议自己实现（`App\Payment\AlipayClient`），没有引入 SDK。
-- **发起**：金额最多两位小数、在单笔限额内；一个商户同时最多 3 笔待支付。支付单号 `AT` + 年月日时分秒 + 6 位随机数。应付金额在所有**未结束**的支付单之间唯一（`active_amount` 唯一索引，撞了换一个随机分重试），入账按应付金额（实际到账的钱）。收款账号、姓名存快照，商户页面姓名只露最后一个字。
-- **认到账**：调 `alipay.data.bill.accountlog.query`（分页大小 2000，时间范围左闭右开、不超过 31 天），条件是**收入**、金额和应付金额**完全相等**、入账时间不早于发起时间（容忍 1 分钟时钟误差）且不晚于核对截止、这条流水没入过账。支付宝说明账务备注「不可依赖此字段进行对账」，所以备注不是必要条件；但备注里写的是别的支付单号时不认。
+- **收款账户**（系统管理 - 系统配置 - 支付宝转账加款账户，`setting.manage`）：可以建多个，每个是账户名称、开放平台 AppID、应用私钥（加密存储、不回显，编辑时留空不改）、支付宝公钥、收款支付宝账号和收款人姓名、二维码有效期（5～60 分钟，默认 15）、单笔最低 / 最高金额、备注；新增、编辑、启用 / 停用（不提供删除），「测试连接」用这个账户查最近一小时的账务明细。停用后指定用它的商户不能再发起，已发起的单照常核对。改收款账号、限额只影响之后发起的单（支付单存收款账号快照）。
+- **商户指定账户**（商户列表 -「收款配置」，`funding.config`）：一个商户指定一个账户（`merchants.alipay_account_id`），没指定或者账户停用，商户就看不到「支付宝转账」入口。和线下打款的收款账户在同一个弹窗里配置。应用必须建在**收款账号所在的企业支付宝账户**下（账务明细接口只能查应用所属账户），开通账务明细查询权限，接口加签方式用**公钥**模式（RSA2）。签名、验签按开放平台通用协议自己实现（`App\Payment\AlipayClient`），没有引入 SDK。
+- **发起**：用商户指定的账户；金额最多两位小数、在这个账户的单笔限额内；一个商户同时最多 3 笔待支付。支付单号 `AT` + 年月日时分秒 + 6 位随机数。应付金额在**同一个收款账户**的未结束支付单之间唯一（`(alipay_account_id, active_amount)` 唯一索引，撞了换一个随机分重试），入账按应付金额（实际到账的钱）。收款账号、姓名存快照，商户页面姓名只露最后一个字。
+- **认到账**：按收款账户分别调 `alipay.data.bill.accountlog.query`（一个账户查询失败只记日志，不影响其他账户）（分页大小 2000，时间范围左闭右开、不超过 31 天），条件是**收入**、金额和应付金额**完全相等**、入账时间不早于发起时间（容忍 1 分钟时钟误差）且不晚于核对截止、这条流水没入过账。支付宝说明账务备注「不可依赖此字段进行对账」，所以备注不是必要条件；但备注里写的是别的支付单号时不认。
 - **入账**：带条件把待支付（或已过期 / 已取消）改成已到账，记下账务流水号（唯一索引，一条流水只能入一单），同一个事务里按应付金额加余额、写一条「加款」资金流水（备注「支付宝转账 {单号} 自动到账」或「…后台确认入账」）。
-- **核对时机**：定时任务每分钟一次（`AlipayTransferCrontab`，没启用或没有待核对的单时不调支付宝）；商户点「我已付款」立即核对，全局 5 秒最多查一次。二维码到期后再核对 10 分钟（核对截止 = 到期时间 + 10 分钟），还没认上就**已过期**。
+- **核对时机**：定时任务每分钟一次（`AlipayTransferCrontab`，没启用或没有待核对的单时不调支付宝）；商户点「我已付款」立即核对这单的收款账户，每个账户 5 秒最多查一次。二维码到期后再核对 10 分钟（核对截止 = 到期时间 + 10 分钟），还没认上就**已过期**。
 - **金额释放**：已到账的立即释放应付金额；已过期、已取消的过了核对截止才释放，防止晚到的钱被认给之后同金额的单。
 - **取消**：商户只能取消待支付的单。
-- **后台处理**（加款申请页「在线支付」，查看 `funding.view`，处理 `funding.review`）：自动核对没认上的单（过期后才到账、备注写错等），点「查找到账记录」从发起时间起（最长 31 天）找金额相等、还没入过账的收入流水，备注是这单单号的排前面，选一条确认入账（服务端会重新查一遍，必须还在候选里）；实在查不到但已在支付宝里核实到账的，写明备注直接确认。都记操作日志。
+- **后台处理**（加款申请页「在线支付」，查看 `funding.view`，处理 `funding.review`）：自动核对没认上的单（过期后才到账、备注写错等），点「查找到账记录」在这单的收款账户里从发起时间起（最长 31 天）找金额相等、还没入过账的收入流水，备注是这单单号的排前面，选一条确认入账（服务端会重新查一遍，必须还在候选里）；实在查不到但已在支付宝里核实到账的，写明备注直接确认。都记操作日志。
 - 商户的操作记到 `merchant` 日志渠道，调支付宝和入账记到 `payment` 日志渠道。
 
 ### 4.7 订单中心
@@ -379,7 +380,8 @@ erDiagram
 | `merchant_receiving_accounts` | 收款账户分配给商户 | `merchant_id`、`receiving_account_id`；唯一 `(merchant_id, receiving_account_id)` |
 | `merchant_payer_accounts` | 商户付款账号 | `merchant_id`、`type`、`account_name`、`account_no`、`bank_name`、`status`（`pending` / `approved` / `rejected`）、`reject_reason`、`reviewed_by`、`reviewed_at` |
 | `merchant_funding_requests` | 加款申请 | `merchant_id`、`amount`、付款账号和收款账户的 id 与快照、`paid_at`、`remark`、`vouchers`（对象 key 列表）、`status`、`review_remark`、`reviewed_by`、`reviewed_at`、`balance_log_id` |
-| `merchant_online_payments` | 支付宝扫码转账加款 | `order_no`（唯一）、`merchant_id`、`amount`、`pay_amount`（应付，入账按这个）、`active_amount`（占用中的应付金额，唯一）、收款账号快照、`status`（`pending` / `paid` / `expired` / `cancelled`）、`expires_at`、`checking_until`、`confirm_type`（`auto` / `manual`）、`account_log_id`（唯一）、`alipay_order_no`、`payer_account`、`trans_memo`、`trans_at`、`remark`、`confirmed_by`、`balance_log_id` |
+| `alipay_accounts` | 支付宝转账加款的收款账户 | `name`、`app_id`、`private_key`（加密）、`alipay_public_key`、`account`、`account_name`、`expire_minutes`、`min_amount`、`max_amount`、`status`、`remark`；商户用哪个存在 `merchants.alipay_account_id` |
+| `merchant_online_payments` | 支付宝扫码转账加款 | `order_no`（唯一）、`merchant_id`、`alipay_account_id`、`amount`、`pay_amount`（应付，入账按这个）、`active_amount`（占用中的应付金额，和 `alipay_account_id` 一起唯一）、收款账号快照、`status`（`pending` / `paid` / `expired` / `cancelled`）、`expires_at`、`checking_until`、`confirm_type`（`auto` / `manual`）、`account_log_id`（唯一）、`alipay_order_no`、`payer_account`、`trans_memo`、`trans_at`、`remark`、`confirmed_by`、`balance_log_id` |
 | `system_settings` | 系统设置 | `key`（唯一）、`value`（JSON，整段加密） |
 | **订单** | | |
 | `orders` | 订单 | `order_no`（唯一）、`merchant_id`、`merchant_order_no`、`product_id`、`product_name`、`mobile`、`operator`、`province`、`face_value`、`sale_price`、`cost_price`、`profit`（利润）、`supplier_id`、`supplier_product_id`、`status`、`fail_reason`、`notify_url`、`notify_status`、`manual_only`（人工处理单）、`manual_notified_at`（最近一次手动回调）、`notify_round`（通知轮次）、`finished_at`；唯一 `(merchant_id, merchant_order_no)` |
@@ -549,7 +551,7 @@ app/Supplier/
 | 商户余额调整 | — | `merchant.balance` |
 | 加款申请（含付款账号审核） | `funding.view` | `funding.review`（审核通过即入账） |
 | 收款配置 | `funding.view` | `funding.config` |
-| 系统配置（系统名称、回调域名、下单设置、支付宝转账加款、图片存储） | — | `setting.manage` |
+| 系统配置（系统名称、回调域名、下单设置、支付宝转账加款账户、图片存储） | — | `setting.manage` |
 | 订单 | `order.view` | `order.manage`（查单、处理异常、手动回调、手动补单） |
 | 冲正 | — | `order.reverse` |
 

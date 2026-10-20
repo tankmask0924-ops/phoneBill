@@ -114,6 +114,9 @@ export interface OnlinePayment {
   amount: string
   /** 应付金额（加了随机分），入账按这个 */
   pay_amount: string
+  alipay_account_id: number | null
+  /** 收款的支付宝账户名称 */
+  alipay_account_name: string | null
   receive_account: string
   receive_name: string
   /** pending / paid / expired / cancelled */
@@ -147,17 +150,46 @@ export interface TransferCandidate {
   memo_matches: boolean
 }
 
-/** 支付宝转账加款配置：应用私钥不回显 */
-export interface AlipayTransferSetting {
-  enabled: boolean
+/** 支付宝转账加款账户：App\Controller\Admin\AlipayAccountController，应用私钥不回显 */
+export interface AlipayAccount {
+  id: number
+  name: string
   app_id: string
-  private_key_set: boolean
   alipay_public_key: string
   account: string
   account_name: string
   expire_minutes: number
   min_amount: string
   max_amount: string
+  status: string
+  remark: string | null
+  created_at: string | null
+  updated_at: string | null
+  /** 指定用这个账户的商户 */
+  merchant_names: string[]
+}
+
+export type AlipayAccountForm = Omit<AlipayAccount, 'id' | 'status' | 'remark' | 'created_at' | 'updated_at' | 'merchant_names'> & {
+  /** 新建必填，编辑时留空不改 */
+  private_key: string
+  remark: string
+}
+
+/** 商户指定的支付宝转账加款账户（一个），null 表示不能用 */
+export interface MerchantAlipayAccount {
+  alipay_account_id: number | null
+  accounts: { id: number; name: string; account: string; status: string }[]
+}
+
+export const alipayAccountApi = {
+  list: () => http.get<AlipayAccount[]>('/admin/alipay-accounts'),
+  create: (data: AlipayAccountForm) => http.post<AlipayAccount>('/admin/alipay-accounts', data),
+  update: (id: number, data: AlipayAccountForm) => http.put<AlipayAccount>(`/admin/alipay-accounts/${id}`, data),
+  changeStatus: (id: number, status: string) => http.post<AlipayAccount>(`/admin/alipay-accounts/${id}/status`, { status }),
+  test: (id: number) => http.post<{ success: boolean; message: string }>(`/admin/alipay-accounts/${id}/test`),
+  forMerchant: (merchantId: number) => http.get<MerchantAlipayAccount>(`/admin/merchants/${merchantId}/alipay-account`),
+  bindMerchant: (merchantId: number, accountId: number | null) =>
+    http.put<MerchantAlipayAccount>(`/admin/merchants/${merchantId}/alipay-account`, { alipay_account_id: accountId }),
 }
 
 /** 存储配置：App\Controller\Admin\SettingController */
@@ -187,8 +219,4 @@ export const settingApi = {
   order: () => http.get<{ duplicate_window_minutes: number }>('/admin/settings/order'),
   saveOrder: (minutes: number) =>
     http.put<{ duplicate_window_minutes: number }>('/admin/settings/order', { duplicate_window_minutes: minutes }),
-  alipayTransfer: () => http.get<AlipayTransferSetting>('/admin/settings/alipay-transfer'),
-  saveAlipayTransfer: (data: Omit<AlipayTransferSetting, 'private_key_set'> & { private_key: string }) =>
-    http.put<AlipayTransferSetting>('/admin/settings/alipay-transfer', data),
-  testAlipayTransfer: () => http.post<{ success: boolean; message: string }>('/admin/settings/alipay-transfer/test'),
 }

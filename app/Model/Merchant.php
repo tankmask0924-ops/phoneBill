@@ -31,6 +31,7 @@ use Hyperf\Database\Model\Events\Saved;
  * @property null|string $ip_whitelist
  * @property string $status
  * @property null|string $remark
+ * @property null|int $alipay_account_id 支付宝转账加款用的收款账户，空表示不能用
  * @property Carbon $created_at
  * @property Carbon $updated_at
  */

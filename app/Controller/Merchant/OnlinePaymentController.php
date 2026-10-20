@@ -36,7 +36,7 @@ class OnlinePaymentController extends AbstractController
     #[GetMapping(path: 'options')]
     public function options(): array
     {
-        return $this->paymentService->options();
+        return $this->paymentService->options($this->merchant());
     }
 
     #[GetMapping(path: '')]

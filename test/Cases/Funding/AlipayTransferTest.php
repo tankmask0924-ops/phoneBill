@@ -12,13 +12,14 @@ declare(strict_types=1);
 
 namespace HyperfTest\Cases\Funding;
 
+use App\Model\AlipayAccount;
 use App\Model\Merchant;
 use App\Model\MerchantBalanceLog;
 use App\Model\MerchantOnlinePayment;
 use App\Model\MerchantUser;
-use App\Model\SystemSetting;
 use App\Network\HttpClient;
 use App\Payment\AlipayClient;
+use App\Security\Encrypter;
 use App\Service\Payment\AlipayTransferService;
 use App\Support\RedisLock;
 use Hyperf\Context\ApplicationContext;
@@ -35,7 +36,8 @@ use RuntimeException;
 use function Hyperf\Support\make;
 
 /**
- * 支付宝扫码转账加款：客户端签名验签、系统配置、商户发起 / 取消、自动核对入账、过期、后台查找到账记录确认入账。
+ * 支付宝扫码转账加款：客户端签名验签、收款账户（多个）和商户指定、商户发起 / 取消、按账户自动核对入账、过期、
+ * 后台查找到账记录确认入账。
  *
  * @internal
  * @coversNothing
@@ -54,9 +56,8 @@ class AlipayTransferTest extends HttpTestCase
 
     private FakeHttpClient $http;
 
-    private ?string $originalSetting = null;
-
-    private bool $hadSetting = false;
+    /** @var list<int> */
+    private array $accountIds = [];
 
     protected function setUp(): void
     {
@@ -81,20 +82,13 @@ class AlipayTransferTest extends HttpTestCase
             }
         });
         $this->client = make(Client::class);
-        $row = SystemSetting::where('key', AlipayTransferService::SETTING_KEY)->first();
-        $this->hadSetting = $row !== null;
-        $this->originalSetting = $row?->value;
         self::$keys ??= self::generateKeys();
     }
 
     protected function tearDown(): void
     {
         MerchantOnlinePayment::whereIn('merchant_id', $this->merchantIds)->delete();
-        if ($this->hadSetting) {
-            SystemSetting::where('key', AlipayTransferService::SETTING_KEY)->update(['value' => $this->originalSetting]);
-        } else {
-            SystemSetting::where('key', AlipayTransferService::SETTING_KEY)->delete();
-        }
+        AlipayAccount::destroy($this->accountIds);
         $this->cleanUpCatalog();
         $this->cleanUpAdmins();
         parent::tearDown();
@@ -137,39 +131,51 @@ class AlipayTransferTest extends HttpTestCase
         $this->assertTrue(AlipayClient::isPublicKey(self::pemBody(self::$keys['alipay_public'])));
     }
 
-    public function testSettings()
+    public function testAccountsAndMerchantBinding()
     {
-        $admin = $this->loginAs($this->createAdminWithPermissions(['setting.manage']));
-        $valid = $this->settingData();
+        $admin = $this->loginAs($this->createAdminWithPermissions(['setting.manage', 'funding.view', 'funding.config']));
+        $valid = $this->accountData();
 
-        $this->assertSame(422, $this->jsonRequest('PUT', '/admin/settings/alipay-transfer', $admin, ['app_id' => 'abc'] + $valid)->getStatusCode());
-        $this->assertSame(422, $this->jsonRequest('PUT', '/admin/settings/alipay-transfer', $admin, ['alipay_public_key' => 'bad'] + $valid)->getStatusCode());
-        $this->assertSame(422, $this->jsonRequest('PUT', '/admin/settings/alipay-transfer', $admin, ['private_key' => 'bad'] + $valid)->getStatusCode());
-        $this->assertSame(422, $this->jsonRequest('PUT', '/admin/settings/alipay-transfer', $admin, ['account' => 'abc'] + $valid)->getStatusCode());
-        $this->assertSame(422, $this->jsonRequest('PUT', '/admin/settings/alipay-transfer', $admin, ['expire_minutes' => 2] + $valid)->getStatusCode());
-        $this->assertSame(422, $this->jsonRequest('PUT', '/admin/settings/alipay-transfer', $admin, ['min_amount' => '100', 'max_amount' => '10'] + $valid)->getStatusCode());
-
-        $saved = $this->body($this->jsonRequest('PUT', '/admin/settings/alipay-transfer', $admin, $valid));
-        $this->assertTrue($saved['private_key_set']);
-        $this->assertArrayNotHasKey('private_key', $saved);
-        $this->assertSame(['enabled' => true, 'app_id' => self::APP_ID, 'account' => 'pay@example.com', 'account_name' => '张三', 'expire_minutes' => 15, 'min_amount' => '1.00', 'max_amount' => '5000.00'], array_intersect_key($saved, array_flip(['enabled', 'app_id', 'account', 'account_name', 'expire_minutes', 'min_amount', 'max_amount'])));
+        foreach ([['app_id' => 'abc'], ['alipay_public_key' => 'bad'], ['private_key' => 'bad'], ['private_key' => ''], ['account' => 'abc'], ['expire_minutes' => 2], ['min_amount' => '100', 'max_amount' => '10'], ['name' => '']] as $bad) {
+            $this->assertSame(422, $this->jsonRequest('POST', '/admin/alipay-accounts', $admin, $bad + $valid)->getStatusCode(), json_encode($bad));
+        }
+        $first = $this->body($this->jsonRequest('POST', '/admin/alipay-accounts', $admin, $valid));
+        $second = $this->body($this->jsonRequest('POST', '/admin/alipay-accounts', $admin, ['name' => '备用账户', 'account' => '13800138000'] + $valid));
+        $this->accountIds = [$first['id'], $second['id']];
+        $this->assertArrayNotHasKey('private_key', $first);
+        $this->assertSame(['测试收款账户', 'pay@example.com', '张三', 15, '1.00', '5000.00', 'active'], [$first['name'], $first['account'], $first['account_name'], $first['expire_minutes'], $first['min_amount'], $first['max_amount'], $first['status']]);
+        $this->assertNotSame(trim(self::$keys['app_private']), AlipayAccount::find($first['id'])->private_key, '私钥加密存储');
 
         // 私钥留空不改
-        $this->jsonRequest('PUT', '/admin/settings/alipay-transfer', $admin, ['private_key' => '', 'enabled' => false] + $valid);
-        $config = make(AlipayTransferService::class)->config();
-        $this->assertSame(trim(self::$keys['app_private']), $config['private_key']);
-        $this->assertFalse($config['enabled']);
+        $updated = $this->body($this->jsonRequest('PUT', "/admin/alipay-accounts/{$first['id']}", $admin, ['private_key' => '', 'max_amount' => '8000'] + $valid));
+        $this->assertSame('8000.00', $updated['max_amount']);
+        $this->assertSame(trim(self::$keys['app_private']), make(Encrypter::class)->decrypt(AlipayAccount::find($first['id'])->private_key));
+        $this->assertSame('disabled', $this->body($this->jsonRequest('POST', "/admin/alipay-accounts/{$second['id']}/status", $admin, ['status' => 'disabled']))['status']);
 
-        // 测试连接：查最近一小时的账务明细
-        $this->http->responses = [$this->alipayResponse(['code' => '10000', 'total_size' => '0', 'detail_list' => []])];
-        $ok = $this->body($this->jsonRequest('POST', '/admin/settings/alipay-transfer/test', $admin));
+        // 测试连接：用这个账户查最近一小时的账务明细
+        $this->http->responses = [$this->accountLogs([])];
+        $ok = $this->body($this->jsonRequest('POST', "/admin/alipay-accounts/{$first['id']}/test", $admin));
         $this->assertTrue($ok['success'], $ok['message']);
+        $this->assertSame(self::APP_ID, $this->http->requests[0]['payload']['app_id']);
         $this->http->responses = [$this->alipayResponse(['code' => '40004', 'msg' => 'Business Failed', 'sub_msg' => 'ISV权限不足'])];
-        $failed = $this->body($this->jsonRequest('POST', '/admin/settings/alipay-transfer/test', $admin));
+        $failed = $this->body($this->jsonRequest('POST', "/admin/alipay-accounts/{$first['id']}/test", $admin));
         $this->assertFalse($failed['success']);
         $this->assertStringContainsString('ISV权限不足', $failed['message']);
 
-        $this->assertSame(403, $this->jsonRequest('GET', '/admin/settings/alipay-transfer', $this->loginAs($this->createAdminWithPermissions(['funding.view'])))->getStatusCode());
+        // 商户指定账户：一个商户一个，可以清空
+        $merchant = $this->createMerchant();
+        $this->assertNull($this->body($this->jsonRequest('GET', "/admin/merchants/{$merchant->id}/alipay-account", $admin))['alipay_account_id']);
+        $this->assertSame(422, $this->jsonRequest('PUT', "/admin/merchants/{$merchant->id}/alipay-account", $admin, ['alipay_account_id' => 999999999])->getStatusCode());
+        $bound = $this->body($this->jsonRequest('PUT', "/admin/merchants/{$merchant->id}/alipay-account", $admin, ['alipay_account_id' => $first['id']]));
+        $this->assertSame($first['id'], $bound['alipay_account_id']);
+        $this->assertContains(['id' => $second['id'], 'name' => '备用账户', 'account' => '13800138000', 'status' => 'disabled'], $bound['accounts']);
+        $listed = array_column($this->body($this->jsonRequest('GET', '/admin/alipay-accounts', $admin)), null, 'id');
+        $this->assertSame([$merchant->name], $listed[$first['id']]['merchant_names']);
+        $this->assertNull($this->body($this->jsonRequest('PUT', "/admin/merchants/{$merchant->id}/alipay-account", $admin, ['alipay_account_id' => null]))['alipay_account_id']);
+
+        $viewer = $this->loginAs($this->createAdminWithPermissions(['funding.view']));
+        $this->assertSame(403, $this->jsonRequest('GET', '/admin/alipay-accounts', $viewer)->getStatusCode());
+        $this->assertSame(403, $this->jsonRequest('PUT', "/admin/merchants/{$merchant->id}/alipay-account", $viewer, ['alipay_account_id' => $first['id']])->getStatusCode());
     }
 
     public function testMerchantPaysAndIsCreditedAutomatically()
@@ -178,11 +184,12 @@ class AlipayTransferTest extends HttpTestCase
         $token = $this->merchantLogin($mine);
         $theirToken = $this->merchantLogin($this->createMerchant());
 
-        // 没开通
+        // 没给这个商户指定账户
+        $account = $this->createAccount();
         $this->assertFalse($this->body($this->jsonRequest('GET', '/merchant/online-payments/options', $token))['enabled']);
         $this->assertSame(422, $this->jsonRequest('POST', '/merchant/online-payments', $token, ['amount' => '100'])->getStatusCode());
 
-        $this->saveSetting();
+        $this->bind($mine, $account);
         $this->assertSame(['enabled' => true, 'min_amount' => '1.00', 'max_amount' => '5000.00', 'expire_minutes' => 15], $this->body($this->jsonRequest('GET', '/merchant/online-payments/options', $token)));
         $this->assertSame(422, $this->jsonRequest('POST', '/merchant/online-payments', $token, ['amount' => '0.5'])->getStatusCode(), '低于最低金额');
         $this->assertSame(422, $this->jsonRequest('POST', '/merchant/online-payments', $token, ['amount' => '1.234'])->getStatusCode());
@@ -215,8 +222,9 @@ class AlipayTransferTest extends HttpTestCase
             ['account_log_id' => 'L-WRONG', 'trans_amount' => '100.00', 'direction' => '收入', 'trans_dt' => $now],
             ['account_log_id' => 'L-OK', 'trans_amount' => $p['pay_amount'], 'direction' => '收入', 'trans_dt' => $now, 'other_account' => 'pay***@qq.com', 'alipay_order_no' => '2026101922001', 'trans_memo' => '转账'],
         ])];
-        $this->assertSame(1, make(AlipayTransferService::class)->reconcile());
+        $this->assertSame(1, make(AlipayTransferService::class)->reconcile($account));
         $paid = MerchantOnlinePayment::find($p['id']);
+        $this->assertSame($account, $paid->alipay_account_id);
         $this->assertSame([MerchantOnlinePayment::STATUS_PAID, MerchantOnlinePayment::CONFIRM_AUTO, 'L-OK', 'pay***@qq.com', null], [$paid->status, $paid->confirm_type, $paid->account_log_id, $paid->payer_account, $paid->active_amount]);
         $this->assertSame(bcadd('10.00', $p['pay_amount'], 2), Merchant::find($mine->id)->balance);
         $log = MerchantBalanceLog::find($paid->balance_log_id);
@@ -225,7 +233,7 @@ class AlipayTransferTest extends HttpTestCase
 
         // 同一条流水不会再入账
         $this->http->responses = [$this->accountLogs([['account_log_id' => 'L-OK', 'trans_amount' => $second['pay_amount'], 'direction' => '收入', 'trans_dt' => $now]])];
-        $this->assertSame(0, make(AlipayTransferService::class)->reconcile());
+        $this->assertSame(0, make(AlipayTransferService::class)->reconcile($account));
 
         // 「我已付款」立即核对；取消
         $this->http->responses = [$this->accountLogs([])];
@@ -237,12 +245,45 @@ class AlipayTransferTest extends HttpTestCase
 
         $list = $this->body($this->jsonRequest('GET', '/merchant/online-payments?status=paid', $token));
         $this->assertSame([$p['id']], array_column($list['data'], 'id'));
+
+        // 账户停用：不能再发起，已发起的单照常核对
+        AlipayAccount::where('id', $account)->update(['status' => AlipayAccount::STATUS_DISABLED]);
+        $this->assertFalse($this->body($this->jsonRequest('GET', '/merchant/online-payments/options', $token))['enabled']);
+        $this->assertSame(422, $this->jsonRequest('POST', '/merchant/online-payments', $token, ['amount' => '100'])->getStatusCode());
+        $third = MerchantOnlinePayment::where('merchant_id', $mine->id)->where('status', 'pending')->first();
+        $this->http->responses = [$this->accountLogs([['account_log_id' => 'L-THIRD', 'trans_amount' => $third->pay_amount, 'direction' => '收入', 'trans_dt' => $now]])];
+        $this->assertSame(1, make(AlipayTransferService::class)->reconcile($account));
+    }
+
+    public function testEachAccountIsReconciledSeparately()
+    {
+        $accountA = $this->createAccount();
+        $accountB = $this->createAccount('2021000000000002');
+        $a = $this->createMerchant();
+        $b = $this->createMerchant();
+        $this->bind($a, $accountA);
+        $this->bind($b, $accountB);
+        $pa = $this->body($this->jsonRequest('POST', '/merchant/online-payments', $this->merchantLogin($a), ['amount' => '10']));
+        $pb = $this->body($this->jsonRequest('POST', '/merchant/online-payments', $this->merchantLogin($b), ['amount' => '10']));
+        $this->assertSame([$accountA, $accountB], [MerchantOnlinePayment::find($pa['id'])->alipay_account_id, MerchantOnlinePayment::find($pb['id'])->alipay_account_id]);
+
+        // 账户 A 的流水里有 B 的应付金额也不认给 B：各账户只认自己的单；A 查询失败不影响 B
+        $now = date('Y-m-d H:i:s');
+        $this->http->responses = [
+            $this->alipayResponse(['code' => '40004', 'msg' => 'Business Failed', 'sub_msg' => 'ISV权限不足']),
+            $this->accountLogs([['account_log_id' => 'B-1', 'trans_amount' => $pb['pay_amount'], 'direction' => '收入', 'trans_dt' => $now]]),
+        ];
+        make(AlipayTransferService::class)->reconcile();
+        $this->assertSame(['pending', 'paid'], [MerchantOnlinePayment::find($pa['id'])->status, MerchantOnlinePayment::find($pb['id'])->status]);
+        $appIds = array_map(static fn (array $r) => $r['payload']['app_id'], $this->http->requests);
+        $this->assertContains(self::APP_ID, $appIds);
+        $this->assertContains('2021000000000002', $appIds);
     }
 
     public function testExpireAndAdminConfirm()
     {
-        $this->saveSetting();
         $merchant = $this->createMerchant('0.00');
+        $this->bind($merchant, $this->createAccount());
         $token = $this->merchantLogin($merchant);
         $viewer = $this->loginAs($this->createAdminWithPermissions(['funding.view']));
         $reviewer = $this->loginAs($this->createAdminWithPermissions(['funding.view', 'funding.review']));
@@ -296,11 +337,11 @@ class AlipayTransferTest extends HttpTestCase
     /**
      * @return array<string, mixed>
      */
-    private function settingData(): array
+    private function accountData(string $appId = self::APP_ID): array
     {
         return [
-            'enabled' => true,
-            'app_id' => self::APP_ID,
+            'name' => '测试收款账户',
+            'app_id' => $appId,
             'private_key' => self::$keys['app_private'],
             'alipay_public_key' => self::pemBody(self::$keys['alipay_public']),
             'account' => 'pay@example.com',
@@ -308,13 +349,23 @@ class AlipayTransferTest extends HttpTestCase
             'expire_minutes' => 15,
             'min_amount' => '1',
             'max_amount' => '5000',
+            'remark' => '',
         ];
     }
 
-    private function saveSetting(): void
+    private function createAccount(string $appId = self::APP_ID): int
     {
         $admin = $this->loginAs($this->createAdminWithPermissions(['setting.manage']));
-        $this->assertSame(200, $this->jsonRequest('PUT', '/admin/settings/alipay-transfer', $admin, $this->settingData())->getStatusCode());
+        $account = $this->body($this->jsonRequest('POST', '/admin/alipay-accounts', $admin, $this->accountData($appId)));
+        $this->accountIds[] = $account['id'];
+
+        return $account['id'];
+    }
+
+    private function bind(Merchant $merchant, int $accountId): void
+    {
+        $admin = $this->loginAs($this->createAdminWithPermissions(['funding.config']));
+        $this->assertSame(200, $this->jsonRequest('PUT', "/admin/merchants/{$merchant->id}/alipay-account", $admin, ['alipay_account_id' => $accountId])->getStatusCode());
     }
 
     /**

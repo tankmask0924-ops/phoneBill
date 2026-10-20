@@ -48,19 +48,19 @@ class MerchantOnlinePaymentService extends AbstractService
     protected LoggerFactory $loggerFactory;
 
     /**
-     * 有没有开通、金额范围、二维码有效期。
+     * 有没有开通（平台给这个商户指定了启用的账户）、金额范围、二维码有效期。
      *
      * @return array{enabled: bool, min_amount: null|string, max_amount: null|string, expire_minutes: null|int}
      */
-    public function options(): array
+    public function options(Merchant $merchant): array
     {
-        $config = $this->transferService->enabledConfig();
+        $account = $this->transferService->merchantAccount($merchant->id);
 
         return [
-            'enabled' => $config !== null,
-            'min_amount' => $config['min_amount'] ?? null,
-            'max_amount' => $config['max_amount'] ?? null,
-            'expire_minutes' => $config['expire_minutes'] ?? null,
+            'enabled' => $account !== null,
+            'min_amount' => $account?->min_amount,
+            'max_amount' => $account?->max_amount,
+            'expire_minutes' => $account?->expire_minutes,
         ];
     }
 
@@ -120,7 +120,7 @@ class MerchantOnlinePaymentService extends AbstractService
         $p = $this->find($merchant, $id);
         if ($p->status === MerchantOnlinePayment::STATUS_PENDING) {
             try {
-                $this->transferService->checkNow();
+                $this->transferService->checkNow($p);
             } catch (Throwable) {
                 // 已记日志，等定时核对
             }

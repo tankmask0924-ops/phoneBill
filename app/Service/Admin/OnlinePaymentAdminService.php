@@ -14,6 +14,7 @@ namespace App\Service\Admin;
 
 use App\Dao\AdminOperationLogDao;
 use App\Dao\AdminUserDao;
+use App\Dao\AlipayAccountDao;
 use App\Dao\MerchantDao;
 use App\Dao\MerchantOnlinePaymentDao;
 use App\Model\AdminUser;
@@ -51,10 +52,13 @@ class OnlinePaymentAdminService extends AbstractService
     protected AdminUserDao $adminUserDao;
 
     #[Inject]
+    protected AlipayAccountDao $accountDao;
+
+    #[Inject]
     protected AdminOperationLogDao $operationLogDao;
 
     /**
-     * @param array<string, mixed> $query status / merchant_id / keyword（支付单号）/ created_from / created_to
+     * @param array<string, mixed> $query status / merchant_id / alipay_account_id / keyword（支付单号）/ created_from / created_to
      * @return array{data: list<array<string, mixed>>, total: int, page: int, per_page: int}
      */
     public function list(array $query): array
@@ -69,6 +73,9 @@ class OnlinePaymentAdminService extends AbstractService
         if (isset($query['merchant_id']) && is_numeric($query['merchant_id'])) {
             $builder->where('merchant_id', (int) $query['merchant_id']);
         }
+        if (isset($query['alipay_account_id']) && is_numeric($query['alipay_account_id'])) {
+            $builder->where('alipay_account_id', (int) $query['alipay_account_id']);
+        }
         $keyword = trim(is_string($query['keyword'] ?? null) ? $query['keyword'] : '');
         if ($keyword !== '') {
             $builder->where('order_no', $keyword);
@@ -79,9 +86,10 @@ class OnlinePaymentAdminService extends AbstractService
         $rows = $builder->orderByDesc('id')->forPage($page, $perPage)->get();
         $merchants = $this->merchantNames($rows->pluck('merchant_id')->all());
         $admins = $this->adminNames($rows->pluck('confirmed_by')->all());
+        $accounts = $this->accountDao->names($rows->pluck('alipay_account_id')->all());
 
         return [
-            'data' => $rows->map(fn (MerchantOnlinePayment $p) => $this->format($p, $merchants, $admins))->values()->all(),
+            'data' => $rows->map(fn (MerchantOnlinePayment $p) => $this->format($p, $merchants, $admins, $accounts))->values()->all(),
             'total' => $total,
             'page' => $page,
             'per_page' => $perPage,
@@ -95,7 +103,7 @@ class OnlinePaymentAdminService extends AbstractService
     {
         $p = $this->find($id);
 
-        return $this->format($p, $this->merchantNames([$p->merchant_id]), $this->adminNames([$p->confirmed_by]));
+        return $this->format($p, $this->merchantNames([$p->merchant_id]), $this->adminNames([$p->confirmed_by]), $this->accountDao->names([$p->alipay_account_id]));
     }
 
     /**
@@ -168,9 +176,10 @@ class OnlinePaymentAdminService extends AbstractService
     /**
      * @param array<int, string> $merchants
      * @param array<int, string> $admins
+     * @param array<int, string> $accounts
      * @return array<string, mixed>
      */
-    private function format(MerchantOnlinePayment $p, array $merchants, array $admins): array
+    private function format(MerchantOnlinePayment $p, array $merchants, array $admins, array $accounts): array
     {
         return [
             'id' => $p->id,
@@ -179,6 +188,8 @@ class OnlinePaymentAdminService extends AbstractService
             'merchant_name' => $merchants[$p->merchant_id] ?? null,
             'amount' => $p->amount,
             'pay_amount' => $p->pay_amount,
+            'alipay_account_id' => $p->alipay_account_id,
+            'alipay_account_name' => $p->alipay_account_id ? ($accounts[$p->alipay_account_id] ?? null) : null,
             'receive_account' => $p->receive_account,
             'receive_name' => $p->receive_name,
             'status' => $p->status,

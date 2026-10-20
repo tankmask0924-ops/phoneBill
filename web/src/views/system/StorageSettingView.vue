@@ -2,6 +2,7 @@
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { onMounted, reactive, ref } from 'vue'
 import { settingApi } from '@/api/funding'
+import AlipayAccountCard from './AlipayAccountCard.vue'
 import { useSiteStore } from '@/stores/site'
 
 // ---- 基本设置 ----
@@ -46,77 +47,6 @@ async function saveOrder() {
     ElMessage.success(duplicateWindow.value === 0 ? '已保存，不再拦截重复充值' : '已保存，新下的订单立即生效')
   } finally {
     orderSaving.value = false
-  }
-}
-
-// ---- 支付宝转账加款 ----
-const alipayLoading = ref(false)
-const alipaySaving = ref(false)
-const alipayTesting = ref(false)
-const privateKeySet = ref(false)
-const alipayFormRef = ref<FormInstance>()
-const alipay = reactive({
-  enabled: false,
-  app_id: '',
-  private_key: '',
-  alipay_public_key: '',
-  account: '',
-  account_name: '',
-  expire_minutes: 15,
-  min_amount: '1.00',
-  max_amount: '50000.00',
-})
-
-const alipayRules: FormRules = {
-  app_id: [{ required: true, pattern: /^\d{16}$/, message: 'AppID 是 16 位数字', trigger: 'blur' }],
-  alipay_public_key: [{ required: true, message: '请粘贴支付宝公钥', trigger: 'blur' }],
-  account: [{ required: true, message: '请输入收款支付宝账号', trigger: 'blur' }],
-  account_name: [{ required: true, message: '请输入收款人姓名', trigger: 'blur' }],
-  min_amount: [{ required: true, message: '请输入单笔最低金额', trigger: 'blur' }],
-  max_amount: [{ required: true, message: '请输入单笔最高金额', trigger: 'blur' }],
-}
-
-async function loadAlipay() {
-  alipayLoading.value = true
-  try {
-    const { private_key_set, ...rest } = await settingApi.alipayTransfer()
-    Object.assign(alipay, rest, { private_key: '' })
-    privateKeySet.value = private_key_set
-  } finally {
-    alipayLoading.value = false
-  }
-}
-
-async function saveAlipay() {
-  if (!(await alipayFormRef.value?.validate().catch(() => false))) {
-    return
-  }
-  if (!privateKeySet.value && !alipay.private_key) {
-    ElMessage.warning('请粘贴应用私钥')
-    return
-  }
-  alipaySaving.value = true
-  try {
-    const { private_key_set, ...rest } = await settingApi.saveAlipayTransfer({ ...alipay })
-    Object.assign(alipay, rest, { private_key: '' })
-    privateKeySet.value = private_key_set
-    ElMessage.success('已保存，建议点「测试连接」确认一下')
-  } finally {
-    alipaySaving.value = false
-  }
-}
-
-async function testAlipay() {
-  alipayTesting.value = true
-  try {
-    const result = await settingApi.testAlipayTransfer()
-    if (result.success) {
-      ElMessage.success(result.message)
-    } else {
-      ElMessage.error({ message: `测试失败：${result.message}`, duration: 8000 })
-    }
-  } finally {
-    alipayTesting.value = false
   }
 }
 
@@ -180,7 +110,6 @@ async function test() {
 
 onMounted(async () => {
   load()
-  loadAlipay()
   settingApi.site().then((s) => (siteName.value = s.name))
   notifyBase.value = (await settingApi.notify()).base_url
   duplicateWindow.value = (await settingApi.order()).duplicate_window_minutes
@@ -231,53 +160,7 @@ onMounted(async () => {
     </el-form>
   </el-card>
 
-  <el-card v-loading="alipayLoading" shadow="never" header="支付宝转账加款" class="block">
-    <el-alert type="info" :closable="false" show-icon class="tip-bar">
-      商户在加款页面扫码，用支付宝向下面的收款账号转账（金额带随机分、备注填支付单号），系统每分钟查一次收款账号的<b>账务明细</b>，
-      金额对上就自动入账。需要在支付宝开放平台为<b>收款账号所在的企业账户</b>创建应用、开通账务明细查询权限，接口加签方式选<b>公钥</b>。
-    </el-alert>
-    <el-form ref="alipayFormRef" :model="alipay" :rules="alipayRules" label-width="110px" style="max-width: 640px">
-      <el-form-item label="启用">
-        <el-switch v-model="alipay.enabled" />
-        <span class="unit">关闭后商户看不到这个入口，已发起的单照常核对</span>
-      </el-form-item>
-      <el-form-item label="AppID" prop="app_id">
-        <el-input v-model="alipay.app_id" maxlength="16" placeholder="开放平台应用的 AppID" />
-      </el-form-item>
-      <el-form-item label="应用私钥">
-        <el-input
-          v-model="alipay.private_key"
-          type="textarea"
-          :rows="3"
-          autocomplete="off"
-          :placeholder="privateKeySet ? '已设置，不改请留空' : '必填，支付宝密钥工具生成的应用私钥'"
-        />
-      </el-form-item>
-      <el-form-item label="支付宝公钥" prop="alipay_public_key">
-        <el-input v-model="alipay.alipay_public_key" type="textarea" :rows="3" placeholder="开放平台「接口加签方式」里的支付宝公钥，不是应用公钥" />
-      </el-form-item>
-      <el-form-item label="收款账号" prop="account">
-        <el-input v-model="alipay.account" maxlength="64" placeholder="手机号或邮箱，必须是创建应用的那个支付宝账户" />
-      </el-form-item>
-      <el-form-item label="收款人姓名" prop="account_name">
-        <el-input v-model="alipay.account_name" maxlength="64" placeholder="商户页面只显示最后一个字" />
-      </el-form-item>
-      <el-form-item label="二维码有效期">
-        <el-input-number v-model="alipay.expire_minutes" :min="5" :max="60" :step="5" controls-position="right" />
-        <span class="unit">分钟，到期后还会再自动核对 10 分钟</span>
-      </el-form-item>
-      <el-form-item label="单笔金额" required>
-        <el-input v-model="alipay.min_amount" style="width: 140px" placeholder="最低" />
-        <span class="unit">~</span>
-        <el-input v-model="alipay.max_amount" style="width: 140px; margin-left: 8px" placeholder="最高" />
-        <span class="unit">元</span>
-      </el-form-item>
-      <el-form-item>
-        <el-button type="primary" :loading="alipaySaving" @click="saveAlipay">保存</el-button>
-        <el-button :loading="alipayTesting" @click="testAlipay">测试连接</el-button>
-      </el-form-item>
-    </el-form>
-  </el-card>
+  <AlipayAccountCard class="block" />
 
   <el-card v-loading="loading" shadow="never" header="图片存储（腾讯云 COS）">
     <el-alert type="info" :closable="false" show-icon class="tip-bar">
