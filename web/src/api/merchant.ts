@@ -11,7 +11,12 @@ export interface Merchant {
   contact: string | null
   phone: string | null
   app_key: string
+  /** 有授信时可以是负数 */
   balance: string
+  /** 授信额度：余额最低可以扣到它的负数，0 表示不能负数 */
+  credit_limit: string
+  /** 可用额度 = 余额 + 授信额度 */
+  available_balance: string
   notify_url: string | null
   /** IP 或 CIDR，空数组表示不限制 */
   ip_whitelist: string[]
@@ -86,6 +91,7 @@ export const merchantApi = {
   resetSecret: (id: number) => http.post<{ app_key: string; app_secret: string }>(`/admin/merchants/${id}/secret`),
   adjustBalance: (id: number, data: { type: 'recharge' | 'deduct'; amount: string; remark: string }) =>
     http.post<Merchant>(`/admin/merchants/${id}/balance`, data),
+  setCreditLimit: (id: number, creditLimit: string) => http.put<Merchant>(`/admin/merchants/${id}/credit-limit`, { credit_limit: creditLimit }),
   products: (id: number) => http.get<MerchantProduct[]>(`/admin/merchants/${id}/products`),
   availableProducts: (id: number) => http.get<AvailableProduct[]>(`/admin/merchants/${id}/available-products`),
   saveProduct: (id: number, productId: number, data: { status?: string; prices: Partial<Record<OperatorCode, string>> }) =>

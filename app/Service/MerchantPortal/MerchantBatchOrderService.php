@@ -95,9 +95,8 @@ class MerchantBatchOrderService extends AbstractService
             'items' => $items,
             'valid_count' => count(array_filter($items, static fn (array $i) => $i['ok'])),
             'total_amount' => $total,
-            // 登录态里的商户可能是旧的，余额查最新的
-            'balance' => $this->merchantDao->find($merchant->id)?->balance,
-        ];
+            // 登录态里的商户可能是旧的，余额查最新的；够不够下单看可用额度（余额 + 授信）
+        ] + $this->balances($merchant);
     }
 
     /**
@@ -152,8 +151,7 @@ class MerchantBatchOrderService extends AbstractService
             'items' => $items,
             'success_count' => $successCount,
             'failed_count' => count($items) - $successCount,
-            'balance' => $this->merchantDao->find($merchant->id)?->balance,
-        ];
+        ] + $this->balances($merchant);
     }
 
     /**
@@ -199,5 +197,15 @@ class MerchantBatchOrderService extends AbstractService
         }
 
         return [$productCode, $mobiles];
+    }
+
+    /**
+     * @return array{balance: null|string, credit_limit: null|string, available_balance: null|string}
+     */
+    private function balances(Merchant $merchant): array
+    {
+        $fresh = $this->merchantDao->find($merchant->id);
+
+        return ['balance' => $fresh?->balance, 'credit_limit' => $fresh?->credit_limit, 'available_balance' => $fresh?->availableBalance()];
     }
 }

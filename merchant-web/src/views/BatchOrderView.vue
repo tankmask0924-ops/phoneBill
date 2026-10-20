@@ -30,7 +30,7 @@ const validMobiles = computed(() => preview.value?.items.filter((i) => i.ok).map
 
 const balanceShort = computed(() => {
   const p = preview.value
-  return p !== null && p.balance !== null && Number(p.balance) < Number(p.total_amount)
+  return p !== null && p.available_balance !== null && Number(p.available_balance) < Number(p.total_amount)
 })
 
 function productText(p: CatalogProduct): string {
@@ -78,7 +78,7 @@ async function doPreview() {
 
 async function submit() {
   const p = preview.value!
-  const tip = balanceShort.value ? `当前余额 ${p.balance} 元，不够全部下单，余额不足的号码会下单失败。` : ''
+  const tip = balanceShort.value ? `当前可用额度 ${p.available_balance} 元，不够全部下单，额度不足的号码会下单失败。` : ''
   try {
     await ElMessageBox.confirm(
       `将为 ${p.valid_count} 个号码下单，预计扣款 ${p.total_amount} 元（每个号码单独扣款，失败自动退款）。${tip}确定下单吗？`,
@@ -155,7 +155,8 @@ onMounted(async () => {
         <template #title>
           {{ selectedProduct ? productText(selectedProduct) : productCode }}：共 {{ preview.items.length }} 个号码，
           可下单 <b>{{ preview.valid_count }}</b> 个，预计扣款 <b>{{ preview.total_amount }}</b> 元，当前余额 {{ preview.balance }} 元
-          <template v-if="balanceShort">，余额不够全部下单</template>
+          <template v-if="Number(preview.credit_limit) > 0">（授信 {{ preview.credit_limit }} 元，可用 {{ preview.available_balance }} 元）</template>
+          <template v-if="balanceShort">，额度不够全部下单</template>
         </template>
       </el-alert>
       <el-table :data="preview.items" border max-height="520">
@@ -189,7 +190,7 @@ onMounted(async () => {
     <template v-else-if="step === 'result' && result">
       <el-alert :type="result.failed_count ? 'warning' : 'success'" :closable="false" show-icon class="summary">
         <template #title>
-          下单成功 <b>{{ result.success_count }}</b> 个，失败 <b>{{ result.failed_count }}</b> 个，当前余额 {{ result.balance }} 元。
+          下单成功 <b>{{ result.success_count }}</b> 个，失败 <b>{{ result.failed_count }}</b> 个，当前余额 {{ result.balance }} 元<template v-if="Number(result.credit_limit) > 0">（可用 {{ result.available_balance }} 元）</template>。
           下单成功只是平台已受理，充值结果以订单记录和回调为准。
         </template>
       </el-alert>

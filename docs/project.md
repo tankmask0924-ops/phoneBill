@@ -81,6 +81,7 @@ flowchart LR
 
 - 商户预存余额。商户线下打款，管理员在后台手动加款（也可以手动扣款），必须填备注。
 - 下单成功即扣款；订单最终失败时退回。每一笔余额变动都写资金流水。
+- **授信额度**：每个商户可以设一个授信额度（默认 0，即不能负数）。**可用额度 = 余额 + 授信额度**，扣款时只要扣完余额不低于「负的授信额度」就允许，余额可以是负数；加款（线下打款审核、支付宝转账、后台加款）照常加，负数自然变少，不单独做还款。下单、后台手动扣款都受这个限制；只有订单「失败改成功」重新扣款不受限制（钱已经花在供应商那边，拦住账就对不上），可能扣到超出授信。授信在商户列表里设（`merchant.credit`），金额 0 ~ 1000 万、最多两位小数，只记操作日志不写资金流水；调低到比当前欠款还少也允许，已有欠款不动，还到授信线以上之前不能再下单。
 - 冲正（成功订单事后被供应商撤销）：管理员手动改为失败并退款，需单独权限，必须填原因。
 
 ### 2.5 订单与风控
@@ -233,7 +234,8 @@ stateDiagram-v2
 
 - **商户**：名称、联系人、电话、状态、AppKey / AppSecret（可重置）、回调地址、IP 白名单；管理商户后台登录账号（可多个，创建、重置密码、启停）。
 - **商户商品与价格**：为商户开通商品，按运营商设置价格（开通时带出默认售价）。
-- **余额调整**：加款/扣款，必须填备注，记录操作人。
+- **余额调整**：加款/扣款，必须填备注，记录操作人。扣款不能超出授信额度（见 2.4）。
+- **授信额度**（`merchant.credit`）：商户列表「授信」设置，列表的余额列在有授信时显示授信和可用额度，负数余额标红。
 - **资金流水**：所有商户的余额变动，显示关联订单的手机号；可按平台订单号（不限日期）、商户、类型、时间筛选。
 
 ### 4.6.1 加款申请与收款配置
@@ -299,7 +301,7 @@ flowchart LR
 
 | 页面 | 内容 |
 |---|---|
-| 首页 | 当前余额；今日订单数、成功数、成功金额 |
+| 首页 | 当前余额（有授信时显示授信额度和可用额度）；今日订单数、成功数、成功金额 |
 | 订单记录 | 平台订单号、商户订单号、手机号、商品、运营商、扣款金额、状态、下单/完成时间；可按订单号、手机号（可批量）、状态、运营商、地区、时间筛选，看详情 |
 | 批量下单 | 选一个商品、粘贴手机号（最多 200 个），先预览每个号码的运营商、地区、价格或不能下单的原因和合计金额，确认后逐个下单，逐条显示结果（规则见下） |
 | 资金流水 | 类型（加款 / 下单扣款 / 失败退款 / 人工调整）、金额、变动后余额、关联订单号、手机号、时间；可按平台订单号或商户订单号筛选（不限日期） |
@@ -325,7 +327,7 @@ flowchart LR
 |---|---|
 | `POST /open/v1/recharge` | 下单：`product_code`、`mobile`、`merchant_order_no`、`notify_url`（可选，不传用商户配置的） |
 | `GET /open/v1/order` | 按平台订单号或商户订单号查单 |
-| `GET /open/v1/balance` | 查余额 |
+| `GET /open/v1/balance` | 查余额：`balance`（有授信时可能是负数）、`credit_limit`、`available_balance` |
 | `GET /open/v1/products` | 查已开通的商品及各运营商价格 |
 
 - 签名：参数按 key 排序拼接，用 `app_secret` 做 HMAC-SHA256；带 `timestamp`（5 分钟内有效）和 `nonce`（Redis 去重防重放）；校验 IP 白名单。
@@ -371,7 +373,7 @@ erDiagram
 | `mobile_blacklist` | 号码黑名单 | `mobile`（唯一）、`reason` |
 | `channel_maintenances` | 通道维护 | `supplier_id`、`operator`（可空）、`province`（可空）、`start_at`、`end_at`、`reason` |
 | **商户** | | |
-| `merchants` | 商户 | `name`、`contact`、`phone`、`app_key`（唯一）、`app_secret`（加密）、`balance`、`notify_url`、`ip_whitelist`、`status` |
+| `merchants` | 商户 | `name`、`contact`、`phone`、`app_key`（唯一）、`app_secret`（加密）、`balance`（有授信时可以是负数）、`credit_limit`（授信额度）、`alipay_account_id`（支付宝转账加款账户）、`notify_url`、`ip_whitelist`、`status` |
 | `merchant_users` | 商户后台账号 | `merchant_id`、`username`（唯一）、`password`、`status`、`last_login_at` |
 | `merchant_products` | 商户开通的商品 | `merchant_id`、`product_id`、`status`；唯一 `(merchant_id, product_id)` |
 | `merchant_product_prices` | 商户各运营商价格 | `merchant_product_id`、`operator`、`price`；唯一 `(merchant_product_id, operator)` |
@@ -549,6 +551,7 @@ app/Supplier/
 | 商户 | `merchant.view` | `merchant.manage` |
 | 商户商品与价格 | `merchant.view` | `merchant.price` |
 | 商户余额调整 | — | `merchant.balance` |
+| 商户授信额度 | — | `merchant.credit` |
 | 加款申请（含付款账号审核） | `funding.view` | `funding.review`（审核通过即入账） |
 | 收款配置 | `funding.view` | `funding.config` |
 | 系统配置（系统名称、回调域名、下单设置、支付宝转账加款账户、图片存储） | — | `setting.manage` |

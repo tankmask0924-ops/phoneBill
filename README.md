@@ -147,6 +147,7 @@ npm run build        # 产物在 merchant-web/dist，部署在 /merchant/ 路径
 | POST/PUT | `/admin/merchants`、`/{id}`、`/{id}/status`、`/{id}/secret` | `merchant.manage` |
 | PUT | `/admin/merchants/{id}/products/{productId}` | `merchant.price` |
 | POST | `/admin/merchants/{id}/balance` | `merchant.balance` |
+| PUT | `/admin/merchants/{id}/credit-limit`（授信额度） | `merchant.credit` |
 | GET | `/admin/orders`、`/filter-options`、`/export`、`/{id}`；`/admin/dashboard`（首页汇总，含销售额和利润）；`/admin/product-stats/provinces`（省份统计，含成功金额和利润） | `order.view` |
 | GET/POST | `/admin/orders/{id}/query`、`/{id}/success`、`/{id}/fail`、`/{id}/notify`（手动回调，选成功 / 失败，订单按选的结果改；成功改失败还要 `order.reverse`）、`/batch-notify`（批量手动回调）、`/{id}/resupply-options`、`/{id}/resupply`（手动补单） | `order.manage` |
 | POST | `/admin/orders/{id}/reverse` | `order.reverse` |

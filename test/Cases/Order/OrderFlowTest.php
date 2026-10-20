@@ -293,6 +293,26 @@ class OrderFlowTest extends HttpTestCase
         $this->assertSame('10.00', Merchant::find($poor->id)->balance);
     }
 
+    public function testCreditLimitAllowsNegativeBalance()
+    {
+        [, $product, $mobile] = $this->scenario([['provinces' => ['广东'], 'operators' => ['cmcc'], 'cost' => '98.00']]);
+        $merchant = $this->createMerchant('10.00');
+        $this->openProduct($merchant, $product, ['cmcc' => '99.50']);
+        Merchant::where('id', $merchant->id)->update(['credit_limit' => '100.00']);
+
+        // 余额 10 + 授信 100，够下一单 99.50，扣完余额 -89.50
+        $this->assertSame('OK', $this->api($merchant, 'POST', '/open/v1/recharge', ['product_code' => $product->code, 'mobile' => $mobile, 'merchant_order_no' => 'C1'])['code']);
+        $this->assertSame('-89.50', Merchant::find($merchant->id)->balance);
+        $this->assertSame(['balance' => '-89.50', 'credit_limit' => '100.00', 'available_balance' => '10.50'], $this->api($merchant, 'GET', '/open/v1/balance', [])['data']);
+
+        // 再下一单会超出授信：拒绝，不建单不扣款
+        $rejected = $this->api($merchant, 'POST', '/open/v1/recharge', ['product_code' => $product->code, 'mobile' => $this->createSegment('cmcc', '广东'), 'merchant_order_no' => 'C2']);
+        $this->assertSame('INSUFFICIENT_BALANCE', $rejected['code']);
+        $this->assertSame('可用额度不足：余额 -89.50 元，授信 100.00 元，需要 99.50 元', $rejected['message']);
+        $this->assertSame(1, Order::where('merchant_id', $merchant->id)->count());
+        $this->assertSame('-89.50', Merchant::find($merchant->id)->balance);
+    }
+
     public function testAuthentication()
     {
         $merchant = $this->createMerchant('5.00');
@@ -305,7 +325,7 @@ class OrderFlowTest extends HttpTestCase
         };
 
         $ok = $signed();
-        $this->assertSame(['code' => 'OK', 'message' => '成功', 'data' => ['balance' => '5.00']], $call($ok));
+        $this->assertSame(['code' => 'OK', 'message' => '成功', 'data' => ['balance' => '5.00', 'credit_limit' => '0.00', 'available_balance' => '5.00']], $call($ok));
         $this->assertSame('DUPLICATE_NONCE', $call($ok)['code']);
         $this->assertSame('INVALID_SIGN', $call(['sign' => 'bad'] + $signed())['code']);
         $this->assertSame('INVALID_TIMESTAMP', $call($signed(['timestamp' => (string) (time() - 3600)]))['code']);

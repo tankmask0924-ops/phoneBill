@@ -388,14 +388,11 @@ class OrderControllerTest extends HttpTestCase
         $this->assertSame(200, $this->jsonRequest('POST', "/admin/orders/{$abnormal->id}/notify", $token, ['result' => 'success', 'remark' => '重推'])->getStatusCode());
         $this->assertSame($balance, Merchant::find($merchant->id)->balance);
 
-        // 失败改成功、商户余额不够：拒绝，订单和余额都不变
+        // 失败改成功、商户可用额度不够：钱已经花在供应商那边，照扣，余额变成负数（即使超出授信）
         $poor = $this->createOrder($merchant, $product, $sp, Order::STATUS_FAILED);
-        Merchant::where('id', $merchant->id)->update(['balance' => '1.00']);
-        $response = $this->jsonRequest('POST', "/admin/orders/{$poor->id}/notify", $token, ['result' => 'success', 'remark' => 'x']);
-        $this->assertSame(422, $response->getStatusCode());
-        $this->assertStringContainsString('余额不足', $this->body($response)['message'] ?? (string) $response->getBody());
-        $this->assertSame(Order::STATUS_FAILED, Order::find($poor->id)->status);
-        $this->assertSame('1.00', Merchant::find($merchant->id)->balance);
+        Merchant::where('id', $merchant->id)->update(['balance' => '1.00', 'credit_limit' => '0.00']);
+        $this->assertSame('success', $this->body($this->jsonRequest('POST', "/admin/orders/{$poor->id}/notify", $token, ['result' => 'success', 'remark' => 'x']))['status']);
+        $this->assertSame(bcsub('1.00', $poor->sale_price, 2), Merchant::find($merchant->id)->balance);
     }
 
     public function testManualNotifySuccessToFailedNeedsReversePermission()

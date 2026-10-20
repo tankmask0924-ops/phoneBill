@@ -119,7 +119,7 @@ class OrderService extends AbstractService
                 }
             }
         } catch (InsufficientBalanceException $e) {
-            throw new OpenApiException(OpenApiException::INSUFFICIENT_BALANCE, "余额不足：当前 {$e->balance} 元，需要 {$e->required} 元");
+            throw new OpenApiException(OpenApiException::INSUFFICIENT_BALANCE, $e->getMessage());
         } catch (QueryException $e) {
             // 同一个商户订单号并发提交，唯一索引冲突：返回先建成的那一单
             $existing = $this->orderDao->findByMerchantOrderNo($merchant->id, $merchantOrderNo);

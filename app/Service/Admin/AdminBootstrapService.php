@@ -62,6 +62,7 @@ class AdminBootstrapService extends AbstractService
         ['code' => 'merchant.manage', 'module' => 'merchant', 'name' => '商户管理（资料、密钥、启停）', 'type' => 'action'],
         ['code' => 'merchant.price', 'module' => 'merchant', 'name' => '商户商品与价格', 'type' => 'action'],
         ['code' => 'merchant.balance', 'module' => 'merchant', 'name' => '商户加款扣款', 'type' => 'action'],
+        ['code' => 'merchant.credit', 'module' => 'merchant', 'name' => '商户授信额度（允许余额扣到负数）', 'type' => 'action'],
         ['code' => 'funding.view', 'module' => 'merchant', 'name' => '加款申请查看（含付款账号、收款配置）', 'type' => 'action'],
         ['code' => 'funding.review', 'module' => 'merchant', 'name' => '加款申请审核（入账）、付款账号审核', 'type' => 'action'],
         ['code' => 'funding.config', 'module' => 'merchant', 'name' => '收款配置（收款账户、分配给商户）', 'type' => 'action'],
@@ -88,7 +89,7 @@ class AdminBootstrapService extends AbstractService
         ],
         '财务' => [
             'remark' => '资金与对账',
-            'permissions' => ['operation_log.view', 'merchant.view', 'merchant.balance', 'order.view', 'funding.view', 'funding.review', 'funding.config'],
+            'permissions' => ['operation_log.view', 'merchant.view', 'merchant.balance', 'merchant.credit', 'order.view', 'funding.view', 'funding.review', 'funding.config'],
         ],
     ];
 

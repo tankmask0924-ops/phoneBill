@@ -136,6 +136,7 @@ class MerchantPortalTest extends HttpTestCase
 
         $dashboard = $this->body($this->jsonRequest('GET', '/merchant/dashboard', $token));
         $this->assertSame(Merchant::find($mine->id)->balance, $dashboard['balance']);
+        $this->assertSame(['0.00', $dashboard['balance']], [$dashboard['credit_limit'], $dashboard['available_balance']]);
         $this->assertSame(2, $dashboard['today']['order_count']);
         $this->assertSame(1, $dashboard['today']['success_count']);
         $this->assertSame('99.50', $dashboard['today']['success_amount']);

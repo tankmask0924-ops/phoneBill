@@ -24,7 +24,6 @@ use App\Dao\SupplierDao;
 use App\Dao\SupplierProductDao;
 use App\Enum\Operator;
 use App\Enum\Province;
-use App\Exception\InsufficientBalanceException;
 use App\Model\AdminUser;
 use App\Model\MerchantBalanceLog;
 use App\Model\Order;
@@ -482,8 +481,6 @@ class OrderAdminService extends AbstractService
             if (! $this->processService->settleManually($order, $to, $remark)) {
                 throw new HttpException(422, '订单状态已经变化，请刷新后再操作');
             }
-        } catch (InsufficientBalanceException $e) {
-            throw new HttpException(422, '失败改为成功要重新扣款，商户' . $e->getMessage());
         } finally {
             $this->lock->release("order:submit:{$order->id}", $token);
         }

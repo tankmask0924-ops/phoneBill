@@ -150,7 +150,7 @@ public static String sign(Map<String, Object> params, String secret) throws Exce
 | `NO_CHANNEL` | 该号码所在地区暂时无法充值 | 稍后再试 |
 | `BLACKLISTED` | 号码暂不支持充值 | |
 | `DUPLICATE_RECHARGE` | 该号码 10 分钟内有正在处理的同面值订单 | 等上一单出结果 |
-| `INSUFFICIENT_BALANCE` | 余额不足 | 充值后再下单 |
+| `INSUFFICIENT_BALANCE` | 余额不足（有授信时是可用额度不足，提示如「可用额度不足：余额 -89.50 元，授信 100.00 元，需要 99.50 元」） | 充值后再下单 |
 | `ORDER_NOT_FOUND` | 订单不存在 | |
 
 **以上错误都表示订单没有创建、没有扣款**，修正后可以用同一个商户订单号重新提交。
@@ -245,8 +245,14 @@ GET {BASE}/open/v1/order?app_key=ak_demo&merchant_order_no=M20261010001&timestam
 `GET {BASE}/open/v1/balance`，只需要公共参数。
 
 ```json
-{"code": "OK", "message": "成功", "data": {"balance": "1000.00"}}
+{"code": "OK", "message": "成功", "data": {"balance": "1000.00", "credit_limit": "0.00", "available_balance": "1000.00"}}
 ```
+
+| 字段 | 说明 |
+|---|---|
+| `balance` | 余额（元）。平台给了授信额度时可以是负数，表示欠款 |
+| `credit_limit` | 授信额度（元），没有授信为 `0.00` |
+| `available_balance` | 可用额度（元）= 余额 + 授信额度，下单时按这个判断够不够 |
 
 ### 3.4 查商品
 

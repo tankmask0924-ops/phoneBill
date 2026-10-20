@@ -15,12 +15,14 @@ namespace App\Exception;
 use RuntimeException;
 
 /**
- * 商户余额不够扣。
+ * 商户可用额度（余额 + 授信额度）不够扣。
  */
 class InsufficientBalanceException extends RuntimeException
 {
-    public function __construct(public readonly string $balance, public readonly string $required)
+    public function __construct(public readonly string $balance, public readonly string $required, public readonly string $creditLimit = '0.00')
     {
-        parent::__construct("余额不足：当前 {$balance} 元，需要 {$required} 元");
+        parent::__construct(bccomp($creditLimit, '0', 2) > 0
+            ? "可用额度不足：余额 {$balance} 元，授信 {$creditLimit} 元，需要 {$required} 元"
+            : "余额不足：当前 {$balance} 元，需要 {$required} 元");
     }
 }

@@ -12,6 +12,7 @@ declare(strict_types=1);
 
 namespace HyperfTest\Cases\Admin;
 
+use App\Model\AdminOperationLog;
 use App\Model\Merchant;
 use App\Model\MerchantBalanceLog;
 use App\Security\Encrypter;
@@ -123,6 +124,38 @@ class MerchantControllerTest extends HttpTestCase
         $this->assertSame($admin->real_name, $logs['data'][0]['admin_name']);
         $this->assertSame(0, $this->body($this->jsonRequest('GET', "/admin/balance-logs?merchant_id={$merchant->id}&type=order_pay", $token))['total']);
         $this->assertSame(2, MerchantBalanceLog::where('merchant_id', $merchant->id)->count());
+    }
+
+    public function testCreditLimitAllowsDeductingBelowZero()
+    {
+        $admin = $this->createAdminWithPermissions(['merchant.view', 'merchant.balance', 'merchant.credit', 'operation_log.view']);
+        $token = $this->loginAs($admin);
+        $merchant = $this->createMerchant();
+
+        foreach (['-1', 'abc', '1.234', '10000000.01', null] as $bad) {
+            $this->assertSame(422, $this->jsonRequest('PUT', "/admin/merchants/{$merchant->id}/credit-limit", $token, ['credit_limit' => $bad])->getStatusCode(), var_export($bad, true));
+        }
+        $set = $this->body($this->jsonRequest('PUT', "/admin/merchants/{$merchant->id}/credit-limit", $token, ['credit_limit' => '100']));
+        $this->assertSame(['0.00', '100.00', '100.00'], [$set['balance'], $set['credit_limit'], $set['available_balance']]);
+
+        // 扣到负数，但不能超出授信
+        $deducted = $this->body($this->jsonRequest('POST', "/admin/merchants/{$merchant->id}/balance", $token, ['type' => 'deduct', 'amount' => '80', 'remark' => '先用']));
+        $this->assertSame(['-80.00', '20.00'], [$deducted['balance'], $deducted['available_balance']]);
+        $response = $this->jsonRequest('POST', "/admin/merchants/{$merchant->id}/balance", $token, ['type' => 'deduct', 'amount' => '20.01', 'remark' => 'x']);
+        $this->assertSame(422, $response->getStatusCode());
+        $this->assertStringContainsString('超出授信额度', (string) $response->getBody());
+
+        // 调低到比欠款还少：允许，已有欠款不动；之后加款照常加（还欠款）
+        $lowered = $this->body($this->jsonRequest('PUT', "/admin/merchants/{$merchant->id}/credit-limit", $token, ['credit_limit' => '10']));
+        $this->assertSame(['-80.00', '10.00', '-70.00'], [$lowered['balance'], $lowered['credit_limit'], $lowered['available_balance']]);
+        $this->assertSame(422, $this->jsonRequest('POST', "/admin/merchants/{$merchant->id}/balance", $token, ['type' => 'deduct', 'amount' => '1', 'remark' => 'x'])->getStatusCode());
+        $this->assertSame('-30.00', $this->body($this->jsonRequest('POST', "/admin/merchants/{$merchant->id}/balance", $token, ['type' => 'recharge', 'amount' => '50', 'remark' => '还款']))['balance']);
+        $this->assertSame(2, AdminOperationLog::where('admin_user_id', $admin->id)->where('action', 'set_merchant_credit_limit')->where('target_id', $merchant->id)->count(), '改了两次授信');
+
+        // 授信要单独的权限
+        $balanceOnly = $this->loginAs($this->createAdminWithPermissions(['merchant.view', 'merchant.balance', 'merchant.manage']));
+        $this->assertSame(403, $this->jsonRequest('PUT', "/admin/merchants/{$merchant->id}/credit-limit", $balanceOnly, ['credit_limit' => '999'])->getStatusCode());
+        $this->assertSame('10.00', Merchant::find($merchant->id)->credit_limit);
     }
 
     public function testBalanceNeedsItsOwnPermission()

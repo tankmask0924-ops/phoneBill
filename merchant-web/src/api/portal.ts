@@ -7,7 +7,12 @@ type Query = Record<string, unknown>
 
 /** 商户后台：App\Controller\Merchant\PortalController */
 export interface Dashboard {
+  /** 有授信时可以是负数 */
   balance: string
+  /** 授信额度：余额最低可以扣到它的负数 */
+  credit_limit: string
+  /** 可用额度 = 余额 + 授信额度 */
+  available_balance: string
   merchant_status: string
   today: {
     order_count: number
@@ -234,6 +239,9 @@ export interface BatchPreview {
   valid_count: number
   total_amount: string
   balance: string | null
+  credit_limit: string | null
+  /** 可用额度 = 余额 + 授信额度，够不够下单看这个 */
+  available_balance: string | null
 }
 
 export interface BatchResultItem {
@@ -253,6 +261,8 @@ export interface BatchResult {
   success_count: number
   failed_count: number
   balance: string | null
+  credit_limit: string | null
+  available_balance: string | null
 }
 
 /** 批量下单：App\Controller\Merchant\BatchOrderController，一批最多 200 个号码 */

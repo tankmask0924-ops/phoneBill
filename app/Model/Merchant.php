@@ -27,6 +27,7 @@ use Hyperf\Database\Model\Events\Saved;
  * @property string $app_key
  * @property string $app_secret
  * @property string $balance
+ * @property string $credit_limit 授信额度，余额最低可以扣到它的负数
  * @property null|string $notify_url
  * @property null|string $ip_whitelist
  * @property string $status
@@ -46,11 +47,20 @@ class Merchant extends Model
         'app_key',
         'app_secret',
         'balance',
+        'credit_limit',
         'notify_url',
         'ip_whitelist',
         'status',
         'remark',
     ];
+
+    /**
+     * 可用额度 = 余额 + 授信额度。
+     */
+    public function availableBalance(): string
+    {
+        return bcadd((string) $this->balance, (string) ($this->credit_limit ?? '0'), 2);
+    }
 
     /**
      * @return list<string> IP 白名单（单个 IP 或 CIDR），空数组表示不限制

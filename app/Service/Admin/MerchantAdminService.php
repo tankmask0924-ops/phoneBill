@@ -40,6 +40,9 @@ class MerchantAdminService extends AbstractService
 
     private const MODULE = 'merchant';
 
+    /** 授信额度上限（元） */
+    private const MAX_CREDIT_LIMIT = '10000000';
+
     private const MAX_PER_PAGE = 100;
 
     #[Inject]
@@ -209,7 +212,9 @@ class MerchantAdminService extends AbstractService
         try {
             $log = Db::transaction(fn () => $this->balanceService->change($merchant->id, $type, $signed, null, $remark, $operator->id));
         } catch (InsufficientBalanceException $e) {
-            throw new HttpException(422, "扣款后余额会变成负数（当前余额 {$e->balance} 元）");
+            throw new HttpException(422, bccomp($e->creditLimit, '0', 2) > 0
+                ? "扣款后会超出授信额度（当前余额 {$e->balance} 元，授信 {$e->creditLimit} 元）"
+                : "扣款后余额会变成负数（当前余额 {$e->balance} 元）");
         }
         $this->operationLogDao->record(
             $operator->id,
@@ -221,6 +226,29 @@ class MerchantAdminService extends AbstractService
             ['balance' => $log->balance_after, 'amount' => $signed, 'remark' => $remark],
             $ip
         );
+
+        return $this->format($this->findOrFail($merchant->id));
+    }
+
+    /**
+     * 设置授信额度：余额最低可以扣到它的负数，0 表示不能负数。调低到比当前欠款还少也允许，已有欠款不动，
+     * 只是还到授信线以上之前不能再下单。授信不是钱，不写资金流水，只记操作日志。
+     *
+     * @return array<string, mixed>
+     */
+    public function setCreditLimit(AdminUser $operator, int $id, mixed $creditLimit, ?string $ip): array
+    {
+        $merchant = $this->findOrFail($id);
+        $value = is_string($creditLimit) || is_int($creditLimit) || is_float($creditLimit) ? trim((string) $creditLimit) : '';
+        if (preg_match('/^\d{1,9}(\.\d{1,2})?$/', $value) !== 1 || bccomp($value, self::MAX_CREDIT_LIMIT, 2) > 0) {
+            throw new HttpException(422, '授信额度是 0 ~ ' . self::MAX_CREDIT_LIMIT . ' 的金额，最多两位小数');
+        }
+        $value = bcadd($value, '0', 2);
+        $before = (string) $merchant->credit_limit;
+        if (bccomp($before, $value, 2) !== 0) {
+            $this->merchantDao->update($merchant->id, ['credit_limit' => $value]);
+            $this->operationLogDao->record($operator->id, self::MODULE, 'set_merchant_credit_limit', 'merchant', $merchant->id, ['credit_limit' => $before], ['credit_limit' => $value, 'balance' => $merchant->balance], $ip);
+        }
 
         return $this->format($this->findOrFail($merchant->id));
     }
@@ -299,6 +327,8 @@ class MerchantAdminService extends AbstractService
             'phone' => $merchant->phone,
             'app_key' => $merchant->app_key,
             'balance' => $merchant->balance,
+            'credit_limit' => $merchant->credit_limit,
+            'available_balance' => $merchant->availableBalance(),
             'notify_url' => $merchant->notify_url,
             'ip_whitelist' => $merchant->ipWhitelist(),
             'status' => $merchant->status,

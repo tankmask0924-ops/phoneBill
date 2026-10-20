@@ -22,7 +22,8 @@ onMounted(load)
     <el-row :gutter="16">
       <el-col :span="6">
         <el-card shadow="never">
-          <el-statistic title="当前余额（元）" :value="Number(data?.balance ?? 0)" :precision="2" />
+          <el-statistic title="当前余额（元）" :value="Number(data?.balance ?? 0)" :precision="2" :value-style="Number(data?.balance ?? 0) < 0 ? { color: '#f56c6c' } : undefined" />
+          <div v-if="Number(data?.credit_limit ?? 0) > 0" class="credit">授信 {{ data?.credit_limit }} 元 · 可用 {{ data?.available_balance }} 元</div>
         </el-card>
       </el-col>
       <el-col :span="6">
@@ -57,6 +58,12 @@ onMounted(load)
 </template>
 
 <style scoped>
+.credit {
+  margin-top: 6px;
+  color: #909399;
+  font-size: 12px;
+}
+
 .sub {
   margin-left: 8px;
   color: #909399;

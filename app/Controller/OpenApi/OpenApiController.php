@@ -78,8 +78,14 @@ class OpenApiController extends AbstractController
     #[GetMapping(path: 'balance')]
     public function balance(): array
     {
-        // 中间件里的商户来自缓存、不带余额，这里查最新的
-        return $this->ok(['balance' => $this->merchantDao->find($this->merchant()->id)?->balance]);
+        // 中间件里的商户来自缓存、不带余额，这里查最新的。有授信时 balance 可能是负数，能下多少单看 available_balance
+        $merchant = $this->merchantDao->find($this->merchant()->id);
+
+        return $this->ok([
+            'balance' => $merchant?->balance,
+            'credit_limit' => $merchant?->credit_limit,
+            'available_balance' => $merchant?->availableBalance(),
+        ]);
     }
 
     /**

@@ -14,6 +14,7 @@ const permission = usePermissionStore()
 const canManage = computed(() => permission.can('merchant.manage'))
 const canPrice = computed(() => permission.can('merchant.price'))
 const canBalance = computed(() => permission.can('merchant.balance'))
+const canCredit = computed(() => permission.can('merchant.credit'))
 const canFundingConfig = computed(() => permission.can('funding.config'))
 
 const list = usePagedList<Merchant, { keyword: string; status: string }>(merchantApi.list, { keyword: '', status: '' })
@@ -179,6 +180,29 @@ async function saveBalance() {
   } finally {
     balanceSaving.value = false
   }
+}
+
+// ---- 授信额度 ----
+async function setCredit(row: Merchant) {
+  let value = ''
+  try {
+    const result = await ElMessageBox.prompt(
+      `「${row.name}」当前余额 ${row.balance} 元。设置授信额度后，余额最低可以扣到它的负数（0 表示不能负数）；调低到比当前欠款还少时，已有欠款不动，还款前不能再下单。`,
+      '授信额度',
+      {
+        inputValue: row.credit_limit,
+        inputPlaceholder: '授信额度（元）',
+        inputValidator: (v) => /^\d{1,9}(\.\d{1,2})?$/.test(v.trim()) || '请输入 0 或正数金额，最多两位小数',
+        confirmButtonText: '保存',
+      },
+    )
+    value = result.value.trim()
+  } catch {
+    return
+  }
+  const updated = await merchantApi.setCreditLimit(row.id, value)
+  ElMessage.success(`已保存，授信 ${updated.credit_limit} 元，可用额度 ${updated.available_balance} 元`)
+  await list.load()
 }
 
 // ---- 商品与价格 ----
@@ -407,8 +431,11 @@ onMounted(async () => {
         <template #default="{ row }">{{ [row.contact, row.phone].filter(Boolean).join(' ') || '-' }}</template>
       </el-table-column>
       <el-table-column prop="app_key" label="AppKey" min-width="270" />
-      <el-table-column label="余额（元）" width="120" align="right">
-        <template #default="{ row }">{{ row.balance }}</template>
+      <el-table-column label="余额（元）" width="150" align="right">
+        <template #default="{ row }">
+          <span :class="{ 'negative': Number(row.balance) < 0 }">{{ row.balance }}</span>
+          <div v-if="Number(row.credit_limit) > 0" class="muted">授信 {{ row.credit_limit }} · 可用 {{ row.available_balance }}</div>
+        </template>
       </el-table-column>
       <el-table-column prop="product_count" label="已开通商品" width="100" align="center" />
       <el-table-column label="IP 白名单" min-width="140">
@@ -422,11 +449,12 @@ onMounted(async () => {
       <el-table-column label="状态" width="80">
         <template #default="{ row }"><StatusTag :map="supplierStatusLabels" :value="row.status" /></template>
       </el-table-column>
-      <el-table-column label="操作" width="370" fixed="right">
+      <el-table-column label="操作" width="410" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" @click="openProducts(row as Merchant)">商品与价格</el-button>
           <el-button link type="primary" @click="openUsers(row as Merchant)">后台账号</el-button>
           <el-button v-if="canBalance" link type="primary" @click="openBalance(row as Merchant)">加/扣款</el-button>
+          <el-button v-if="canCredit" link type="primary" @click="setCredit(row as Merchant)">授信</el-button>
           <el-button v-if="canFundingConfig" link type="primary" @click="openReceiving(row as Merchant)">收款配置</el-button>
           <template v-if="canManage">
             <el-button link type="primary" @click="openEdit(row as Merchant)">编辑</el-button>
@@ -498,7 +526,9 @@ onMounted(async () => {
   <!-- 加款 / 扣款 -->
   <el-dialog v-model="balanceVisible" title="加款 / 扣款" width="440px">
     <el-form label-width="80px">
-      <el-form-item label="商户">{{ balanceTarget?.name }}（当前余额 {{ balanceTarget?.balance }} 元）</el-form-item>
+      <el-form-item label="商户">
+        {{ balanceTarget?.name }}（当前余额 {{ balanceTarget?.balance }} 元<template v-if="Number(balanceTarget?.credit_limit) > 0">，授信 {{ balanceTarget?.credit_limit }} 元，可用 {{ balanceTarget?.available_balance }} 元</template>）
+      </el-form-item>
       <el-form-item label="类型">
         <el-radio-group v-model="balanceForm.type">
           <el-radio value="recharge">加款</el-radio>
@@ -679,6 +709,10 @@ onMounted(async () => {
 .muted {
   color: #909399;
   font-size: 12px;
+}
+
+.negative {
+  color: #f56c6c;
 }
 
 .warn-text {

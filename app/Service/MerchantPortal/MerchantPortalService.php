@@ -92,6 +92,8 @@ class MerchantPortalService extends AbstractService
 
         return [
             'balance' => $merchant->balance,
+            'credit_limit' => $merchant->credit_limit,
+            'available_balance' => $merchant->availableBalance(),
             'merchant_status' => $merchant->status,
             'today' => [
                 'order_count' => $base()->count(),

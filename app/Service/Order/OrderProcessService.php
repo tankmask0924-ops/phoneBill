@@ -14,7 +14,6 @@ namespace App\Service\Order;
 
 use App\Dao\OrderAttemptDao;
 use App\Dao\OrderDao;
-use App\Exception\InsufficientBalanceException;
 use App\Model\MerchantBalanceLog;
 use App\Model\Order;
 use App\Model\OrderAttempt;
@@ -337,7 +336,6 @@ class OrderProcessService extends AbstractService
      *
      * @param string $to Order::STATUS_SUCCESS / Order::STATUS_FAILED
      * @return bool 订单现在是不是 $to；false 表示订单状态在这期间被别处改了
-     * @throws InsufficientBalanceException 失败改成功、商户余额不够重新扣款时
      */
     public function settleManually(Order $order, string $to, string $note): bool
     {
@@ -376,8 +374,8 @@ class OrderProcessService extends AbstractService
                 $this->attemptDao->transition($attempt->id, OrderAttempt::STATUS_PROCESSING, OrderAttempt::STATUS_SUCCESS, ['message' => mb_substr($note, 0, 255), 'finished_at' => $now]);
             }
             if ($order->status === Order::STATUS_FAILED) {
-                // 失败时已经退过款，改成功要重新扣；余额不够会抛异常，整个事务回滚
-                $this->balanceService->change($order->merchant_id, MerchantBalanceLog::TYPE_ORDER_PAY, bcmul($order->sale_price, '-1', 2), $order->id, '手动回调失败改为成功，重新扣款');
+                // 失败时已经退过款，改成功要重新扣。钱已经花在供应商那边，可用额度不够也照扣（余额可能超出授信变成更多的负数）
+                $this->balanceService->change($order->merchant_id, MerchantBalanceLog::TYPE_ORDER_PAY, bcmul($order->sale_price, '-1', 2), $order->id, '手动回调失败改为成功，重新扣款', null, true);
             }
 
             return true;

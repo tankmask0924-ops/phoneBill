@@ -183,6 +183,18 @@ class MerchantController extends AbstractController
     }
 
     /**
+     * 设置授信额度（余额最低可以扣到它的负数）。
+     */
+    #[Middleware(AdminAuthMiddleware::class)]
+    #[Middleware(AdminPermissionMiddleware::class)]
+    #[RequiresPermission('merchant.credit')]
+    #[PutMapping(path: '{id:\d+}/credit-limit')]
+    public function setCreditLimit(int $id): array
+    {
+        return $this->merchantAdminService->setCreditLimit($this->admin(), $id, $this->request->input('credit_limit'), $this->clientIp());
+    }
+
+    /**
      * 商户的收款配置：全部收款账户，标出这个商户能用的。
      */
     #[Middleware(AdminAuthMiddleware::class)]
