@@ -431,10 +431,15 @@ onMounted(async () => {
         <template #default="{ row }">{{ [row.contact, row.phone].filter(Boolean).join(' ') || '-' }}</template>
       </el-table-column>
       <el-table-column prop="app_key" label="AppKey" min-width="270" />
-      <el-table-column label="余额（元）" width="150" align="right">
+      <el-table-column label="余额（元）" width="120" align="right">
         <template #default="{ row }">
           <span :class="{ 'negative': Number(row.balance) < 0 }">{{ row.balance }}</span>
-          <div v-if="Number(row.credit_limit) > 0" class="muted">授信 {{ row.credit_limit }} · 可用 {{ row.available_balance }}</div>
+        </template>
+      </el-table-column>
+      <el-table-column prop="credit_limit" label="授信额度（元）" width="130" align="right" />
+      <el-table-column label="可用额度（元）" width="130" align="right">
+        <template #default="{ row }">
+          <span :class="{ 'negative': Number(row.available_balance) < 0 }">{{ row.available_balance }}</span>
         </template>
       </el-table-column>
       <el-table-column prop="product_count" label="已开通商品" width="100" align="center" />

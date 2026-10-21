@@ -14,19 +14,37 @@ async function load() {
   }
 }
 
+/** 负数标红 */
+function valueStyle(value: string | undefined) {
+  return Number(value ?? 0) < 0 ? { color: '#f56c6c' } : undefined
+}
+
 onMounted(load)
 </script>
 
 <template>
   <div v-loading="loading">
-    <el-row :gutter="16">
-      <el-col :span="6">
+    <!-- 资金 -->
+    <el-row :gutter="16" class="stats">
+      <el-col :span="8">
         <el-card shadow="never">
-          <el-statistic title="当前余额（元）" :value="Number(data?.balance ?? 0)" :precision="2" :value-style="Number(data?.balance ?? 0) < 0 ? { color: '#f56c6c' } : undefined" />
-          <div v-if="Number(data?.credit_limit ?? 0) > 0" class="credit">授信 {{ data?.credit_limit }} 元 · 可用 {{ data?.available_balance }} 元</div>
+          <el-statistic title="当前余额（元）" :value="Number(data?.balance ?? 0)" :precision="2" :value-style="valueStyle(data?.balance)" />
         </el-card>
       </el-col>
-      <el-col :span="6">
+      <el-col :span="8">
+        <el-card shadow="never">
+          <el-statistic title="授信额度（元）" :value="Number(data?.credit_limit ?? 0)" :precision="2" />
+        </el-card>
+      </el-col>
+      <el-col :span="8">
+        <el-card shadow="never">
+          <el-statistic title="可用额度（元）" :value="Number(data?.available_balance ?? 0)" :precision="2" :value-style="valueStyle(data?.available_balance)" />
+        </el-card>
+      </el-col>
+    </el-row>
+    <!-- 今日订单 -->
+    <el-row :gutter="16" class="stats">
+      <el-col :span="8">
         <el-card shadow="never">
           <el-statistic title="今日订单" :value="data?.today.order_count ?? 0">
             <template #suffix>
@@ -35,7 +53,7 @@ onMounted(load)
           </el-statistic>
         </el-card>
       </el-col>
-      <el-col :span="6">
+      <el-col :span="8">
         <el-card shadow="never">
           <el-statistic title="今日成功" :value="data?.today.success_count ?? 0">
             <template #suffix>
@@ -44,7 +62,7 @@ onMounted(load)
           </el-statistic>
         </el-card>
       </el-col>
-      <el-col :span="6">
+      <el-col :span="8">
         <el-card shadow="never">
           <el-statistic title="今日成功金额（元）" :value="Number(data?.today.success_amount ?? 0)" :precision="2" />
         </el-card>
@@ -58,10 +76,21 @@ onMounted(load)
 </template>
 
 <style scoped>
-.credit {
-  margin-top: 6px;
-  color: #909399;
-  font-size: 12px;
+.stats + .stats {
+  margin-top: 16px;
+}
+
+/* 同一行的卡片等高，标题不换行 */
+.stats :deep(.el-col) {
+  display: flex;
+}
+
+.stats :deep(.el-card) {
+  flex: 1;
+}
+
+.stats :deep(.el-statistic__head) {
+  white-space: nowrap;
 }
 
 .sub {
