@@ -17,6 +17,11 @@ const emit = defineEmits<{
 
 const route = useRoute()
 const collapsed = ref(false)
+
+/** 分组收起时，子菜单有角标就在分组上显示一个红点 */
+function hasBadge(item: MenuItem): boolean {
+  return item.children?.some((child) => (child.badge ?? 0) > 0) ?? false
+}
 </script>
 
 <template>
@@ -38,10 +43,14 @@ const collapsed = ref(false)
             <template #title>
               <el-icon v-if="item.icon"><component :is="item.icon" /></el-icon>
               <span>{{ item.title }}</span>
+              <el-badge v-if="hasBadge(item)" is-dot class="group-dot" />
             </template>
             <el-menu-item v-for="child in item.children" :key="child.path" :index="child.path">
               <el-icon v-if="child.icon"><component :is="child.icon" /></el-icon>
-              <template #title>{{ child.title }}</template>
+              <template #title>
+                {{ child.title }}
+                <el-badge v-if="child.badge" :value="child.badge" :max="99" class="menu-badge" />
+              </template>
             </el-menu-item>
           </el-sub-menu>
           <el-menu-item v-else :index="item.path">
@@ -105,6 +114,20 @@ const collapsed = ref(false)
 
 .menu {
   border-right: none;
+}
+
+.menu-badge {
+  margin-left: 8px;
+  line-height: 1;
+}
+
+.menu-badge :deep(.el-badge__content) {
+  border: none;
+}
+
+.group-dot {
+  margin-left: 6px;
+  line-height: 1;
 }
 
 .header {

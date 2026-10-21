@@ -25,5 +25,6 @@ export interface AdminTodos {
 
 export const dashboardApi = {
   summary: () => http.get<AdminDashboard>('/admin/dashboard'),
-  todos: () => http.get<AdminTodos>('/admin/dashboard/todos'),
+  /** silent：右下角提醒每分钟轮询，出错不弹提示 */
+  todos: (silent = false) => http.get<AdminTodos>('/admin/dashboard/todos', undefined, { silent }),
 }

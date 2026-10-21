@@ -7,6 +7,8 @@ export interface MenuItem {
   icon?: Component
   /** 需要的权限编码，没有这个权限时不显示；不填表示登录即可见 */
   permission?: string
+  /** 红色角标数字（待办数量），0 或不填不显示 */
+  badge?: number
   children?: MenuItem[]
 }
 

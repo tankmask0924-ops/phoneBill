@@ -16,9 +16,12 @@ import {
 } from '@/api/funding'
 import { fundingStatusLabels, onlinePaymentStatusLabels, toOptions } from '@/utils/labels'
 import { usePermissionStore } from '@/stores/permission'
+import { useTodoStore } from '@/stores/todo'
 
 const permission = usePermissionStore()
 const canReview = computed(() => permission.can('funding.review'))
+/** 审核完马上刷新菜单角标、首页卡片的待办数量 */
+const todoStore = useTodoStore()
 
 type Tab = 'requests' | 'online' | 'payers'
 const TABS: Tab[] = ['requests', 'online', 'payers']
@@ -98,6 +101,7 @@ async function reviewRequest(run: () => Promise<FundingRequestDetail>, success: 
   try {
     detail.value = await run()
     ElMessage.success(success)
+    todoStore.refresh(true).catch(() => {})
     await requests.load()
   } finally {
     acting.value = false
@@ -118,6 +122,7 @@ async function approvePayer(row: PayerAccount) {
   }
   await fundingApi.approvePayer(row.id)
   ElMessage.success('已通过')
+  todoStore.refresh(true).catch(() => {})
   await payers.load()
 }
 
@@ -135,6 +140,7 @@ async function rejectPayer(row: PayerAccount) {
   }
   await fundingApi.rejectPayer(row.id, reason)
   ElMessage.success('已驳回')
+  todoStore.refresh(true).catch(() => {})
   await payers.load()
 }
 

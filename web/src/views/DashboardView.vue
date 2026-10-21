@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { type AdminDashboard, type AdminTodos, dashboardApi } from '@/api/dashboard'
+import { type AdminDashboard, dashboardApi } from '@/api/dashboard'
 import { useAuthStore } from '@/stores/auth'
 import { usePermissionStore } from '@/stores/permission'
+import { useTodoStore } from '@/stores/todo'
 import { roleLabel } from '@/utils/labels'
 
 const auth = useAuthStore()
@@ -15,7 +16,9 @@ const canViewStats = computed(() => permission.can('order.view'))
 const canViewTodos = computed(() => permission.can('funding.view'))
 const router = useRouter()
 const data = ref<AdminDashboard | null>(null)
-const todos = ref<AdminTodos | null>(null)
+/** 跟菜单角标、右下角提醒共用一份 */
+const todoStore = useTodoStore()
+const todos = computed(() => todoStore.todos)
 const loading = ref(false)
 
 async function load() {
@@ -33,7 +36,7 @@ function todoStyle(count: number | undefined) {
 }
 
 async function loadTodos() {
-  todos.value = await dashboardApi.todos()
+  await todoStore.refresh()
 }
 
 /** 点待办卡片：打开加款申请页对应的页签（默认筛待审核） */
