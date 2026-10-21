@@ -3,7 +3,8 @@ import StatusTag from '@/components/StatusTag.vue'
 import { recentDays } from '@/utils/date'
 import { usePagedList } from '@/utils/paged'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import {
   type FundingRequest,
   type FundingRequestDetail,
@@ -19,7 +20,13 @@ import { usePermissionStore } from '@/stores/permission'
 const permission = usePermissionStore()
 const canReview = computed(() => permission.can('funding.review'))
 
-const tab = ref<'requests' | 'online' | 'payers'>('requests')
+type Tab = 'requests' | 'online' | 'payers'
+const TABS: Tab[] = ['requests', 'online', 'payers']
+// 首页待办卡片带 ?tab=payers 之类直接打开对应的页签（列表默认就是筛待审核的）
+const route = useRoute()
+const tabFromQuery = (): Tab => (TABS.includes(route.query.tab as Tab) ? (route.query.tab as Tab) : 'requests')
+const tab = ref<Tab>(tabFromQuery())
+watch(() => route.query.tab, () => (tab.value = tabFromQuery()))
 const merchants = ref<{ id: number; name: string }[]>([])
 
 function accountText(a: PaymentAccountInfo): string {

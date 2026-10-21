@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { type AdminDashboard, dashboardApi } from '@/api/dashboard'
+import { useRouter } from 'vue-router'
+import { type AdminDashboard, type AdminTodos, dashboardApi } from '@/api/dashboard'
 import { useAuthStore } from '@/stores/auth'
 import { usePermissionStore } from '@/stores/permission'
 import { roleLabel } from '@/utils/labels'
@@ -10,7 +11,11 @@ const permission = usePermissionStore()
 
 /** 汇总里有销售额和利润，跟订单列表一样要 order.view */
 const canViewStats = computed(() => permission.can('order.view'))
+/** 待办：待审核的付款账号、加款申请，要 funding.view */
+const canViewTodos = computed(() => permission.can('funding.view'))
+const router = useRouter()
 const data = ref<AdminDashboard | null>(null)
+const todos = ref<AdminTodos | null>(null)
 const loading = ref(false)
 
 async function load() {
@@ -22,8 +27,25 @@ async function load() {
   }
 }
 
+/** 有待办时数字标橙色 */
+function todoStyle(count: number | undefined) {
+  return (count ?? 0) > 0 ? { color: '#e6a23c' } : undefined
+}
+
+async function loadTodos() {
+  todos.value = await dashboardApi.todos()
+}
+
+/** 点待办卡片：打开加款申请页对应的页签（默认筛待审核） */
+function openFunding(tab: 'requests' | 'payers') {
+  router.push({ path: '/merchant/funding-requests', query: { tab } })
+}
+
 onMounted(async () => {
   await permission.load()
+  if (canViewTodos.value) {
+    loadTodos()
+  }
   if (canViewStats.value) {
     load()
   }
@@ -31,6 +53,23 @@ onMounted(async () => {
 </script>
 
 <template>
+  <el-row v-if="canViewTodos" :gutter="16" class="todos">
+    <el-col :span="6">
+      <el-card shadow="hover" class="todo" @click="openFunding('requests')">
+        <el-statistic title="待审批加款" :value="todos?.pending_funding_requests ?? 0" :value-style="todoStyle(todos?.pending_funding_requests)">
+          <template #suffix><span class="todo-link">去审批 ›</span></template>
+        </el-statistic>
+      </el-card>
+    </el-col>
+    <el-col :span="6">
+      <el-card shadow="hover" class="todo" @click="openFunding('payers')">
+        <el-statistic title="待审核付款账号" :value="todos?.pending_payer_accounts ?? 0" :value-style="todoStyle(todos?.pending_payer_accounts)">
+          <template #suffix><span class="todo-link">去审核 ›</span></template>
+        </el-statistic>
+      </el-card>
+    </el-col>
+  </el-row>
+
   <div v-if="canViewStats" v-loading="loading" class="stats">
     <el-row :gutter="16">
       <el-col :span="6">
@@ -77,7 +116,7 @@ onMounted(async () => {
       </el-col>
     </el-row>
     <div class="actions">
-      <el-button @click="load">刷新</el-button>
+      <el-button @click="load(); canViewTodos && loadTodos()">刷新</el-button>
       <router-link to="/order/orders"><el-button type="primary" plain>查看订单</el-button></router-link>
       <span class="tip">销售额、利润只算成功的订单；累计数据每分钟更新一次</span>
     </div>
@@ -96,6 +135,20 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.todos {
+  margin-bottom: 16px;
+}
+
+.todo {
+  cursor: pointer;
+}
+
+.todo-link {
+  margin-left: 8px;
+  color: #409eff;
+  font-size: 13px;
+}
+
 .welcome {
   margin: 0 0 16px;
   font-size: 20px;

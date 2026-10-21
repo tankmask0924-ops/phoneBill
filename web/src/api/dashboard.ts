@@ -17,6 +17,13 @@ export interface AdminDashboard {
   }
 }
 
+/** 待办数量，需要 funding.view，实时 */
+export interface AdminTodos {
+  pending_payer_accounts: number
+  pending_funding_requests: number
+}
+
 export const dashboardApi = {
   summary: () => http.get<AdminDashboard>('/admin/dashboard'),
+  todos: () => http.get<AdminTodos>('/admin/dashboard/todos'),
 }

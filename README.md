@@ -135,7 +135,7 @@ npm run build        # 产物在 merchant-web/dist，部署在 /merchant/ 路径
 | GET | `/admin/products`、`/admin/products/supplier-product-options`、`/admin/product-stats`、`/admin/product-categories` | `product.view` |
 | POST/PUT/DELETE | `/admin/products`、`/{id}`、`/{id}/status`；`DELETE /{id}` 是软删除，没有商户开通着、没有充值中的单才能删 | `product.manage` |
 | POST/PUT/DELETE | `/admin/product-categories`、`/{id}` | `product.manage` |
-| GET | `/admin/funding/requests`、`/requests/{id}`、`/payer-accounts`、`/merchant-options`、`/online-payments`、`/online-payments/{id}`、`/admin/receiving-accounts`、`/admin/merchants/{id}/receiving-accounts`、`/admin/merchants/{id}/alipay-account` | `funding.view` |
+| GET | `/admin/dashboard/todos`（首页待办：待审核的付款账号、加款申请数量）、`/admin/funding/requests`、`/requests/{id}`、`/payer-accounts`、`/merchant-options`、`/online-payments`、`/online-payments/{id}`、`/admin/receiving-accounts`、`/admin/merchants/{id}/receiving-accounts`、`/admin/merchants/{id}/alipay-account` | `funding.view` |
 | POST | `/admin/funding/requests/{id}/approve`、`/requests/{id}/reject`、`/payer-accounts/{id}/approve`、`/payer-accounts/{id}/reject`、`/online-payments/{id}/candidates`（查找到账记录）、`/online-payments/{id}/confirm`（确认入账） | `funding.review` |
 | POST/PUT | `/admin/receiving-accounts`、`/{id}`、`/{id}/status`、`/{id}/merchants`；`PUT /admin/merchants/{id}/receiving-accounts`（按商户配置）、`PUT /admin/merchants/{id}/alipay-account`（指定支付宝转账加款账户） | `funding.config` |
 | GET | `/admin/settings/public`（系统名称，登录页用） | 不用登录 |

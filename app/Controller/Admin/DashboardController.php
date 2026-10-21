@@ -23,7 +23,7 @@ use Hyperf\HttpServer\Annotation\GetMapping;
 use Hyperf\HttpServer\Annotation\Middleware;
 
 /**
- * 首页汇总，含销售额和利润，要有查看订单的权限。
+ * 首页汇总，含销售额和利润，要有查看订单的权限；待办（待审核的付款账号、加款申请）要有查看加款申请的权限。
  */
 #[Controller(prefix: '/admin/dashboard')]
 class DashboardController extends AbstractController
@@ -38,5 +38,14 @@ class DashboardController extends AbstractController
     public function index(): array
     {
         return $this->dashboardAdminService->summary();
+    }
+
+    #[Middleware(AdminAuthMiddleware::class)]
+    #[Middleware(AdminPermissionMiddleware::class)]
+    #[RequiresPermission('funding.view')]
+    #[GetMapping(path: 'todos')]
+    public function todos(): array
+    {
+        return $this->dashboardAdminService->todos();
     }
 }

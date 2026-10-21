@@ -13,13 +13,18 @@ declare(strict_types=1);
 namespace App\Service\Admin;
 
 use App\Dao\MerchantDao;
+use App\Dao\MerchantFundingRequestDao;
+use App\Dao\MerchantPayerAccountDao;
 use App\Dao\OrderDao;
+use App\Model\MerchantFundingRequest;
+use App\Model\MerchantPayerAccount;
 use App\Service\AbstractService;
 use Hyperf\Cache\Annotation\Cacheable;
 use Hyperf\Di\Annotation\Inject;
 
 /**
  * 管理后台首页汇总：全部订单的累计数据 + 今天的数据。销售额、利润只算成功的订单，按下单时间归属日期。
+ * 另外有待办数量（待审核的付款账号、加款申请），实时查，不缓存。
  */
 class DashboardAdminService extends AbstractService
 {
@@ -28,6 +33,25 @@ class DashboardAdminService extends AbstractService
 
     #[Inject]
     protected MerchantDao $merchantDao;
+
+    #[Inject]
+    protected MerchantPayerAccountDao $payerDao;
+
+    #[Inject]
+    protected MerchantFundingRequestDao $requestDao;
+
+    /**
+     * 待办：待审核的付款账号、待审核的加款申请。
+     *
+     * @return array{pending_payer_accounts: int, pending_funding_requests: int}
+     */
+    public function todos(): array
+    {
+        return [
+            'pending_payer_accounts' => $this->payerDao->newQuery()->where('status', MerchantPayerAccount::STATUS_PENDING)->count(),
+            'pending_funding_requests' => $this->requestDao->newQuery()->where('status', MerchantFundingRequest::STATUS_PENDING)->count(),
+        ];
+    }
 
     /**
      * @return array{total: array<string, mixed>, today: array<string, mixed>}

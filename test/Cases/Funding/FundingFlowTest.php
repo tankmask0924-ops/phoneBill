@@ -115,6 +115,23 @@ class FundingFlowTest extends HttpTestCase
         $this->assertStringContainsString('AccessDenied', $failed['message']);
     }
 
+    public function testDashboardTodosCountPendingReviews()
+    {
+        $admin = $this->loginAs($this->createAdminWithPermissions(['funding.view']));
+        $before = $this->body($this->jsonRequest('GET', '/admin/dashboard/todos', $admin));
+        $merchant = $this->createMerchant();
+        $payer = MerchantPayerAccount::create(['merchant_id' => $merchant->id, 'type' => 'alipay', 'account_name' => '张三', 'account_no' => 'a@example.com', 'status' => MerchantPayerAccount::STATUS_PENDING]);
+        MerchantPayerAccount::create(['merchant_id' => $merchant->id, 'type' => 'alipay', 'account_name' => '李四', 'account_no' => 'b@example.com', 'status' => MerchantPayerAccount::STATUS_APPROVED]);
+        $snapshot = ['payer_account_id' => $payer->id, 'payer_type' => 'alipay', 'payer_account_name' => '张三', 'payer_account_no' => 'a@example.com', 'receiving_type' => 'alipay', 'receiving_account_name' => '平台', 'receiving_account_no' => 'p@example.com', 'paid_at' => date('Y-m-d H:i:s'), 'vouchers' => []];
+        MerchantFundingRequest::create(['merchant_id' => $merchant->id, 'amount' => '10.00', 'status' => MerchantFundingRequest::STATUS_PENDING] + $snapshot);
+        MerchantFundingRequest::create(['merchant_id' => $merchant->id, 'amount' => '20.00', 'status' => MerchantFundingRequest::STATUS_REJECTED] + $snapshot);
+
+        $after = $this->body($this->jsonRequest('GET', '/admin/dashboard/todos', $admin));
+        $this->assertSame($before['pending_payer_accounts'] + 1, $after['pending_payer_accounts'], '只算待审核的');
+        $this->assertSame($before['pending_funding_requests'] + 1, $after['pending_funding_requests']);
+        $this->assertSame(403, $this->jsonRequest('GET', '/admin/dashboard/todos', $this->loginAs($this->createAdminWithPermissions(['order.view'])))->getStatusCode());
+    }
+
     public function testFundingFlow()
     {
         $this->configureStorage();
