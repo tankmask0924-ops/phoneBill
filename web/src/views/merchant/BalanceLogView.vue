@@ -1,22 +1,38 @@
 <script setup lang="ts">
+import { Download } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import { recentDays } from '@/utils/date'
 import { usePagedList } from '@/utils/paged'
 import { onMounted, ref } from 'vue'
 import { type BalanceLog, balanceLogApi, merchantApi, type MerchantOption } from '@/api/merchant'
 import { balanceTypeLabels, labelOf, toOptions } from '@/utils/labels'
 
+// 日期范围拆成 created_from / created_to；按订单号查时不限日期
+function toParams(params: Record<string, unknown>): Record<string, unknown> {
+  const { dates, ...rest } = params as Record<string, unknown> & { dates?: [string, string]; order_no?: string }
+  return dates && !rest.order_no ? { ...rest, created_from: dates[0], created_to: dates[1] } : rest
+}
+
 const list = usePagedList<BalanceLog, { order_no: string; merchant_id: number | ''; type: string; dates: [string, string] | null }>(
-  (params) => {
-    // 日期范围拆成 created_from / created_to；按订单号查时不限日期
-    const { dates, ...rest } = params as Record<string, unknown> & { dates?: [string, string]; order_no?: string }
-    return balanceLogApi.list(dates && !rest.order_no ? { ...rest, created_from: dates[0], created_to: dates[1] } : rest)
-  },
+  (params) => balanceLogApi.list(toParams(params)),
   { order_no: '', merchant_id: '', type: '', dates: recentDays() },
   20,
 )
 const { rows, total, page, perPage, loading, filters } = list
 
 const merchants = ref<MerchantOption[]>([])
+const exporting = ref(false)
+
+async function exportCsv() {
+  exporting.value = true
+  try {
+    await balanceLogApi.download(toParams({ ...filters }))
+  } catch (e) {
+    ElMessage.error((e as Error).message)
+  } finally {
+    exporting.value = false
+  }
+}
 
 onMounted(async () => {
   list.load()
@@ -52,6 +68,7 @@ onMounted(async () => {
       </el-form-item>
       <el-form-item>
         <el-button type="primary" native-type="submit">查询</el-button>
+        <el-button :icon="Download" :loading="exporting" @click="exportCsv">导出</el-button>
       </el-form-item>
     </el-form>
 

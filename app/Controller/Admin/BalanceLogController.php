@@ -21,9 +21,10 @@ use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpServer\Annotation\Controller;
 use Hyperf\HttpServer\Annotation\GetMapping;
 use Hyperf\HttpServer\Annotation\Middleware;
+use Psr\Http\Message\ResponseInterface;
 
 /**
- * 商户中心 - 资金流水。
+ * 商户中心 - 资金流水，列表和导出。
  */
 #[Controller(prefix: '/admin/balance-logs')]
 class BalanceLogController extends AbstractController
@@ -38,5 +39,18 @@ class BalanceLogController extends AbstractController
     public function index(): array
     {
         return $this->balanceLogAdminService->list($this->request->all());
+    }
+
+    #[Middleware(AdminAuthMiddleware::class)]
+    #[Middleware(AdminPermissionMiddleware::class)]
+    #[RequiresPermission('merchant.view')]
+    #[GetMapping(path: 'export')]
+    public function export(): ResponseInterface
+    {
+        $csv = $this->balanceLogAdminService->exportCsv($this->request->all());
+
+        return $this->response->raw($csv)
+            ->withHeader('Content-Type', 'text/csv; charset=utf-8')
+            ->withHeader('Content-Disposition', 'attachment; filename="balance-logs-' . date('YmdHis') . '.csv"');
     }
 }

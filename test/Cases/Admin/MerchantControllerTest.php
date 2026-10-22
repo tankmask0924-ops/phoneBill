@@ -123,6 +123,14 @@ class MerchantControllerTest extends HttpTestCase
         $this->assertSame(['70.50', '100.50'], array_column($logs['data'], 'balance_after'));
         $this->assertSame($admin->real_name, $logs['data'][0]['admin_name']);
         $this->assertSame(0, $this->body($this->jsonRequest('GET', "/admin/balance-logs?merchant_id={$merchant->id}&type=order_pay", $token))['total']);
+
+        $csv = (string) $this->jsonRequest('GET', "/admin/balance-logs/export?merchant_id={$merchant->id}", $token)->getBody();
+        $lines = explode("\n", trim($csv));
+        $this->assertStringStartsWith("\xEF\xBB\xBF时间,商户,类型,金额,变动后余额", $lines[0]);
+        $this->assertCount(3, $lines, '表头 + 2 条流水');
+        $this->assertStringContainsString(",{$merchant->name},扣款,-30.00,70.50,", $lines[1]);
+        $this->assertStringContainsString($admin->real_name, $lines[1]);
+        $this->assertCount(1, explode("\n", trim((string) $this->jsonRequest('GET', "/admin/balance-logs/export?merchant_id={$merchant->id}&type=order_pay", $token)->getBody())), '筛不出数据时只有表头');
         $this->assertSame(2, MerchantBalanceLog::where('merchant_id', $merchant->id)->count());
     }
 

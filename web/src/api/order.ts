@@ -1,7 +1,6 @@
 import type { Paged } from '@/utils/paged'
-import { useAuthStore } from '@/stores/auth'
 import type { OperatorCode } from './product'
-import { http } from './http'
+import { downloadCsv, http } from './http'
 
 type Query = Record<string, unknown>
 
@@ -150,26 +149,8 @@ export const orderApi = {
 }
 
 /**
- * 按当前筛选条件下载 CSV。走 fetch 而不是 http 封装，因为要拿文件流。
+ * 按当前筛选条件下载 CSV。
  */
-export async function downloadOrders(params: Query): Promise<void> {
-  const query = new URLSearchParams()
-  for (const [key, value] of Object.entries(params)) {
-    if (value !== '' && value !== null && value !== undefined) {
-      query.set(key, String(value))
-    }
-  }
-  const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/admin/orders/export?${query}`, {
-    headers: { Authorization: `Bearer ${useAuthStore().token ?? ''}` },
-  })
-  if (!response.ok) {
-    throw new Error((await response.text()) || '导出失败')
-  }
-  const blob = await response.blob()
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = response.headers.get('Content-Disposition')?.match(/filename="(.+)"/)?.[1] ?? 'orders.csv'
-  link.click()
-  URL.revokeObjectURL(url)
+export function downloadOrders(params: Query): Promise<void> {
+  return downloadCsv('/admin/orders/export', params, 'orders.csv')
 }

@@ -143,7 +143,7 @@ npm run build        # 产物在 merchant-web/dist，部署在 /merchant/ 路径
 | GET | `/admin/segments/lookup` | `risk.view` |
 | GET | `/admin/risk/blacklist`、`/admin/risk/maintenances`、`/admin/risk/maintenances/options` | `risk.view` |
 | POST/DELETE | `/admin/risk/blacklist`、`/admin/risk/blacklist/{id}`、`/admin/risk/maintenances`、`/{id}/finish` | `risk.manage` |
-| GET | `/admin/merchants`、`/options`、`/{id}/products`、`/{id}/available-products`、`/admin/balance-logs` | `merchant.view` |
+| GET | `/admin/merchants`、`/options`、`/{id}/products`、`/{id}/available-products`、`/admin/balance-logs`、`/admin/balance-logs/export` | `merchant.view` |
 | POST/PUT | `/admin/merchants`、`/{id}`、`/{id}/status`、`/{id}/secret` | `merchant.manage` |
 | PUT | `/admin/merchants/{id}/products/{productId}` | `merchant.price` |
 | POST | `/admin/merchants/{id}/balance` | `merchant.balance` |

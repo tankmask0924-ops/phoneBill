@@ -1,6 +1,6 @@
 import type { Paged } from '@/utils/paged'
 import type { OperatorCode } from './product'
-import { http } from './http'
+import { downloadCsv, http } from './http'
 
 type Query = Record<string, unknown>
 
@@ -125,4 +125,6 @@ export interface BalanceLog {
 
 export const balanceLogApi = {
   list: (params: Query) => http.get<Paged<BalanceLog>>('/admin/balance-logs', params),
+  /** 按当前筛选条件下载 CSV */
+  download: (params: Query) => downloadCsv('/admin/balance-logs/export', params, 'balance-logs.csv'),
 }
