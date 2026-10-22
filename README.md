@@ -64,6 +64,13 @@ docker exec pb php bin/hyperf.php segment:import docs/recharge_phone_prefix_info
 docker exec pb php bin/hyperf.php segment:import docs/recharge_phone_prefix_info.sql             # 按号段覆盖写入，可重复执行
 ```
 
+拿到新的号段表 xlsx（表头含 号段 / 省区 / 城市 / 服务商，如 `t_sys_phone.xlsx`）时，只补库里没有的号段，已有的不动：
+
+```bash
+docker exec pb php bin/hyperf.php segment:import docs/t_sys_phone.xlsx --only-new --dry-run   # 先看会新增多少
+docker exec pb php bin/hyperf.php segment:import docs/t_sys_phone.xlsx --only-new
+```
+
 商品每日统计（成功率、耗时）每天 3 点自动算前一天；人工处理完异常订单、或补历史数据时重算：
 
 ```bash

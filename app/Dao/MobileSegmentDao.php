@@ -32,4 +32,25 @@ class MobileSegmentDao extends AbstractDao
     {
         $this->newQuery()->getQuery()->upsert($rows, ['segment'], ['operator', 'province', 'city', 'is_virtual', 'updated_at']);
     }
+
+    /**
+     * 这些号段里库中已有的。
+     *
+     * @param list<string> $segments
+     * @return list<string>
+     */
+    public function existingSegments(array $segments): array
+    {
+        return $this->newQuery()->whereIn('segment', $segments)->pluck('segment')->all();
+    }
+
+    /**
+     * 批量新增，号段已有的跳过（只补新号段用）。同样不触发模型事件，导入完要整体清缓存。
+     *
+     * @param list<array<string, mixed>> $rows
+     */
+    public function insertMissing(array $rows): void
+    {
+        $this->newQuery()->getQuery()->insertOrIgnore($rows);
+    }
 }

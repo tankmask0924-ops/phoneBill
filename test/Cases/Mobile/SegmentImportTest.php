@@ -17,11 +17,12 @@ use App\Model\MobileSegment;
 use App\Service\Mobile\MobileSegmentService;
 use App\Service\Mobile\SegmentImportService;
 use PHPUnit\Framework\TestCase;
+use ZipArchive;
 
 use function Hyperf\Support\make;
 
 /**
- * 号段库导入：运营商、省份、虚拟运营商号段的转换，以及覆盖写入、导入后清缓存。
+ * 号段库导入：运营商、省份、虚拟运营商号段的转换，覆盖写入、xlsx 只新增，以及导入后清缓存。
  *
  * @internal
  * @coversNothing
@@ -101,6 +102,74 @@ class SegmentImportTest extends TestCase
         $this->assertSame(1, MobileSegment::where('segment', $a)->count());
         $this->assertSame('ctcc', MobileSegment::where('segment', $b)->value('operator'));
         $this->assertNull(MobileSegment::where('segment', $b)->value('city'));
+    }
+
+    public function testImportXlsxOnlyNewKeepsExistingSegments()
+    {
+        $this->segments[] = $existing = $this->freeSegment();
+        $this->segments[] = $new = $this->freeSegment();
+        MobileSegment::create(['segment' => $existing, 'operator' => 'cmcc', 'province' => '广东', 'city' => '广州市', 'is_virtual' => false]);
+        $this->assertNull(make(MobileSegmentService::class)->identify($new . '0000'), '导入前查不到');
+
+        // 号段一列用共享字符串，一列用内联字符串；省区是简称；最后一行号段不对
+        $file = $this->xlsx([
+            ['id', '代码', '号段', '省区', '城市', '服务商'],
+            ['1', '100', $existing, '湖南', '长沙', '中国电信'],
+            ['2', '100', ['inline' => $new], '江苏', '常州', '中国联通'],
+            ['3', '100', '12345', '江苏', '常州', '中国联通'],
+        ]);
+        $service = make(SegmentImportService::class);
+        $dry = $service->import($file, true, null, true);
+        $this->assertSame([2, 1, 1, 1], [$dry['rows'], $dry['existing'], $dry['imported'], $dry['unparsed']]);
+        $this->assertFalse(MobileSegment::where('segment', $new)->exists(), '试运行不写库');
+
+        $stats = $service->import($file, false, null, true);
+        unlink($file);
+        $this->assertSame(['cucc' => 1], $stats['by_operator']);
+        $this->assertSame(['cmcc', '广东', '广州市'], array_values(MobileSegment::where('segment', $existing)->first(['operator', 'province', 'city'])->toArray()), '已有的不动');
+        $this->assertSame(['cucc', '江苏', '常州'], array_values(MobileSegment::where('segment', $new)->first(['operator', 'province', 'city'])->toArray()));
+        $this->assertSame('江苏', make(MobileSegmentService::class)->identify($new . '0000')->province, '导入后清了缓存');
+
+        $this->expectExceptionMessage('表头里没找到「号段」列');
+        $file = $this->xlsx([['id', '省区', '城市', '服务商']]);
+        try {
+            $service->import($file, true, null, true);
+        } finally {
+            unlink($file);
+        }
+    }
+
+    /**
+     * 拼一个最小的 xlsx：字符串默认放共享字符串表，['inline' => 值] 写成内联字符串。
+     *
+     * @param list<list<array{inline: string}|string>> $rows
+     */
+    private function xlsx(array $rows): string
+    {
+        $shared = [];
+        $sheet = '';
+        foreach ($rows as $r => $cells) {
+            $sheet .= '<row r="' . ($r + 1) . '">';
+            foreach ($cells as $c => $value) {
+                $ref = chr(65 + $c) . ($r + 1);
+                if (is_array($value)) {
+                    $sheet .= "<c r=\"{$ref}\" t=\"inlineStr\"><is><t>{$value['inline']}</t></is></c>";
+                } else {
+                    $shared[] = "<si><t>{$value}</t></si>";
+                    $sheet .= "<c r=\"{$ref}\" t=\"s\"><v>" . (count($shared) - 1) . '</v></c>';
+                }
+            }
+            $sheet .= '</row>';
+        }
+        $ns = 'xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"';
+        $file = tempnam(sys_get_temp_dir(), 'seg') . '.xlsx';
+        $zip = new ZipArchive();
+        $zip->open($file, ZipArchive::CREATE);
+        $zip->addFromString('xl/sharedStrings.xml', "<?xml version=\"1.0\"?><sst {$ns}>" . implode('', $shared) . '</sst>');
+        $zip->addFromString('xl/worksheets/sheet1.xml', "<?xml version=\"1.0\"?><worksheet {$ns}><sheetData>{$sheet}</sheetData></worksheet>");
+        $zip->close();
+
+        return $file;
     }
 
     private function freeSegment(): string
