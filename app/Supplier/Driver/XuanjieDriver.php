@@ -30,10 +30,8 @@ use RuntimeException;
  *   nProductClass / nProductType 固定 1，常规话费不传 szProductId；上游没有自己的订单号；
  * - 全部接口表单 POST，带 szFormat=json；签名：按文档给的固定顺序拼 k=v&...，末尾拼 &szKey=，md5 小写；
  *   szTimeStamp 是北京时间 yyyy-MM-dd HH:mm:ss，晚于上游 1 分钟算过期；
- * - 下单：0 受理；1000、1001、1003、1004、1006、2001～2003、2020、2021、2030 上游明确下单失败，换下一家；
- *   3003 订单号重复按回复规则判失败换下一家（文档写的是等待结果，2026-10-16 定按失败处理）；表外的码文档写的是
- *   「未确认（人工核实）」，不能判失败，和网络异常、HTTP 出错、返回无法解析（没有拿到返回值）一样按接口异常处理，
- *   订单立即转异常人工处理；
+ * - 下单只有 nRtn=0 算受理；上游有返回、nRtn 是别的（含 3003 订单号重复和文档写「未确认」的表外的码）一律判失败
+ *   换下一家（2026-10-25 定）；网络异常、HTTP 出错、返回无法解析（没有拿到返回值）按接口异常处理，订单立即转异常人工处理；
  * - 查单 5012 成功、5013 失败、5011 处理中；5005 订单不存在只记录，订单状态不动（下单受理了就以下单为准）；
  *   5002 查询频繁、5003 / 5004、表外的码都不处理订单，按处理中；
  * - 回调按文档字段验签（szRtnMsg 不参与）并核对 szAgentId，nFlag 2 成功、3 失败、其他不处理订单，验签通过回 ok。
@@ -52,8 +50,8 @@ class XuanjieDriver implements SupplierDriverInterface
     /** 查单、查余额太频繁（30 秒只能查一次） */
     private const CODE_FREQUENT = '5002';
 
-    /** 下单判失败、换下一家的码：文档 2.2 的下单失败码，加上 3003 订单号重复（2026-10-16 定按失败处理） */
-    private const REJECT_CODES = [
+    /** 下单返回码的文档说明：上游没给描述时用；下单除了 0 都按失败处理 */
+    private const SUBMIT_CODES = [
         '1000' => '系统接口维护',
         '1001' => '时间格式错误或非表单请求',
         '1003' => '时间戳过期或初始化卡单上限',
@@ -139,12 +137,8 @@ class XuanjieDriver implements SupplierDriverInterface
             // HTTP 出错、返回无法解析：没有拿到返回值，不知道建没建单，转异常人工处理
             return RechargeResult::callFailed('下单没有拿到上游返回，转异常人工处理：' . $this->describe($body, $response), $sent, $response['body']);
         }
-        if (isset(self::REJECT_CODES[$body['nRtn']])) {
-            return RechargeResult::failed('上游拒单：' . $this->describe($body, $response), $request->supplierOrderNo, $sent, $response['body']);
-        }
         if ($body['nRtn'] !== self::CODE_OK) {
-            // 文档：其他返回是「未确认（人工核实）」，不能判失败
-            return RechargeResult::callFailed('下单返回未确认，转异常人工处理：' . $this->describe($body, $response), $sent, $response['body']);
+            return RechargeResult::failed('上游拒单：' . $this->describe($body, $response), $request->supplierOrderNo, $sent, $response['body']);
         }
 
         return RechargeResult::processing($request->supplierOrderNo, null, $sent, $response['body']);
@@ -298,6 +292,6 @@ class XuanjieDriver implements SupplierDriverInterface
         }
         $message = $this->message($body);
 
-        return '[' . $body['nRtn'] . '] ' . ($message === '' ? self::REJECT_CODES[$body['nRtn']] ?? self::QUERY_CODES[$body['nRtn']] ?? '' : $message);
+        return '[' . $body['nRtn'] . '] ' . ($message === '' ? self::SUBMIT_CODES[$body['nRtn']] ?? self::QUERY_CODES[$body['nRtn']] ?? '' : $message);
     }
 }

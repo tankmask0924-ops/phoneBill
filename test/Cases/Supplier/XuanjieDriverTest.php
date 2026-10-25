@@ -143,24 +143,18 @@ class XuanjieDriverTest extends HttpTestCase
 
     public function testRechargeMapsDocumentCodes()
     {
-        // 文档 2.2 明确下单失败的码，加上 3003 订单号重复：失败换下一家
-        foreach (['1000', '1001', '1003', '1004', '2001', '2002', '2003', '2020', '2021', '1006', '2030', '3003'] as $code) {
+        // 只有 0 算受理：文档 2.2 的失败码、3003 订单号重复、表外的码，一律失败换下一家
+        foreach (['1000', '1001', '1003', '1004', '2001', '2002', '2003', '2020', '2021', '1006', '2030', '3003', '1', '999', '5011'] as $code) {
             $this->respond(['nRtn' => (int) $code, 'szOrderId' => 'A0001', 'szRtnCode' => '']);
             $result = $this->driver()->recharge($this->request());
             $this->assertSame(RechargeStatus::Failed, $result->status, "nRtn {$code}");
             $this->assertFalse($result->callFailed, "nRtn {$code}");
             $this->assertStringContainsString("[{$code}]", $result->message);
         }
-        $this->assertStringContainsString('[3003] 订单号重复', $result->message);
-
-        // 表外的码：未确认，不能判失败，转异常人工处理
-        foreach (['1', '999', '5011'] as $code) {
-            $this->respond(['nRtn' => $code, 'szRtnCode' => '系统异常']);
-            $result = $this->driver()->recharge($this->request());
-            $this->assertSame(RechargeStatus::Processing, $result->status, "nRtn {$code}");
-            $this->assertTrue($result->callFailed, "nRtn {$code}");
-        }
-        $this->assertStringContainsString('[5011] 系统异常', $result->message);
+        $this->respond(['nRtn' => 3003, 'szRtnCode' => '']);
+        $this->assertStringContainsString('[3003] 订单号重复', $this->driver()->recharge($this->request())->message);
+        $this->respond(['nRtn' => '999', 'szRtnCode' => '系统异常']);
+        $this->assertStringContainsString('[999] 系统异常', $this->driver()->recharge($this->request())->message);
 
         // 没有响应体、返回无法解析、HTTP 出错：没有拿到返回值，转异常人工处理
         foreach ([['status' => 200, 'body' => ''], ['status' => 200, 'body' => '<return><nRtn>0</nRtn></return>'], ['status' => 502, 'body' => '<html>Bad Gateway</html>']] as $response) {
@@ -313,20 +307,27 @@ class XuanjieDriverTest extends HttpTestCase
         $this->assertSame('200.00', Merchant::find($merchant->id)->balance);
     }
 
-    public function testUnconfirmedReplyMarksOrderAbnormal()
+    public function testRejectedSubmitFailsOverAndNoReplyMarksOrderAbnormal()
     {
         [$merchant, $product, $mobile] = $this->scenario();
 
+        // 表外的码：上游有返回，判失败；只有这一家，订单失败退款
         $this->respond(['nRtn' => 999, 'szRtnCode' => '系统异常']);
         $order = $this->placeOrder($merchant, $product, $mobile);
         $this->process()->submit($order->id);
+        $this->assertSame(Order::STATUS_FAILED, Order::find($order->id)->status);
+        $this->assertSame('200.00', Merchant::find($merchant->id)->balance);
+        $this->assertStringContainsString('[999]', OrderAttempt::where('order_id', $order->id)->first()->message);
 
+        // 没拿到返回：转异常人工处理，不退款、不换下一家
+        $this->http->responses = [['status' => 504, 'body' => 'Gateway Timeout']];
+        $order = $this->placeOrder($merchant, $product, $mobile);
+        $this->process()->submit($order->id);
         $order = Order::find($order->id);
         $this->assertSame(Order::STATUS_ABNORMAL, $order->status);
         $this->assertTrue((bool) $order->manual_only);
         $this->assertSame('100.50', Merchant::find($merchant->id)->balance, '不退款');
         $this->assertSame(1, OrderAttempt::where('order_id', $order->id)->count(), '不换下一家');
-        $this->assertStringContainsString('[999]', OrderAttempt::where('order_id', $order->id)->first()->message);
     }
 
     /**
