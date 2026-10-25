@@ -414,6 +414,8 @@ app/Supplier/
     ├── YingyetingDriver.php      # 营业厅话费 API（docs/营业厅.md）
     ├── ChongyidaDriver.php       # 充易达话费 API（docs/充易达.md）
     ├── XuanjieDriver.php         # 炫捷话费 API（docs/炫捷.md）
+    ├── ZhixinDriver.php          # 智信科技话费 API（docs/智信科技平台API接口文档.md）
+    ├── LinxianDriver.php         # 邻显科技话费 API（docs/邻显科技.md）
     └── XxxDriver.php             # 每家供应商一个
 ```
 
@@ -539,6 +541,25 @@ app/Supplier/
 - 字段对应：`szOrderId` = 提交单号 `attempt_no`，`szPhoneNum` = 手机号，`nMoney` = 整数面值，`nSortType` 1 移动、2 联通、3 电信（其他运营商不提交，直接失败换下一家），`nProductClass` / `nProductType` 固定 `1`，常规话费不传 `szProductId`（供应商商品编码不发给上游）。上游没有自己的订单号，供应商订单号留空。
 - 签名：按文档给的固定顺序拼 `k=v&...`，末尾拼 `&szKey=`，md5 小写；`szTimeStamp` 用北京时间 `yyyy-MM-dd HH:mm:ss`（晚于上游 1 分钟算过期）。回调按 `szAgentId`、`szOrderId`、`szPhoneNum`、`nDemo`、`fSalePrice`、`nFlag` 验签（`szRtnMsg` 不参与）并核对 `szAgentId`，通过回 `ok`。
 - 结果判定（按上游文档 2.2）：下单 `0` 受理；`1000`、`1001`、`1003`、`1004`、`1006`、`2001`～`2003`、`2020`、`2021`、`2030` 判失败换下一家；`3003` 订单号重复也判失败换下一家（文档写的是等待结果，2026-10-16 定按回复规则判失败）；表外的码上游写明「未确认（人工核实）」不能判失败，和没拿到返回（网络异常、HTTP 出错、返回无法解析）一样立即转异常并标为人工处理单（见 2.5）。查单 `5012` 成功、`5013` 失败、`5011` 处理中；`5005` 订单不存在只记录、订单状态不动；`5002` 查询频繁、`5003`、`5004` 和表外的码不处理订单。回调 `nFlag` 2 成功、3 失败、其他不处理订单。
+
+### 7.10 智信科技（驱动 `zhixin`）
+
+上游文档 `docs/智信科技平台API接口文档.md`（最后是对接方式、结果判定表和待确认事项）：下单、查单、余额、回调，全部 POST JSON，回调是 GET。只接话费。
+
+- 接口参数：接口域名（路径 `/zxpaycore/v2/...` 写在驱动里）、查单 / 余额域名（选填，留空同接口域名）、商户代号（`mrch_no`）、商户密钥；回调地址自动生成，每单随下单传 `notify_url`（见 4.2）。
+- 字段对应：`client_order_no` = 提交单号 `attempt_no`，`phone_no` = 手机号，`product_type` 固定 `1`，`recharge_amount` = 面值（分），`cp` 01 移动、02 电信、03 联通、04 广电，`recharge_type` 固定 `0`；供应商商品编码不发给上游。上游 `up_order_no` 存为供应商订单号。查单的 `order_time` 取提交单号开头 14 位下单时间。
+- 签名：每次带 `mrch_no` 和北京时间 `request_time`（`yyyyMMddHHmmss`），去掉 `sign` 按名升序拼 `key1value1...`（空值也参与），末尾拼商户密钥，md5 小写。回调按文档列出的字段里收到的验签（`desc`、`channel_type` 不参与），通过回 `SUCCESS`。
+- 结果判定：下单只有 `code=2` 算受理；其他 code（含文档写「存疑」的 `625` 重复订单号和表外的码）判失败换下一家；没拿到返回（网络异常、HTTP 出错、返回无法解析或没有 code）立即转异常并标为人工处理单（见 2.5）。查单 `recharge_status` 2 成功、6 失败、其他处理中；`626` 订单不存在只记录、订单状态不动；`603` 等其他码不处理订单。回调 `recharge_status` 2 成功、6 失败、其他不处理订单。
+
+### 7.11 邻显科技（驱动 `linxian`）
+
+上游文档 `docs/邻显科技.md`（最后是对接方式、结果判定表和待确认事项）：下单、查单、余额、商品列表、回调，全部表单 POST、返回 JSON。只接话费。
+
+- 接口参数：接口域名（路径 `/api/...` 写在驱动里）、`APPID`、`APPSECRET`；**回调地址不随单传**，要在上游后台「系统管理—查看设置」里填自动生成的回调地址。
+- 字段对应：`out_order_no` = 提交单号 `attempt_no`，`mobile` = 手机号，`product_id` = 供应商商品编码（上游产品 id）。上游 `order_no` 存为供应商订单号。
+- 签名：去掉 `sign` 按名 ASCII 升序 `http_build_query`（值 URL 编码，空值也参与），末尾拼 `&secret=APPSECRET`，md5 转大写。回调按收到的全部字段（除 `sign`）验签，通过回 `success`。
+- 结果判定：下单只有 `code=0` 算受理；其他 code 判失败换下一家；没拿到返回（网络异常、HTTP 出错、返回无法解析或没有 code）立即转异常并标为人工处理单（见 2.5）。查单 `order_status` `FINISH` 成功、`FAILED` 失败、`PASS` / `RUNNING` 和其他处理中；`40001` 无订单只记录、订单状态不动。回调同样 `FINISH` / `FAILED` 才处理订单。
+- 上游商品列表：`operator` 是中文（移动 / 联通 / 电信 / 广电）；`unit` 为「元」时 `capacity` 当面值；`region` 作为补充说明；没有上下架字段，全部按在售。
 
 ## 8. 权限
 
