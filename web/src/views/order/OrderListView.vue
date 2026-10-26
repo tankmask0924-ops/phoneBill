@@ -25,6 +25,7 @@ import {
   toOptions,
 } from '@/utils/labels'
 import { usePermissionStore } from '@/stores/permission'
+import { useTodoStore } from '@/stores/todo'
 
 /** 异常订单页：固定只看 abnormal */
 const props = defineProps<{ abnormal?: boolean }>()
@@ -101,13 +102,21 @@ async function openDetail(row: Order) {
   }
 }
 
+const todoStore = useTodoStore()
+
+/** 处理过订单后刷新列表，异常订单角标也马上跟着变 */
+async function reload() {
+  await list.load()
+  todoStore.refreshOrders(true).catch(() => {})
+}
+
 /** 执行一个人工操作，成功后刷新详情和列表 */
 async function act(run: () => Promise<OrderDetail>, success: string) {
   acting.value = true
   try {
     detail.value = await run()
     ElMessage.success(success)
-    await list.load()
+    await reload()
   } finally {
     acting.value = false
   }
@@ -133,7 +142,7 @@ async function query() {
   try {
     result = await orderApi.query(detail.value!.id)
     detail.value = result
-    await list.load()
+    await reload()
   } finally {
     acting.value = false
   }
@@ -240,7 +249,7 @@ async function submitNotify() {
   let outcome
   try {
     outcome = await orderApi.batchNotify(notifyOrders.value.map((o) => o.id), result, remark.trim())
-    await list.load()
+    await reload()
   } finally {
     acting.value = false
   }

@@ -14,6 +14,8 @@ const permission = usePermissionStore()
 const canViewStats = computed(() => permission.can('order.view'))
 /** 待办：待审核的付款账号、加款申请，要 funding.view */
 const canViewTodos = computed(() => permission.can('funding.view'))
+/** 异常订单数，要 order.view */
+const canViewOrderTodos = canViewStats
 const router = useRouter()
 const data = ref<AdminDashboard | null>(null)
 /** 跟菜单角标、右下角提醒共用一份 */
@@ -39,6 +41,10 @@ async function loadTodos() {
   await todoStore.refresh()
 }
 
+async function loadOrderTodos() {
+  await todoStore.refreshOrders()
+}
+
 /** 点待办卡片：打开加款申请页对应的页签（默认筛待审核） */
 function openFunding(tab: 'requests' | 'payers') {
   router.push({ path: '/merchant/funding-requests', query: { tab } })
@@ -51,20 +57,28 @@ onMounted(async () => {
   }
   if (canViewStats.value) {
     load()
+    loadOrderTodos()
   }
 })
 </script>
 
 <template>
-  <el-row v-if="canViewTodos" :gutter="16" class="todos">
-    <el-col :span="6">
+  <el-row v-if="canViewTodos || canViewOrderTodos" :gutter="16" class="todos">
+    <el-col v-if="canViewOrderTodos" :span="6">
+      <el-card shadow="hover" class="todo" @click="router.push('/order/abnormal')">
+        <el-statistic title="异常订单" :value="todoStore.abnormalCount" :value-style="todoStyle(todoStore.abnormalCount)">
+          <template #suffix><span class="todo-link">去处理 ›</span></template>
+        </el-statistic>
+      </el-card>
+    </el-col>
+    <el-col v-if="canViewTodos" :span="6">
       <el-card shadow="hover" class="todo" @click="openFunding('requests')">
         <el-statistic title="待审批加款" :value="todos?.pending_funding_requests ?? 0" :value-style="todoStyle(todos?.pending_funding_requests)">
           <template #suffix><span class="todo-link">去审批 ›</span></template>
         </el-statistic>
       </el-card>
     </el-col>
-    <el-col :span="6">
+    <el-col v-if="canViewTodos" :span="6">
       <el-card shadow="hover" class="todo" @click="openFunding('payers')">
         <el-statistic title="待审核付款账号" :value="todos?.pending_payer_accounts ?? 0" :value-style="todoStyle(todos?.pending_payer_accounts)">
           <template #suffix><span class="todo-link">去审核 ›</span></template>
@@ -119,7 +133,7 @@ onMounted(async () => {
       </el-col>
     </el-row>
     <div class="actions">
-      <el-button @click="load(); canViewTodos && loadTodos()">刷新</el-button>
+      <el-button @click="load(); loadOrderTodos(); canViewTodos && loadTodos()">刷新</el-button>
       <router-link to="/order/orders"><el-button type="primary" plain>查看订单</el-button></router-link>
       <span class="tip">销售额、利润只算成功的订单；累计数据每分钟更新一次</span>
     </div>

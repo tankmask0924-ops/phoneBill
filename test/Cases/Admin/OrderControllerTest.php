@@ -220,6 +220,19 @@ class OrderControllerTest extends HttpTestCase
         $this->assertSame(bcadd($before['today']['profit'], '1.50', 2), $after['profit']);
     }
 
+    public function testOrderTodosCountAbnormalOrders()
+    {
+        $this->assertSame(403, $this->jsonRequest('GET', '/admin/dashboard/order-todos', $this->loginAs($this->createAdminWithPermissions(['funding.view'])))->getStatusCode());
+        $token = $this->loginAs($this->createAdminWithPermissions(['order.view']));
+        $before = $this->body($this->jsonRequest('GET', '/admin/dashboard/order-todos', $token))['abnormal_orders'];
+
+        [$merchant, $product, $sp] = $this->fixture();
+        $this->createOrder($merchant, $product, $sp, Order::STATUS_ABNORMAL);
+        $this->createOrder($merchant, $product, $sp, Order::STATUS_ABNORMAL);
+        $this->createOrder($merchant, $product, $sp, Order::STATUS_PROCESSING);
+        $this->assertSame($before + 2, $this->body($this->jsonRequest('GET', '/admin/dashboard/order-todos', $token))['abnormal_orders'], '只算异常的');
+    }
+
     public function testBatchMobileFilter()
     {
         $token = $this->loginAs($this->createAdminWithPermissions(['order.view']));

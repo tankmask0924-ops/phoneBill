@@ -13,8 +13,9 @@ const ITEMS: { key: keyof AdminTodos; label: string; tab: string; action: string
 ]
 
 /**
- * 右下角待办提醒：有 funding.view 的管理员在后台任意页面，每分钟、每次换页面查一次待办，
- * 数量比上次提醒时多了就在右下角弹出（要手动关），点哪一项跳到加款申请页对应的页签。
+ * 待办实时刷新：管理员在后台任意页面，每分钟、每次换页面、切回页面时查一次待办。
+ * - 加款待办（funding.view）：数量比上次提醒时多了就在右下角弹出（要手动关），点哪一项跳到加款申请页对应的页签；
+ * - 异常订单（order.view）：只刷新菜单角标和首页卡片，不弹提醒。
  * 在后台布局里调用，退出登录离开布局时停止。
  */
 export function useTodoReminder() {
@@ -52,10 +53,22 @@ export function useTodoReminder() {
     )
   }
 
+  let fundingEnabled = false
+  let ordersEnabled = false
+
   async function check() {
     if (stopped || document.hidden) {
       return
     }
+    if (ordersEnabled) {
+      store.refreshOrders(true).catch(() => {})
+    }
+    if (fundingEnabled) {
+      await checkFunding()
+    }
+  }
+
+  async function checkFunding() {
     let todos: AdminTodos
     try {
       todos = await store.refresh(true)
@@ -109,7 +122,9 @@ export function useTodoReminder() {
   permission
     .load()
     .then(() => {
-      if (stopped || !permission.can('funding.view')) {
+      fundingEnabled = permission.can('funding.view')
+      ordersEnabled = permission.can('order.view')
+      if (stopped || (!fundingEnabled && !ordersEnabled)) {
         return
       }
       enabled = true

@@ -18,6 +18,7 @@ use App\Dao\MerchantPayerAccountDao;
 use App\Dao\OrderDao;
 use App\Model\MerchantFundingRequest;
 use App\Model\MerchantPayerAccount;
+use App\Model\Order;
 use App\Service\AbstractService;
 use Hyperf\Cache\Annotation\Cacheable;
 use Hyperf\Di\Annotation\Inject;
@@ -50,6 +51,18 @@ class DashboardAdminService extends AbstractService
         return [
             'pending_payer_accounts' => $this->payerDao->newQuery()->where('status', MerchantPayerAccount::STATUS_PENDING)->count(),
             'pending_funding_requests' => $this->requestDao->newQuery()->where('status', MerchantFundingRequest::STATUS_PENDING)->count(),
+        ];
+    }
+
+    /**
+     * 订单待办：异常订单（等人工处理）的数量，实时查。
+     *
+     * @return array{abnormal_orders: int}
+     */
+    public function orderTodos(): array
+    {
+        return [
+            'abnormal_orders' => $this->orderDao->newQuery()->where('status', Order::STATUS_ABNORMAL)->count(),
         ];
     }
 

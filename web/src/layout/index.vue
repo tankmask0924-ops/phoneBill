@@ -21,7 +21,7 @@ const todo = useTodoStore()
 const passwordDialog = ref(false)
 
 /** 菜单上的待办角标 */
-const badges = computed<Record<string, number>>(() => ({ '/merchant/funding-requests': todo.total }))
+const badges = computed<Record<string, number>>(() => ({ '/merchant/funding-requests': todo.total, '/order/abnormal': todo.abnormalCount }))
 
 function withBadges(items: MenuItem[]): MenuItem[] {
   return items.map((item) => ({ ...item, badge: badges.value[item.path], children: item.children && withBadges(item.children) }))

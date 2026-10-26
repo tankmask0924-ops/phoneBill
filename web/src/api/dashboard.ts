@@ -23,8 +23,15 @@ export interface AdminTodos {
   pending_funding_requests: number
 }
 
+/** 订单待办，需要 order.view，实时 */
+export interface AdminOrderTodos {
+  /** 异常订单（等人工处理）的数量 */
+  abnormal_orders: number
+}
+
 export const dashboardApi = {
   summary: () => http.get<AdminDashboard>('/admin/dashboard'),
   /** silent：右下角提醒每分钟轮询，出错不弹提示 */
   todos: (silent = false) => http.get<AdminTodos>('/admin/dashboard/todos', undefined, { silent }),
+  orderTodos: (silent = false) => http.get<AdminOrderTodos>('/admin/dashboard/order-todos', undefined, { silent }),
 }
