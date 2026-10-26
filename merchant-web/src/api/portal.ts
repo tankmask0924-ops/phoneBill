@@ -34,7 +34,7 @@ export interface Order {
   province: string
   face_value: number
   amount: string
-  /** processing 充值中 / abnormal 异常（平台正在人工核实，只在商户后台的订单记录里有）/ success 成功 / failed 失败（已退款） */
+  /** processing 充值中 / abnormal 异常（平台正在人工核实）/ timeout 超时（上游出结果后自动更新），这两个只在商户后台的订单记录里有 / success 成功 / failed 失败（已退款） */
   status: string
   fail_reason: string | null
   created_at: string | null

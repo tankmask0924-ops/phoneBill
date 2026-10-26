@@ -67,6 +67,7 @@ export const orderStatusLabels: LabelMap = {
   pending: { label: '待提交', type: 'info' },
   processing: { label: '充值中', type: 'primary' },
   abnormal: { label: '异常', type: 'danger' },
+  timeout: { label: '超时', type: 'warning' },
   success: { label: '成功', type: 'success' },
   failed: { label: '失败（已退款）', type: 'warning' },
 }

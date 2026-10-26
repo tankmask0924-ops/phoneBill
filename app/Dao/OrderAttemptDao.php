@@ -69,6 +69,14 @@ class OrderAttemptDao extends AbstractDao
     /**
      * 这个供应商还有没有提交了还没出结果的单（删除供应商前检查）。
      */
+    /**
+     * 这笔订单还有没有提交了还没出结果的。
+     */
+    public function hasProcessingForOrder(int $orderId): bool
+    {
+        return $this->newQuery()->where('order_id', $orderId)->where('status', OrderAttempt::STATUS_PROCESSING)->exists();
+    }
+
     public function hasProcessingForSupplier(int $supplierId): bool
     {
         return $this->newQuery()->where('status', OrderAttempt::STATUS_PROCESSING)->where('supplier_id', $supplierId)->exists();

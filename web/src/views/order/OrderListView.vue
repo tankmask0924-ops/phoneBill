@@ -161,6 +161,10 @@ async function query() {
     next = '这是人工处理单：上游结果只记录，订单状态不会自动变。请核实后置为成功 / 失败，再手动回调；确认上游没有充上也可以手动补单。'
   } else if (result.status === 'success') {
     next = '订单已改为成功，会通知商户。'
+  } else if (result.status === 'failed') {
+    next = '订单已失败并退款，会通知商户。'
+  } else if (result.status === 'timeout') {
+    next = '订单仍是超时，上游出结果后会自动处理，也可以到供应商后台核实后人工处理。'
   } else if (result.status === 'abnormal' && result.query_results.some((r) => r.status === 'failed')) {
     next = '异常订单不会自动退款：请到供应商后台核实没有充值到账后，点「置为失败并退款」。'
   } else if (result.status === 'abnormal') {
@@ -219,7 +223,7 @@ const notifyEffects = computed(() => {
     return []
   }
   const count = (statuses: string[]) => notifyOrders.value.filter((o) => statuses.includes(o.status)).length
-  const unfinished = count(['pending', 'processing', 'abnormal'])
+  const unfinished = count(['pending', 'processing', 'abnormal', 'timeout'])
   const lines: string[] = []
   if (result === 'success') {
     if (unfinished) lines.push(`${unfinished} 笔没出结果的改为成功（按最后一次提交的供应商和成本记账），不动余额`)
@@ -324,7 +328,7 @@ onMounted(async () => {
       :closable="false"
       show-icon
       class="tip-bar"
-      title="两种情况会进这里：① 提交给供应商时接口异常（标「人工」）：上游结果只记录，状态和回调全部人工，置为成功 / 失败后要再点「手动回调」商户才会知道；② 下单超过 2 小时还没有结果：上游后来明确成功的会自动改为成功并通知商户。上游确认没有充上的，可以「手动补单」重新提交（同一笔订单，不重复扣款）。"
+      title="两种情况会进这里：① 提交给供应商时接口异常（标「人工」）：上游结果只记录，状态和回调全部人工，置为成功 / 失败后要再点「手动回调」商户才会知道；② 下单超过 2 小时还没提交出去的。上游确认没有充上的，可以「手动补单」重新提交（同一笔订单，不重复扣款）。已提交、超过 2 小时没结果的是「超时」订单，不在这里：上游成功自动改成功，失败自动退款，都会通知商户。"
     />
     <el-form inline @submit.prevent="list.search">
       <el-form-item>
@@ -396,6 +400,7 @@ onMounted(async () => {
         <div class="summary-sub">
           成功 {{ summary.success_count }} · 失败 {{ summary.failed_count }} · 处理中 {{ summary.processing_count }}
           <span v-if="summary.abnormal_count" class="loss">（异常 {{ summary.abnormal_count }}）</span>
+          <span v-if="summary.timeout_count" class="warn">（超时 {{ summary.timeout_count }}）</span>
         </div>
       </div>
       <div class="summary-item">
@@ -494,12 +499,12 @@ onMounted(async () => {
         <div class="actions">
           <el-button @click="refreshDetail">刷新</el-button>
           <el-button v-if="canManage && detail.attempts.some((a) => a.status === 'processing')" @click="query">向供应商查单</el-button>
-          <template v-if="canManage && detail.status === 'abnormal'">
+          <template v-if="canManage && (detail.status === 'abnormal' || detail.status === 'timeout')">
             <el-button type="success" @click="confirmSuccess">置为成功</el-button>
             <el-button type="danger" @click="confirmFailed">置为失败并退款</el-button>
           </template>
           <el-button v-if="canReverse && detail.status === 'success'" type="danger" plain @click="reverse">冲正</el-button>
-          <el-button v-if="canManage && detail.status === 'abnormal'" type="primary" plain @click="openResupply">手动补单</el-button>
+          <el-button v-if="canManage && (detail.status === 'abnormal' || detail.status === 'timeout')" type="primary" plain @click="openResupply">手动补单</el-button>
           <el-button v-if="canManage" type="primary" plain @click="openNotify([detail], true)">手动回调</el-button>
         </div>
 
@@ -717,6 +722,10 @@ onMounted(async () => {
 
 .loss {
   color: #f56c6c;
+}
+
+.warn {
+  color: #e6a23c;
 }
 
 .actions .el-button + .el-button {

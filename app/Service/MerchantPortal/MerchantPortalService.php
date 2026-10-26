@@ -48,7 +48,7 @@ class MerchantPortalService extends AbstractService
 
     /** 商户看到的状态 → 实际的订单状态 */
     private const STATUS_FILTER = [
-        'processing' => [Order::STATUS_PENDING, Order::STATUS_PROCESSING, Order::STATUS_ABNORMAL],
+        'processing' => [Order::STATUS_PENDING, Order::STATUS_PROCESSING, Order::STATUS_ABNORMAL, Order::STATUS_TIMEOUT],
         'success' => [Order::STATUS_SUCCESS],
         'failed' => [Order::STATUS_FAILED],
     ];
@@ -305,8 +305,9 @@ class MerchantPortalService extends AbstractService
     }
 
     /**
-     * 商户后台（列表、详情、导出）看到的订单：平台这边异常、商户这边还没出结果的，状态显示为 abnormal（见 Order::abnormalForMerchant()）。
-     * 只用于商户后台；开放接口查单、回调用 OrderService::present()，异常仍然是 processing。
+     * 商户后台（列表、详情、导出）看到的订单：平台这边异常、商户这边还没出结果的，状态显示为 abnormal（见 Order::abnormalForMerchant()）；
+     * 超时的显示为 timeout（上游出结果后自动更新并回调）。
+     * 只用于商户后台；开放接口查单、回调用 OrderService::present()，异常、超时仍然是 processing。
      *
      * @param list<Order> $orders
      * @return list<array<string, mixed>>
@@ -319,6 +320,8 @@ class MerchantPortalService extends AbstractService
             $presented = ['id' => $o->id, 'product_name' => $o->product_name, 'province' => $o->province] + $this->orderService->present($o);
             if ($o->abnormalForMerchant(isset($unclear[$o->id]))) {
                 $presented['status'] = 'abnormal';
+            } elseif ($o->status === Order::STATUS_TIMEOUT) {
+                $presented['status'] = Order::STATUS_TIMEOUT;
             }
 
             return $presented;

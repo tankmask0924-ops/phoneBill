@@ -26,7 +26,7 @@ export interface Order {
   supplier_name: string | null
   supplier_product_id: number | null
   supplier_product_name: string | null
-  /** pending / processing / abnormal / success / failed */
+  /** pending / processing / abnormal / timeout / success / failed */
   status: string
   /** 列表标「异常」：已转异常，或还在充值中但上游返回不明确 */
   abnormal: boolean
@@ -51,10 +51,12 @@ export interface OrderSummary {
   order_count: number
   success_count: number
   failed_count: number
-  /** 充值中、等待中、异常 */
+  /** 充值中、等待中、异常、超时 */
   processing_count: number
   /** 其中已转异常的 */
   abnormal_count: number
+  /** 其中超时的 */
+  timeout_count: number
   success_rate: string | null
   amount: string
   cost: string

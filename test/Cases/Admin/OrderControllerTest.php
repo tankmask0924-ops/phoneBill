@@ -130,6 +130,7 @@ class OrderControllerTest extends HttpTestCase
             'failed_count' => 1,
             'processing_count' => 1,
             'abnormal_count' => 0,
+            'timeout_count' => 0,
             'success_rate' => '66.66',
             'amount' => '199.00',
             'cost' => '196.00',
@@ -285,6 +286,25 @@ class OrderControllerTest extends HttpTestCase
         // 重复操作不会重复退款
         $this->assertSame(422, $this->jsonRequest('POST', "/admin/orders/{$toFail->id}/fail", $token, ['remark' => 'x'])->getStatusCode());
         $this->assertSame(1, MerchantBalanceLog::where('order_id', $toFail->id)->where('type', 'order_refund')->count());
+    }
+
+    public function testTimeoutOrdersAreListedAndCanBeHandledManually()
+    {
+        $token = $this->loginAs($this->createAdminWithPermissions(['order.view', 'order.manage']));
+        [$merchant, $product, $sp] = $this->fixture();
+        $timeout = $this->createOrder($merchant, $product, $sp, Order::STATUS_TIMEOUT);
+        $other = $this->createOrder($merchant, $product, $sp, Order::STATUS_TIMEOUT);
+        Order::where('id', $timeout->id)->update(['created_at' => date('Y-m-d H:i:s', time() - 30 * 86400)]);
+
+        // 超时的不限日期；汇总单独数
+        $list = $this->body($this->jsonRequest('GET', "/admin/orders?status=timeout&merchant_id={$merchant->id}", $token));
+        $this->assertSame([$other->id, $timeout->id], array_column($list['data'], 'id'));
+        $this->assertSame(2, $list['summary']['timeout_count']);
+        $this->assertFalse($list['data'][0]['abnormal'], '超时不算异常');
+
+        $failed = $this->body($this->jsonRequest('POST', "/admin/orders/{$timeout->id}/fail", $token, ['remark' => '供应商确认未到账']));
+        $this->assertSame('failed', $failed['status']);
+        $this->assertSame('success', $this->body($this->jsonRequest('POST', "/admin/orders/{$other->id}/success", $token, ['remark' => '供应商确认到账']))['status']);
     }
 
     public function testReverseNeedsItsOwnPermissionAndRefunds()

@@ -66,7 +66,10 @@ class OrderAdminService extends AbstractService
 
     private const MAX_BATCH_NOTIFY = 100;
 
-    private const STATUSES = [Order::STATUS_PENDING, Order::STATUS_PROCESSING, Order::STATUS_ABNORMAL, Order::STATUS_SUCCESS, Order::STATUS_FAILED];
+    private const STATUSES = [Order::STATUS_PENDING, Order::STATUS_PROCESSING, Order::STATUS_ABNORMAL, Order::STATUS_TIMEOUT, Order::STATUS_SUCCESS, Order::STATUS_FAILED];
+
+    /** 可以人工置成功 / 失败、手动补单的状态 */
+    private const MANUAL_STATUSES = [Order::STATUS_ABNORMAL, Order::STATUS_TIMEOUT];
 
     #[Inject]
     protected OrderDao $orderDao;
@@ -158,7 +161,7 @@ class OrderAdminService extends AbstractService
         }
         $rows = $this->formatMany($builder->orderByDesc('id')->get()->all());
 
-        $statusLabels = ['pending' => '充值中', 'processing' => '充值中', 'abnormal' => '异常', 'success' => '成功', 'failed' => '失败'];
+        $statusLabels = ['pending' => '充值中', 'processing' => '充值中', 'abnormal' => '异常', 'timeout' => '超时', 'success' => '成功', 'failed' => '失败'];
         $lines = [['平台订单号', '商户订单号', '商户', '商品', '手机号', '运营商', '省份', '面值', '扣款金额', '成本', '利润', '供应商', '状态', '失败原因', '下单时间', '完成时间', '耗时（秒）']];
         foreach ($rows as $r) {
             $lines[] = [
@@ -259,8 +262,8 @@ class OrderAdminService extends AbstractService
     {
         $order = $this->findOrFail($id);
         $remark = $this->requiredString($remark, '备注', 200);
-        if ($order->status !== Order::STATUS_ABNORMAL) {
-            throw new HttpException(422, '只有异常订单可以人工置成功');
+        if (! in_array($order->status, self::MANUAL_STATUSES, true)) {
+            throw new HttpException(422, '只有异常、超时订单可以人工置成功');
         }
         if (! $this->processService->confirmSuccess($order, $remark)) {
             throw new HttpException(422, '订单状态已经变化，请刷新后再操作');
@@ -277,8 +280,8 @@ class OrderAdminService extends AbstractService
     {
         $order = $this->findOrFail($id);
         $remark = $this->requiredString($remark, '备注', 200);
-        if ($order->status !== Order::STATUS_ABNORMAL) {
-            throw new HttpException(422, '只有异常订单可以人工置失败');
+        if (! in_array($order->status, self::MANUAL_STATUSES, true)) {
+            throw new HttpException(422, '只有异常、超时订单可以人工置失败');
         }
         if (! $this->processService->confirmFailed($order, $remark)) {
             throw new HttpException(422, '订单状态已经变化，请刷新后再操作');
@@ -379,8 +382,8 @@ class OrderAdminService extends AbstractService
     public function resupply(AdminUser $operator, int $id, mixed $supplierProductId, mixed $remark, ?string $ip): array
     {
         $order = $this->findOrFail($id);
-        if ($order->status !== Order::STATUS_ABNORMAL) {
-            throw new HttpException(422, '只有异常订单可以手动补单');
+        if (! in_array($order->status, self::MANUAL_STATUSES, true)) {
+            throw new HttpException(422, '只有异常、超时订单可以手动补单');
         }
         $remark = $this->requiredString($remark, '备注', 200);
         $spId = is_numeric($supplierProductId) ? (int) $supplierProductId : 0;
@@ -403,7 +406,7 @@ class OrderAdminService extends AbstractService
                 }
             }
             // 补单后按正常流程自动处理；补单时再出接口异常会重新标为人工处理单
-            if (! $this->orderDao->transition($order->id, [Order::STATUS_ABNORMAL], Order::STATUS_PROCESSING, ['manual_only' => false])) {
+            if (! $this->orderDao->transition($order->id, self::MANUAL_STATUSES, Order::STATUS_PROCESSING, ['manual_only' => false])) {
                 throw new HttpException(422, '订单状态已经变了，请刷新');
             }
         } finally {
@@ -422,7 +425,7 @@ class OrderAdminService extends AbstractService
     /**
      * 当前筛选条件下全部订单（不只是这一页）的汇总：成功率 = 成功 /（成功 + 失败），成本、利润、扣款合计和平均耗时只算成功的订单。
      *
-     * @return array{order_count: int, success_count: int, failed_count: int, processing_count: int, abnormal_count: int, success_rate: null|string, amount: string, cost: string, profit: string, avg_duration: null|int}
+     * @return array{order_count: int, success_count: int, failed_count: int, processing_count: int, abnormal_count: int, timeout_count: int, success_rate: null|string, amount: string, cost: string, profit: string, avg_duration: null|int}
      */
     private function summary(Builder $builder): array
     {
@@ -431,6 +434,7 @@ class OrderAdminService extends AbstractService
             coalesce(sum(status = 'success'), 0) as success_count,
             coalesce(sum(status = 'failed'), 0) as failed_count,
             coalesce(sum(status = 'abnormal'), 0) as abnormal_count,
+            coalesce(sum(status = 'timeout'), 0) as timeout_count,
             coalesce(sum(case when status = 'success' then sale_price end), 0) as amount,
             coalesce(sum(case when status = 'success' then cost_price end), 0) as cost,
             coalesce(sum(case when status = 'success' then profit end), 0) as profit,
@@ -444,9 +448,10 @@ class OrderAdminService extends AbstractService
             'order_count' => $orders,
             'success_count' => $success,
             'failed_count' => $failed,
-            // 充值中、等待中、异常
+            // 充值中、等待中、异常、超时
             'processing_count' => $orders - $success - $failed,
             'abnormal_count' => (int) $row->abnormal_count,
+            'timeout_count' => (int) $row->timeout_count,
             'success_rate' => ProductStatsService::rate($success, $failed),
             'amount' => bcadd((string) $row->amount, '0', 2),
             'cost' => bcadd((string) $row->cost, '0', 2),
@@ -542,7 +547,7 @@ class OrderAdminService extends AbstractService
         }
         $byMobile = $this->applyMobileFilter($builder, $query['mobile'] ?? null);
         // 未完成的订单（尤其是异常订单）不管多久都要能看到，数量也少，不加默认时间范围
-        $unfinished = in_array($query['status'] ?? null, [Order::STATUS_PENDING, Order::STATUS_PROCESSING, Order::STATUS_ABNORMAL], true);
+        $unfinished = in_array($query['status'] ?? null, [Order::STATUS_PENDING, Order::STATUS_PROCESSING, Order::STATUS_ABNORMAL, Order::STATUS_TIMEOUT], true);
         $this->applyDateRange($builder, $query, $keyword !== '' || $byMobile || $unfinished);
 
         return $builder;

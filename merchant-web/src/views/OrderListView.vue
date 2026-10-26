@@ -28,12 +28,15 @@ function toParams(params: Record<string, unknown>): Record<string, unknown> {
 /** 当前筛选条件下全部订单的汇总，跟列表一起返回 */
 const summary = ref<OrderSummary | null>(null)
 
-const ABNORMAL_TIP = '订单处理异常，平台正在人工核实，结果出来后会回调通知'
+const STATUS_TIPS: Record<string, string> = {
+  abnormal: '订单处理异常，平台正在人工核实，结果出来后会回调通知',
+  timeout: '超时未出结果，上游出结果后自动更新并回调通知',
+}
 
-/** 筛选「充值中」时包含异常的订单（异常也还没有结果） */
+/** 筛选「充值中」时包含异常、超时的订单（都还没有结果） */
 const statusOptions = toOptions(orderStatusLabels)
-  .filter((o) => o.value !== 'abnormal')
-  .map((o) => (o.value === 'processing' ? { ...o, label: '充值中（含异常）' } : o))
+  .filter((o) => o.value !== 'abnormal' && o.value !== 'timeout')
+  .map((o) => (o.value === 'processing' ? { ...o, label: '充值中（含异常、超时）' } : o))
 
 const list = usePagedList<Order, Filters>(
   (params) =>
@@ -169,7 +172,7 @@ onMounted(async () => {
       </el-table-column>
       <el-table-column label="状态" width="150">
         <template #default="{ row }">
-          <el-tooltip :disabled="row.status !== 'abnormal'" :content="ABNORMAL_TIP" placement="top">
+          <el-tooltip :disabled="!STATUS_TIPS[row.status]" :content="STATUS_TIPS[row.status] ?? ''" placement="top">
             <span><StatusTag :map="orderStatusLabels" :value="row.status" /></span>
           </el-tooltip>
         </template>
@@ -210,7 +213,7 @@ onMounted(async () => {
           <el-descriptions-item label="扣款">{{ detail.amount }} 元</el-descriptions-item>
           <el-descriptions-item label="状态">
             <StatusTag :map="orderStatusLabels" :value="detail.status" />
-            <div v-if="detail.status === 'abnormal'" class="muted">{{ ABNORMAL_TIP }}</div>
+            <div v-if="STATUS_TIPS[detail.status]" class="muted">{{ STATUS_TIPS[detail.status] }}</div>
           </el-descriptions-item>
           <el-descriptions-item label="完成时间">{{ detail.finished_at ?? '-' }}</el-descriptions-item>
           <el-descriptions-item v-if="detail.fail_reason" label="失败原因" :span="2">{{ detail.fail_reason }}</el-descriptions-item>

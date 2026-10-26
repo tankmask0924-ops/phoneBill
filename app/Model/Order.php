@@ -53,8 +53,11 @@ class Order extends Model
     /** 已提交，等结果 */
     public const STATUS_PROCESSING = 'processing';
 
-    /** 超时没结果，等人工处理 */
+    /** 等人工处理：提交时接口异常（人工处理单），或者一直没提交出去的单超时了 */
     public const STATUS_ABNORMAL = 'abnormal';
+
+    /** 提交后超时没结果：照常查单、收回调，上游成功就改成功，失败就直接退款（不再换供应商） */
+    public const STATUS_TIMEOUT = 'timeout';
 
     public const STATUS_SUCCESS = 'success';
 
@@ -131,7 +134,7 @@ class Order extends Model
     public function flaggedAbnormal(bool $unclearReply): bool
     {
         return $this->status === self::STATUS_ABNORMAL
-            || ($unclearReply && in_array($this->status, [self::STATUS_PENDING, self::STATUS_PROCESSING], true));
+            || ($unclearReply && in_array($this->status, [self::STATUS_PENDING, self::STATUS_PROCESSING, self::STATUS_TIMEOUT], true));
     }
 
     /**

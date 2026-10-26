@@ -38,7 +38,7 @@ use Hyperf\Di\Annotation\Inject;
 class OrderService extends AbstractService
 {
     /** 还没出结果的状态，重复充值拦截看这些 */
-    public const IN_PROGRESS = [Order::STATUS_PENDING, Order::STATUS_PROCESSING, Order::STATUS_ABNORMAL];
+    public const IN_PROGRESS = [Order::STATUS_PENDING, Order::STATUS_PROCESSING, Order::STATUS_ABNORMAL, Order::STATUS_TIMEOUT];
 
     #[Inject]
     protected OrderDao $orderDao;

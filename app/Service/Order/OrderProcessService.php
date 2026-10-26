@@ -189,7 +189,7 @@ class OrderProcessService extends AbstractService
                         return false;
                     }
 
-                    return $this->orderDao->transition($attempt->order_id, [Order::STATUS_PROCESSING, Order::STATUS_ABNORMAL], Order::STATUS_SUCCESS, [
+                    return $this->orderDao->transition($attempt->order_id, [Order::STATUS_PROCESSING, Order::STATUS_ABNORMAL, Order::STATUS_TIMEOUT], Order::STATUS_SUCCESS, [
                         'supplier_id' => $attempt->supplier_id,
                         'supplier_product_id' => $attempt->supplier_product_id,
                         'cost_price' => $attempt->cost_price,
@@ -218,8 +218,14 @@ class OrderProcessService extends AbstractService
                     $this->logHeldResult($order, $attempt, RechargeStatus::Failed);
                     break;
                 }
-                // 异常订单交给人工，不再自动换供应商
-                if ($resubmitOnFailure && $this->orderDao->find($attempt->order_id)?->status === Order::STATUS_PROCESSING) {
+                $status = $this->orderDao->find($attempt->order_id)?->status;
+                if ($status === Order::STATUS_TIMEOUT) {
+                    // 超时的单上游明确失败：不再换供应商，直接退款并通知商户（还有别的提交没出结果的等它）
+                    if ($order !== null && ! $this->attemptDao->hasProcessingForOrder($order->id)) {
+                        $this->fail($order, [Order::STATUS_TIMEOUT], '超时后上游返回失败' . ($result->message ? "：{$result->message}" : ''));
+                    }
+                } elseif ($resubmitOnFailure && $status === Order::STATUS_PROCESSING) {
+                    // 异常订单交给人工，不再自动换供应商
                     $this->dispatcher->submit($attempt->order_id);
                 }
                 break;
@@ -264,7 +270,7 @@ class OrderProcessService extends AbstractService
     }
 
     /**
-     * 人工确认成功（只用于异常订单）：以最后一次提交的供应商和成本记账。
+     * 人工确认成功（只用于异常、超时订单）：以最后一次提交的供应商和成本记账。
      *
      * @return bool 是否由这次调用改成了成功
      */
@@ -279,7 +285,7 @@ class OrderProcessService extends AbstractService
         $current = $this->orderDao->find($order->id);
         $notify = $current !== null && ! $current->manual_only;
         $done = Db::transaction(function () use ($order, $attempt, $note, $now, $notify) {
-            $changed = $this->orderDao->transition($order->id, [Order::STATUS_ABNORMAL], Order::STATUS_SUCCESS, [
+            $changed = $this->orderDao->transition($order->id, [Order::STATUS_ABNORMAL, Order::STATUS_TIMEOUT], Order::STATUS_SUCCESS, [
                 'supplier_id' => $attempt->supplier_id,
                 'supplier_product_id' => $attempt->supplier_product_id,
                 'cost_price' => $attempt->cost_price,
@@ -304,7 +310,7 @@ class OrderProcessService extends AbstractService
     }
 
     /**
-     * 人工确认失败（只用于异常订单）：还在处理中的提交一并置为失败，订单失败并退款。
+     * 人工确认失败（只用于异常、超时订单）：还在处理中的提交一并置为失败，订单失败并退款。
      */
     public function confirmFailed(Order $order, string $note): bool
     {
@@ -315,7 +321,7 @@ class OrderProcessService extends AbstractService
             ]);
         }
 
-        return $this->fail($order, [Order::STATUS_ABNORMAL], "人工确认失败：{$note}");
+        return $this->fail($order, [Order::STATUS_ABNORMAL, Order::STATUS_TIMEOUT], "人工确认失败：{$note}");
     }
 
     /**
@@ -425,24 +431,26 @@ class OrderProcessService extends AbstractService
     }
 
     /**
-     * 定时任务：下单后超过时限还没结果的转为异常订单，等人工处理（不自动退款）。
+     * 定时任务：下单后超过时限还没结果的订单。
+     * - 已提交（处理中）的转为超时：照常查单、收回调，上游成功就改成功，失败就直接退款，都通知商户；
+     * - 一直没提交出去（等待中）的不会有回调，转为异常订单，等人工处理（不自动退款）。
      *
      * @return int 转了多少笔
      */
-    public function markAbnormal(int $limit = 500): int
+    public function markTimeout(int $limit = 500): int
     {
         $minutes = (int) $this->config->get('order.abnormal_after_minutes', 120);
-        $ids = $this->orderDao->newQuery()
+        $rows = $this->orderDao->newQuery()
             ->whereIn('status', [Order::STATUS_PENDING, Order::STATUS_PROCESSING])
             ->where('created_at', '<=', date('Y-m-d H:i:s', time() - $minutes * 60))
             ->limit($limit)
-            ->pluck('id')
-            ->all();
+            ->get(['id', 'status']);
         $count = 0;
-        foreach ($ids as $id) {
-            if ($this->orderDao->transition($id, [Order::STATUS_PENDING, Order::STATUS_PROCESSING], Order::STATUS_ABNORMAL)) {
+        foreach ($rows as $row) {
+            $to = $row->status === Order::STATUS_PROCESSING ? Order::STATUS_TIMEOUT : Order::STATUS_ABNORMAL;
+            if ($this->orderDao->transition($row->id, [$row->status], $to)) {
                 ++$count;
-                $this->logger()->warning('订单超时转异常', ['order_id' => $id]);
+                $this->logger()->warning($to === Order::STATUS_TIMEOUT ? '订单超时' : '订单超时没提交出去，转异常', ['order_id' => $row->id]);
             }
         }
 

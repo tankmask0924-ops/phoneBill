@@ -213,7 +213,7 @@ class OrderFlowTest extends HttpTestCase
         $this->assertSame($balance, Merchant::find($merchant->id)->balance);
     }
 
-    public function testQueryDueAndAbnormalAfterTimeout()
+    public function testQueryDueAndTimeout()
     {
         [$merchant, $product, $mobile, $suppliers] = $this->scenario([
             ['provinces' => ['*'], 'operators' => ['cmcc'], 'cost' => '98.00', 'result' => 'processing'],
@@ -229,19 +229,54 @@ class OrderFlowTest extends HttpTestCase
         $this->assertGreaterThanOrEqual(1, $this->process()->queryDue());
         $this->assertSame(Order::STATUS_SUCCESS, Order::find($order->id)->status);
 
-        // 处理中超过 2 小时 → 异常；之后供应商说失败也不自动退款、不换供应商
+        // 处理中超过 2 小时 → 超时；之后供应商说失败：不换供应商，直接退款并通知商户
         $this->setMockResult($suppliers[0], 'processing');
         $late = $this->placeOrder($merchant, $product, $this->createSegment('cmcc', '广东'));
         $this->process()->submit($late->id);
         Order::where('id', $late->id)->update(['created_at' => date('Y-m-d H:i:s', time() - 3 * 3600)]);
-        $this->assertGreaterThanOrEqual(1, $this->process()->markAbnormal());
-        $this->assertSame(Order::STATUS_ABNORMAL, Order::find($late->id)->status);
+        $this->assertGreaterThanOrEqual(1, $this->process()->markTimeout());
+        $this->assertSame(Order::STATUS_TIMEOUT, Order::find($late->id)->status);
+        $this->assertSame('1.00', Merchant::find($merchant->id)->balance, '两单都扣了钱');
+        $this->dispatcher->notifies = [];
         $attempt = OrderAttempt::where('order_id', $late->id)->first();
         $this->supplierCallback($suppliers[0], ['attempt_no' => $attempt->attempt_no, 'status' => 'failed']);
-        $this->assertSame(Order::STATUS_ABNORMAL, Order::find($late->id)->status);
+        $failed = Order::find($late->id);
+        $this->assertSame([Order::STATUS_FAILED, Order::NOTIFY_PENDING], [$failed->status, $failed->notify_status]);
+        $this->assertStringContainsString('超时后上游返回失败', $failed->fail_reason);
         $this->assertSame(OrderAttempt::STATUS_FAILED, OrderAttempt::find($attempt->id)->status);
-        $this->assertCount(1, array_filter($this->dispatcher->submits, fn ($s) => $s['order_id'] === $late->id), '只有下单时推的那一次，转异常后不再自动提交');
-        $this->assertSame('1.00', Merchant::find($merchant->id)->balance, '两单都扣了钱，没有退款');
+        $this->assertCount(1, array_filter($this->dispatcher->submits, fn ($s) => $s['order_id'] === $late->id), '只有下单时推的那一次，超时后不再换供应商');
+        $this->assertContains($late->id, array_column($this->dispatcher->notifies, 'order_id'));
+        $this->assertSame('100.50', Merchant::find($merchant->id)->balance, '失败的单退款');
+    }
+
+    public function testTimeoutOrderSucceedsOnLaterCallback()
+    {
+        [$merchant, $product, $mobile, $suppliers] = $this->scenario([
+            ['provinces' => ['*'], 'operators' => ['cmcc'], 'cost' => '98.00', 'result' => 'processing'],
+        ]);
+        $order = $this->placeOrder($merchant, $product, $mobile);
+        $this->process()->submit($order->id);
+        Order::where('id', $order->id)->update(['created_at' => date('Y-m-d H:i:s', time() - 3 * 3600)]);
+        $this->process()->markTimeout();
+        $this->assertSame(Order::STATUS_TIMEOUT, Order::find($order->id)->status);
+        $this->assertSame('processing', ApplicationContext::getContainer()->get(OrderService::class)->present(Order::find($order->id))['status'], '开放接口里仍是处理中');
+
+        $this->dispatcher->notifies = [];
+        $attempt = OrderAttempt::where('order_id', $order->id)->first();
+        $this->supplierCallback($suppliers[0], ['attempt_no' => $attempt->attempt_no, 'status' => 'success']);
+        $done = Order::find($order->id);
+        $this->assertSame([Order::STATUS_SUCCESS, '98.00'], [$done->status, $done->cost_price]);
+        $this->assertSame([['order_id' => $order->id, 'attempt_no' => 1, 'delay' => 0]], $this->dispatcher->notifies);
+    }
+
+    public function testUnsubmittedOrderTimesOutToAbnormal()
+    {
+        [$merchant, $product, $mobile] = $this->scenario([['provinces' => ['*'], 'operators' => ['cmcc'], 'cost' => '98.00']]);
+        $order = $this->placeOrder($merchant, $product, $mobile);
+        $this->assertSame(Order::STATUS_PENDING, Order::find($order->id)->status);
+        Order::where('id', $order->id)->update(['created_at' => date('Y-m-d H:i:s', time() - 3 * 3600)]);
+        $this->process()->markTimeout();
+        $this->assertSame(Order::STATUS_ABNORMAL, Order::find($order->id)->status, '没提交出去的不会有回调，转人工');
     }
 
     public function testStuckOrdersAreResubmitted()

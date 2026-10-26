@@ -84,12 +84,12 @@ class OrderDao extends AbstractDao
     }
 
     /**
-     * 这个平台商品还有没有没出结果的订单（等待中、充值中、异常），删除商品前检查。
+     * 这个平台商品还有没有没出结果的订单（等待中、充值中、异常、超时），删除商品前检查。
      */
     public function hasUnfinishedForProduct(int $productId): bool
     {
         return $this->newQuery()
-            ->whereIn('status', [Order::STATUS_PENDING, Order::STATUS_PROCESSING, Order::STATUS_ABNORMAL])
+            ->whereIn('status', [Order::STATUS_PENDING, Order::STATUS_PROCESSING, Order::STATUS_ABNORMAL, Order::STATUS_TIMEOUT])
             ->where('product_id', $productId)
             ->exists();
     }

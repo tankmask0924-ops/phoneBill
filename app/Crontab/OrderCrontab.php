@@ -19,9 +19,9 @@ use Hyperf\Logger\LoggerFactory;
 use Throwable;
 
 /**
- * 订单兜底：主动查单、超时转异常、补推丢了的提交任务。每分钟一次，多台部署时只在一台上跑。
+ * 订单兜底：主动查单、超时标记（处理中转超时、没提交出去的转异常）、补推丢了的提交任务。每分钟一次，多台部署时只在一台上跑。
  */
-#[Crontab(rule: '* * * * *', name: 'OrderMaintenance', memo: '订单查单、转异常、补推提交', singleton: true, onOneServer: true, mutexExpires: 300)]
+#[Crontab(rule: '* * * * *', name: 'OrderMaintenance', memo: '订单查单、超时标记、补推提交', singleton: true, onOneServer: true, mutexExpires: 300)]
 class OrderCrontab
 {
     public function __invoke(): void
@@ -30,7 +30,7 @@ class OrderCrontab
         $service = $container->get(OrderProcessService::class);
         $logger = $container->get(LoggerFactory::class)->get('crontab');
 
-        foreach (['queryDue', 'markAbnormal', 'resubmitStuck'] as $step) {
+        foreach (['queryDue', 'markTimeout', 'resubmitStuck'] as $step) {
             try {
                 $count = $service->{$step}();
                 if ($count > 0) {

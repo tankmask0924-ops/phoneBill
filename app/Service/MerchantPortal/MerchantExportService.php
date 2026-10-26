@@ -58,7 +58,7 @@ class MerchantExportService extends AbstractService
         MerchantExport::TYPE_BALANCE_LOGS => ['type', 'order_no', 'created_from', 'created_to'],
     ];
 
-    private const ORDER_STATUS_LABELS = ['processing' => '充值中', 'abnormal' => '异常', 'success' => '成功', 'failed' => '失败（已退款）'];
+    private const ORDER_STATUS_LABELS = ['processing' => '充值中', 'abnormal' => '异常', 'timeout' => '超时', 'success' => '成功', 'failed' => '失败（已退款）'];
 
     private const BALANCE_TYPE_LABELS = [
         MerchantBalanceLog::TYPE_RECHARGE => '加款',
