@@ -83,6 +83,8 @@ class MerchantControllerTest extends HttpTestCase
             ['notify_url' => 'not a url'],
             ['ip_whitelist' => '1.2.3.999'],
             ['ip_whitelist' => '10.0.0.0/33'],
+            ['rate_limit_seconds' => -1],
+            ['rate_limit_orders' => 'x'],
         ] as $override) {
             $response = $this->jsonRequest('POST', '/admin/merchants', $token, array_merge(['name' => $this->uniq('商户')], $override));
             $this->assertSame(422, $response->getStatusCode(), json_encode($override, JSON_UNESCAPED_UNICODE));
@@ -91,6 +93,9 @@ class MerchantControllerTest extends HttpTestCase
         $updated = $this->body($this->jsonRequest('PUT', "/admin/merchants/{$existing->id}", $token, ['ip_whitelist' => '', 'notify_url' => '']));
         $this->assertSame([], $updated['ip_whitelist']);
         $this->assertNull($updated['notify_url']);
+        $this->assertSame([0, 0], [$updated['rate_limit_seconds'], $updated['rate_limit_orders']]);
+        $limited = $this->body($this->jsonRequest('PUT', "/admin/merchants/{$existing->id}", $token, ['rate_limit_seconds' => 5, 'rate_limit_orders' => 1]));
+        $this->assertSame([5, 1], [$limited['rate_limit_seconds'], $limited['rate_limit_orders']]);
         $this->assertSame('disabled', $this->body($this->jsonRequest('POST', "/admin/merchants/{$existing->id}/status", $token, ['status' => 'disabled']))['status']);
     }
 

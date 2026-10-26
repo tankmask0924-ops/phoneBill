@@ -27,7 +27,7 @@ use Hyperf\Di\Annotation\Inject;
  */
 class MerchantLookupService extends AbstractService
 {
-    private const CACHED_FIELDS = ['id', 'name', 'app_key', 'app_secret', 'notify_url', 'ip_whitelist', 'status'];
+    private const CACHED_FIELDS = ['id', 'name', 'app_key', 'app_secret', 'notify_url', 'ip_whitelist', 'status', 'rate_limit_seconds', 'rate_limit_orders'];
 
     #[Inject]
     protected MerchantDao $merchantDao;

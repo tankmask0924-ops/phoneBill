@@ -28,6 +28,8 @@ use Hyperf\Database\Model\Events\Saved;
  * @property string $app_secret
  * @property string $balance
  * @property string $credit_limit 授信额度，余额最低可以扣到它的负数
+ * @property int $rate_limit_seconds 下单限流：每这么多秒（0 不限）
+ * @property int $rate_limit_orders 下单限流：最多这么多单（0 不限）
  * @property null|string $notify_url
  * @property null|string $ip_whitelist
  * @property string $status
@@ -48,10 +50,17 @@ class Merchant extends Model
         'app_secret',
         'balance',
         'credit_limit',
+        'rate_limit_seconds',
+        'rate_limit_orders',
         'notify_url',
         'ip_whitelist',
         'status',
         'remark',
+    ];
+
+    protected array $casts = [
+        'rate_limit_seconds' => 'integer',
+        'rate_limit_orders' => 'integer',
     ];
 
     /**

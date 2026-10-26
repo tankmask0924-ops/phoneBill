@@ -15,7 +15,19 @@ const dialogVisible = ref(false)
 const editing = ref<ProductCategory | null>(null)
 const saving = ref(false)
 const formRef = ref<FormInstance>()
-const form = reactive({ name: '', sort: 0, remark: '' })
+const form = reactive({ name: '', sort: 0, mobile_limit_days: 0, mobile_limit_orders: 0, mobile_limit_processing: 0, remark: '' })
+
+/** 列表里的号码限制，如「1 天 1 单 / 同时 1 单」 */
+function limitText(c: ProductCategory): string {
+  const parts: string[] = []
+  if (c.mobile_limit_days > 0 && c.mobile_limit_orders > 0) {
+    parts.push(`${c.mobile_limit_days} 天 ${c.mobile_limit_orders} 单`)
+  }
+  if (c.mobile_limit_processing > 0) {
+    parts.push(`同时 ${c.mobile_limit_processing} 单`)
+  }
+  return parts.join(' / ') || '不限'
+}
 
 const rules: FormRules = {
   name: [{ required: true, message: '请输入分类名称', trigger: 'blur' }],
@@ -32,13 +44,20 @@ async function load() {
 
 function openCreate() {
   editing.value = null
-  Object.assign(form, { name: '', sort: 0, remark: '' })
+  Object.assign(form, { name: '', sort: 0, mobile_limit_days: 0, mobile_limit_orders: 0, mobile_limit_processing: 0, remark: '' })
   dialogVisible.value = true
 }
 
 function openEdit(row: ProductCategory) {
   editing.value = row
-  Object.assign(form, { name: row.name, sort: row.sort, remark: row.remark ?? '' })
+  Object.assign(form, {
+    name: row.name,
+    sort: row.sort,
+    mobile_limit_days: row.mobile_limit_days,
+    mobile_limit_orders: row.mobile_limit_orders,
+    mobile_limit_processing: row.mobile_limit_processing,
+    remark: row.remark ?? '',
+  })
   dialogVisible.value = true
 }
 
@@ -48,7 +67,11 @@ async function save() {
   }
   saving.value = true
   try {
-    const data = { name: form.name, sort: form.sort, remark: form.remark }
+    if ((form.mobile_limit_days > 0) !== (form.mobile_limit_orders > 0)) {
+      ElMessage.warning('号码限制的周期天数和单数要一起设置，都填 0 表示不限')
+      return
+    }
+    const data = { ...form }
     if (editing.value) {
       await productCategoryApi.update(editing.value.id, data)
     } else {
@@ -91,6 +114,11 @@ onMounted(async () => {
       <el-table-column prop="name" label="名称" min-width="140" />
       <el-table-column prop="sort" label="排序" width="80" align="right" />
       <el-table-column prop="product_count" label="平台商品数" width="100" align="right" />
+      <el-table-column label="号码限制" min-width="150">
+        <template #default="{ row }">
+          <span :class="{ muted: limitText(row as ProductCategory) === '不限' }">{{ limitText(row as ProductCategory) }}</span>
+        </template>
+      </el-table-column>
       <el-table-column label="备注" min-width="160">
         <template #default="{ row }">{{ row.remark ?? '' }}</template>
       </el-table-column>
@@ -116,13 +144,30 @@ onMounted(async () => {
     width="480px"
     @closed="formRef?.clearValidate()"
   >
-    <el-form ref="formRef" :model="form" :rules="rules" label-width="80px">
+    <el-form ref="formRef" :model="form" :rules="rules" label-width="96px">
       <el-form-item label="名称" prop="name">
         <el-input v-model="form.name" maxlength="32" placeholder="如：话费快充" />
       </el-form-item>
       <el-form-item label="排序">
         <el-input-number v-model="form.sort" :min="0" :max="9999" controls-position="right" />
         <span class="tip">数字越小越靠前</span>
+      </el-form-item>
+      <el-form-item label="号码限制">
+        <div class="limit">
+          <div>
+            同一号码
+            <el-input-number v-model="form.mobile_limit_days" :min="0" :max="366" size="small" controls-position="right" class="num" />
+            天内最多充
+            <el-input-number v-model="form.mobile_limit_orders" :min="0" :max="9999" size="small" controls-position="right" class="num" />
+            单
+          </div>
+          <div>
+            同时最多
+            <el-input-number v-model="form.mobile_limit_processing" :min="0" :max="9999" size="small" controls-position="right" class="num" />
+            单在充值中
+          </div>
+          <div class="tip">0 表示不限。天数按自然日算（1 = 当天 0 点起）；所有商户合计，失败的单也算；只管这个分类下的商品。</div>
+        </div>
       </el-form-item>
       <el-form-item label="备注">
         <el-input v-model="form.remark" maxlength="255" />
@@ -155,5 +200,23 @@ onMounted(async () => {
 
 .action {
   margin-left: 12px;
+}
+
+.muted {
+  color: #909399;
+}
+
+.limit {
+  line-height: 32px;
+}
+
+.limit .num {
+  width: 100px;
+  margin: 0 4px;
+}
+
+.limit .tip {
+  margin-left: 0;
+  line-height: 20px;
 }
 </style>

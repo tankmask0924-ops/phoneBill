@@ -60,7 +60,7 @@ const dialogVisible = ref(false)
 const editing = ref<Merchant | null>(null)
 const saving = ref(false)
 const formRef = ref<FormInstance>()
-const form = reactive({ name: '', contact: '', phone: '', notify_url: '', ip_whitelist: '', remark: '' })
+const form = reactive({ name: '', contact: '', phone: '', notify_url: '', ip_whitelist: '', rate_limit_seconds: 0, rate_limit_orders: 0, remark: '' })
 const rules: FormRules = {
   name: [{ required: true, message: '请输入商户名称', trigger: 'blur' }],
   notify_url: [{ pattern: /^https?:\/\/.+/i, message: '以 http:// 或 https:// 开头', trigger: 'blur' }],
@@ -68,7 +68,7 @@ const rules: FormRules = {
 
 function openCreate() {
   editing.value = null
-  Object.assign(form, { name: '', contact: '', phone: '', notify_url: '', ip_whitelist: '', remark: '' })
+  Object.assign(form, { name: '', contact: '', phone: '', notify_url: '', ip_whitelist: '', rate_limit_seconds: 0, rate_limit_orders: 0, remark: '' })
   dialogVisible.value = true
 }
 
@@ -80,6 +80,8 @@ function openEdit(row: Merchant) {
     phone: row.phone ?? '',
     notify_url: row.notify_url ?? '',
     ip_whitelist: row.ip_whitelist.join('\n'),
+    rate_limit_seconds: row.rate_limit_seconds,
+    rate_limit_orders: row.rate_limit_orders,
     remark: row.remark ?? '',
   })
   dialogVisible.value = true
@@ -460,6 +462,12 @@ onMounted(async () => {
         </template>
       </el-table-column>
       <el-table-column prop="credit_limit" label="授信额度（元）" width="130" align="right" />
+      <el-table-column label="下单限流" width="130">
+        <template #default="{ row }">
+          <span v-if="row.rate_limit_seconds > 0 && row.rate_limit_orders > 0">{{ row.rate_limit_seconds }} 秒 {{ row.rate_limit_orders }} 单</span>
+          <span v-else class="muted">不限</span>
+        </template>
+      </el-table-column>
       <el-table-column label="可用额度（元）" width="130" align="right">
         <template #default="{ row }">
           <span :class="{ 'negative': Number(row.available_balance) < 0 }">{{ row.available_balance }}</span>
@@ -527,6 +535,14 @@ onMounted(async () => {
           :rows="3"
           placeholder="每行一个 IP 或网段（如 1.2.3.4、10.0.0.0/24）；留空表示不限制，不建议"
         />
+      </el-form-item>
+      <el-form-item label="下单限流">
+        每
+        <el-input-number v-model="form.rate_limit_seconds" :min="0" :max="86400" controls-position="right" class="rate-num" />
+        秒最多
+        <el-input-number v-model="form.rate_limit_orders" :min="0" :max="100000" controls-position="right" class="rate-num" />
+        单
+        <div class="form-tip">只限开放接口下单，查单、查余额不限；任一填 0 表示不限，最多 1 单就是「N 秒提交一次」</div>
       </el-form-item>
       <el-form-item label="备注">
         <el-input v-model="form.remark" maxlength="255" />
@@ -769,6 +785,18 @@ onMounted(async () => {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
+}
+
+.rate-num {
+  width: 120px;
+  margin: 0 6px;
+}
+
+.form-tip {
+  width: 100%;
+  color: #909399;
+  font-size: 12px;
+  line-height: 20px;
 }
 
 .plus {

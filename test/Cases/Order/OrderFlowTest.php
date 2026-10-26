@@ -28,6 +28,7 @@ use App\Service\Order\MerchantNotifyService;
 use App\Service\Order\OrderDispatcher;
 use App\Service\Order\OrderProcessService;
 use App\Service\Order\OrderService;
+use App\Service\Product\CategoryMobileLimitService;
 use Hyperf\Context\ApplicationContext;
 use Hyperf\Contract\ApplicationInterface;
 use Hyperf\Di\Container;
@@ -277,6 +278,58 @@ class OrderFlowTest extends HttpTestCase
         Order::where('id', $order->id)->update(['created_at' => date('Y-m-d H:i:s', time() - 3 * 3600)]);
         $this->process()->markTimeout();
         $this->assertSame(Order::STATUS_ABNORMAL, Order::find($order->id)->status, '没提交出去的不会有回调，转人工');
+    }
+
+    public function testCategoryMobileLimits()
+    {
+        [$merchant, $product, $mobile] = $this->scenario([['provinces' => ['*'], 'operators' => ['cmcc'], 'cost' => '98.00', 'result' => 'processing']]);
+        $category = $this->createCategory();
+        Merchant::where('id', $merchant->id)->update(['balance' => '1000.00']);
+        $category->update(['mobile_limit_days' => 1, 'mobile_limit_orders' => 2, 'mobile_limit_processing' => 1]);
+        Product::where('id', $product->id)->update(['category_id' => $category->id]);
+        $other = $this->createMerchant('200.00');
+        $this->openProduct($other, $product, ['cmcc' => '99.50']);
+        $recharge = fn (Merchant $m) => $this->api($m, 'POST', '/open/v1/recharge', ['product_code' => $product->code, 'mobile' => $mobile, 'merchant_order_no' => $this->uniq('M')]);
+
+        // 同时充值中最多 1 单
+        $first = $this->placeOrder($merchant, $product, $mobile);
+        $blocked = $recharge($merchant);
+        $this->assertSame('MOBILE_LIMITED', $blocked['code']);
+        $this->assertStringContainsString('充值中', $blocked['message']);
+
+        // 当天最多 2 单，失败的也算，所有商户合计
+        Order::where('id', $first->id)->update(['status' => Order::STATUS_FAILED]);
+        $second = $this->placeOrder($other, $product, $mobile);
+        Order::where('id', $second->id)->update(['status' => Order::STATUS_FAILED]);
+        $blocked = $recharge($merchant);
+        $this->assertSame('MOBILE_LIMITED', $blocked['code']);
+        $this->assertStringContainsString('今天已充值 2 单', $blocked['message']);
+        $this->assertSame('OK', $this->api($merchant, 'POST', '/open/v1/recharge', ['product_code' => $product->code, 'mobile' => $this->createSegment('cmcc', '广东'), 'merchant_order_no' => $this->uniq('M')])['code'], '别的号码不受影响');
+
+        // 按自然日：昨天的不算
+        Order::whereIn('id', [$first->id, $second->id])->update(['created_at' => date('Y-m-d 23:59:59', strtotime('-1 day'))]);
+        $this->placeOrder($merchant, $product, $mobile);
+
+        // 没设限制的分类不受影响
+        $category->update(['mobile_limit_days' => 0, 'mobile_limit_orders' => 0, 'mobile_limit_processing' => 0]);
+        make(CategoryMobileLimitService::class)->forget($category->id);
+        $this->assertNotSame('MOBILE_LIMITED', $recharge($merchant)['code']);
+    }
+
+    public function testMerchantRateLimit()
+    {
+        [$merchant, $product] = $this->scenario([['provinces' => ['*'], 'operators' => ['cmcc'], 'cost' => '98.00']]);
+        $merchant->update(['balance' => '1000.00', 'rate_limit_seconds' => 3600, 'rate_limit_orders' => 2]);
+        $this->placeOrder($merchant, $product, $this->createSegment('cmcc', '广东'));
+        $this->placeOrder($merchant, $product, $this->createSegment('cmcc', '广东'));
+        $blocked = $this->api($merchant, 'POST', '/open/v1/recharge', ['product_code' => $product->code, 'mobile' => $this->createSegment('cmcc', '广东'), 'merchant_order_no' => $this->uniq('M')]);
+        $this->assertSame('RATE_LIMITED', $blocked['code']);
+        $this->assertStringContainsString('每 3600 秒最多 2 单', $blocked['message']);
+        $this->assertSame('OK', $this->api($merchant, 'GET', '/open/v1/balance', [])['code'], '查余额不限');
+
+        // 关掉限流
+        $merchant->update(['rate_limit_seconds' => 0]);
+        $this->placeOrder($merchant, $product, $this->createSegment('cmcc', '广东'));
     }
 
     public function testStuckOrdersAreResubmitted()

@@ -88,6 +88,8 @@ flowchart LR
 
 - 商户订单号在商户内唯一；重复提交时返回原订单，不重复扣款。失败订单要重下必须换新单号。
 - 同一手机号、同一面值，**10 分钟**内只允许一笔进行中的订单。
+- **商品分类号码限制**（商品分类里设，0 不限）：同一号码在这个分类下，周期（**自然日**，1 表示当天 0 点起）内最多充几单（**所有商户合计、所有状态都算**，失败的也算），同时最多几单在充值中（等待中、处理中、异常、超时都算）。超出返回 `MOBILE_LIMITED`，不建单、不扣款。同一号码同一分类串行检查（Redis 锁），和上面的重复充值拦截同时生效；批量下单也一样。
+- **商户下单限流**（商户「编辑」里设，`merchant.manage`）：每 N 秒最多 M 单（Redis 滑动窗口，任一为 0 不限），只限开放接口下单，查单、查余额和商户后台批量下单不限。超出返回 `RATE_LIMITED`。
 - 号码在黑名单里时拒绝下单。
 - 调供应商超时或返回「处理中」时**不能当失败**，以回调或查单结果为准。
 - 下单后 **2 小时**仍无结果、已经提交给供应商的订单转为**超时**（`timeout`）：照常查单、接收回调，上游明确**成功**就改成功并通知商户，明确**失败**就**直接失败退款**并通知商户（不再换下一家供应商）；也可以人工查单、置成功 / 失败、手动补单。订单列表单独标出超时，商户后台显示「超时」，开放接口查单和回调仍是 `processing`。
@@ -218,7 +220,7 @@ stateDiagram-v2
 
 - 字段：商品分类、商品编码（商户下单用）、名称、面值、状态。
 - **商品编码自动生成**：新建时按面值生成 `HF{面值}-{序号}`（如 `HF100-001`，同面值按已有最大序号递增，至少 3 位），建好后不能改；两人同时建同面值撞号时自动换下一个序号重试。
-- 商品分类：在「商品中心 - 商品分类」里维护（名称唯一、排序、备注），只给平台商品用，供应商商品不分类。新建、编辑平台商品时必须选；上线前建的老商品没有分类，列表显示「未分类」，编辑时补上。还有平台商品在用的分类不能删除。列表可按分类筛选。权限跟平台商品一样（`product.view` / `product.manage`）。
+- 商品分类：在「商品中心 - 商品分类」里维护（名称唯一、排序、号码限制、备注；号码限制见 2.5），只给平台商品用，供应商商品不分类。新建、编辑平台商品时必须选；上线前建的老商品没有分类，列表显示「未分类」，编辑时补上。还有平台商品在用的分类不能删除。列表可按分类筛选。权限跟平台商品一样（`product.view` / `product.manage`）。
 - 默认售价：按运营商分别填写。
 - 绑定供应商商品：只能选面值相同的，可以多选（跨运营商、跨供应商），每个设优先级（数字越小越先用）；绑定表下方「按成本价排优先级」把优先级按成本价从低到高重排成 1、2、3…（成本相同的保持原来的先后），只改表单，点保存后才生效。选择时三级联动：先选供应商 → 再选运营商 → 最后选商品，商品选项写清「商品名称 — 成本价 — 面值 — 运营商 — 省份」并标出已下架 / 供应商已停用；选中即加入绑定表，已绑定的不再出现。
 - 编辑页自动汇总「覆盖运营商」（由绑定的供应商商品得出），方便发现漏配的运营商。
@@ -378,7 +380,7 @@ erDiagram
 | `supplier_provinces` | 已停用：原来供应商覆盖的省份，迁移时复制给了名下的每个供应商商品，后续版本删除 | `supplier_id`、`province` |
 | `supplier_products` | 供应商商品 | `supplier_id`、`name`、`face_value`、`cost_price`、`external_code`、`status` |
 | `supplier_product_operators` | 供应商商品支持的运营商 | `supplier_product_id`、`operator` |
-| `product_categories` | 商品分类（只给平台商品用） | `name`（唯一）、`sort`、`remark` |
+| `product_categories` | 商品分类（只给平台商品用） | `name`（唯一）、`sort`、`mobile_limit_days` / `mobile_limit_orders` / `mobile_limit_processing`（号码限制，0 不限）、`remark` |
 | `products` | 平台商品 | `category_id`、`code`（唯一）、`name`、`face_value`、`status` |
 | `product_prices` | 平台商品各运营商默认售价 | `product_id`、`operator`、`default_price`；唯一 `(product_id, operator)` |
 | `product_routes` | 平台商品绑定的供应商商品 | `product_id`、`supplier_product_id`、`priority`；唯一 `(product_id, supplier_product_id)` |
@@ -387,7 +389,7 @@ erDiagram
 | `mobile_blacklist` | 号码黑名单 | `mobile`（唯一）、`reason` |
 | `channel_maintenances` | 通道维护 | `supplier_id`、`operator`（可空）、`province`（可空）、`start_at`、`end_at`、`reason` |
 | **商户** | | |
-| `merchants` | 商户 | `name`、`contact`、`phone`、`app_key`（唯一）、`app_secret`（加密）、`balance`（有授信时可以是负数）、`credit_limit`（授信额度）、`alipay_account_id`（支付宝转账加款账户）、`notify_url`、`ip_whitelist`、`status` |
+| `merchants` | 商户 | `name`、`contact`、`phone`、`app_key`（唯一）、`app_secret`（加密）、`balance`（有授信时可以是负数）、`credit_limit`（授信额度）、`rate_limit_seconds` / `rate_limit_orders`（下单限流，0 不限）、`alipay_account_id`（支付宝转账加款账户）、`notify_url`、`ip_whitelist`、`status` |
 | `merchant_users` | 商户后台账号 | `merchant_id`、`username`（唯一）、`password`、`status`、`last_login_at` |
 | `merchant_products` | 商户开通的商品 | `merchant_id`、`product_id`、`status`；唯一 `(merchant_id, product_id)` |
 | `merchant_product_prices` | 商户各运营商价格 | `merchant_product_id`、`operator`、`price`；唯一 `(merchant_product_id, operator)` |

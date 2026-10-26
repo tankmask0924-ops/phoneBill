@@ -156,6 +156,22 @@ class OrderDao extends AbstractDao
      *
      * @param list<string> $statuses
      */
+    /**
+     * 同一号码在这个商品分类下的订单数（所有商户合计，含已删除商品的订单）。按 (mobile, created_at) 索引查。
+     *
+     * @param null|string $since 只算这之后下的单，null 不限时间
+     * @param null|list<string> $statuses 只算这些状态，null 全部
+     */
+    public function countForMobileInCategory(string $mobile, int $categoryId, ?string $since, ?array $statuses): int
+    {
+        return $this->newQuery()
+            ->where('mobile', $mobile)
+            ->when($since !== null, static fn ($q) => $q->where('created_at', '>=', $since))
+            ->when($statuses !== null, static fn ($q) => $q->whereIn('status', $statuses))
+            ->whereIn('product_id', static fn ($q) => $q->select('id')->from('products')->where('category_id', $categoryId))
+            ->count();
+    }
+
     public function hasRecent(string $mobile, int $faceValue, string $since, array $statuses): bool
     {
         return $this->newQuery()

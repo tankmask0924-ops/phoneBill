@@ -50,6 +50,12 @@ class OpenApiException extends RuntimeException
 
     public const ORDER_NOT_FOUND = 'ORDER_NOT_FOUND';
 
+    /** 同一号码超出商品分类的充值次数 / 同时充值中单数限制 */
+    public const MOBILE_LIMITED = 'MOBILE_LIMITED';
+
+    /** 下单太频繁，超出商户的限流 */
+    public const RATE_LIMITED = 'RATE_LIMITED';
+
     public function __construct(public readonly string $errorCode, string $message)
     {
         parent::__construct($message);

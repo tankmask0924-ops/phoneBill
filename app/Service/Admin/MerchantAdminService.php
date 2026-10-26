@@ -298,6 +298,19 @@ class MerchantAdminService extends AbstractService
         if ($merchant === null || array_key_exists('remark', $data)) {
             $attrs['remark'] = $this->remark($data['remark'] ?? null);
         }
+        // 下单限流：每 N 秒最多 M 单，任一为 0 不限
+        foreach (['rate_limit_seconds' => ['限流时间窗口（秒）', 86400], 'rate_limit_orders' => ['限流单数', 100000]] as $field => [$label, $max]) {
+            if ($merchant === null || array_key_exists($field, $data)) {
+                $value = $data[$field] ?? 0;
+                if ($value === null || $value === '') {
+                    $value = 0;
+                }
+                if (! is_numeric($value) || (int) $value != $value || $value < 0 || $value > $max) {
+                    throw new HttpException(422, "{$label}必须是 0~{$max} 的整数，0 表示不限");
+                }
+                $attrs[$field] = (int) $value;
+            }
+        }
 
         return $attrs;
     }
@@ -328,6 +341,8 @@ class MerchantAdminService extends AbstractService
             'app_key' => $merchant->app_key,
             'balance' => $merchant->balance,
             'credit_limit' => $merchant->credit_limit,
+            'rate_limit_seconds' => $merchant->rate_limit_seconds ?? 0,
+            'rate_limit_orders' => $merchant->rate_limit_orders ?? 0,
             'available_balance' => $merchant->availableBalance(),
             'notify_url' => $merchant->notify_url,
             'ip_whitelist' => $merchant->ipWhitelist(),

@@ -22,6 +22,7 @@ use App\Service\AbstractService;
 use App\Service\Merchant\MerchantBalanceService;
 use App\Service\Merchant\MerchantPriceService;
 use App\Service\Mobile\MobileSegmentService;
+use App\Service\Product\CategoryMobileLimitService;
 use App\Service\Product\ProductRouteService;
 use App\Service\Risk\BlacklistService;
 use App\Service\Setting\OrderSettingService;
@@ -70,6 +71,9 @@ class OrderService extends AbstractService
     #[Inject]
     protected OrderSettingService $orderSettingService;
 
+    #[Inject]
+    protected CategoryMobileLimitService $categoryLimitService;
+
     /**
      * @param array<string, mixed> $params product_code / mobile / merchant_order_no / notify_url（可选）
      */
@@ -91,6 +95,18 @@ class OrderService extends AbstractService
         }
         ['quote' => $quote, 'operator' => $operator, 'province' => $province, 'price' => $price] = $this->check($merchant, $this->string($params, 'product_code'), $mobile);
 
+        // 商品分类的号码限制：同一号码同一分类串行处理，防止并发请求同时通过检查
+        $categoryId = $quote['category_id'] ?? null;
+        $limits = $categoryId === null ? null : $this->categoryLimitService->limits((int) $categoryId);
+        $limited = $limits !== null && ($limits['processing'] > 0 || ($limits['days'] > 0 && $limits['orders'] > 0));
+        $categoryLockKey = "order:mobile:{$mobile}:cat:{$categoryId}";
+        $categoryToken = null;
+        if ($limited) {
+            $categoryToken = $this->lock->acquire($categoryLockKey, 10);
+            if ($categoryToken === null) {
+                throw new OpenApiException(OpenApiException::MOBILE_LIMITED, '该号码有正在处理的订单，请稍后再试');
+            }
+        }
         // 重复充值拦截（时间窗口在系统配置里设，0 表示不拦截）：同一号码同一面值串行处理，防止并发请求同时通过检查
         $window = $this->orderSettingService->duplicateWindowMinutes();
         $lockKey = "order:mobile:{$mobile}:{$quote['face_value']}";
@@ -98,10 +114,16 @@ class OrderService extends AbstractService
         if ($window > 0) {
             $token = $this->lock->acquire($lockKey, 10);
             if ($token === null) {
+                if ($categoryToken !== null) {
+                    $this->lock->release($categoryLockKey, $categoryToken);
+                }
                 throw new OpenApiException(OpenApiException::DUPLICATE_RECHARGE, '该号码有正在处理的同面值订单');
             }
         }
         try {
+            if ($limited) {
+                $this->checkMobileLimit($mobile, (int) $categoryId, $limits);
+            }
             if ($window > 0 && $this->orderDao->hasRecent($mobile, $quote['face_value'], self::since($window), self::IN_PROGRESS)) {
                 throw new OpenApiException(OpenApiException::DUPLICATE_RECHARGE, self::duplicateMessage($window));
             }
@@ -131,6 +153,9 @@ class OrderService extends AbstractService
         } finally {
             if ($token !== null) {
                 $this->lock->release($lockKey, $token);
+            }
+            if ($categoryToken !== null) {
+                $this->lock->release($categoryLockKey, $categoryToken);
             }
         }
 
@@ -171,6 +196,31 @@ class OrderService extends AbstractService
         }
 
         return ['quote' => $quote, 'operator' => $segment->operator, 'province' => $segment->province, 'price' => (string) $price];
+    }
+
+    /**
+     * 商品分类的号码限制（docs/project.md 4.4），所有商户合计：
+     * - 同时充值中（没出结果的）的单数不超过 processing；
+     * - 周期（自然日，1 表示当天 0 点起）内下的单（所有状态都算）不超过 orders。
+     *
+     * @param array{days: int, orders: int, processing: int} $limits
+     */
+    private function checkMobileLimit(string $mobile, int $categoryId, array $limits): void
+    {
+        if ($limits['processing'] > 0) {
+            $count = $this->orderDao->countForMobileInCategory($mobile, $categoryId, null, self::IN_PROGRESS);
+            if ($count >= $limits['processing']) {
+                throw new OpenApiException(OpenApiException::MOBILE_LIMITED, "该号码已有 {$count} 笔订单在充值中，请等出结果后再充");
+            }
+        }
+        if ($limits['days'] > 0 && $limits['orders'] > 0) {
+            $since = date('Y-m-d 00:00:00', strtotime('-' . ($limits['days'] - 1) . ' days'));
+            $count = $this->orderDao->countForMobileInCategory($mobile, $categoryId, $since, null);
+            if ($count >= $limits['orders']) {
+                $period = $limits['days'] === 1 ? '今天' : "近 {$limits['days']} 天";
+                throw new OpenApiException(OpenApiException::MOBILE_LIMITED, "该号码{$period}已充值 {$count} 单，达到上限");
+            }
+        }
     }
 
     /**

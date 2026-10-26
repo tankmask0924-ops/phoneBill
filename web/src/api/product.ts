@@ -150,6 +150,10 @@ export interface ProductCategory {
   name: string
   /** 越小越靠前 */
   sort: number
+  /** 号码限制（0 不限）：周期（自然日）内同一号码最多几单（所有商户合计、所有状态），同时最多几单充值中 */
+  mobile_limit_days: number
+  mobile_limit_orders: number
+  mobile_limit_processing: number
   remark: string | null
   /** 用这个分类的平台商品数，大于 0 时不能删除 */
   product_count: number
@@ -160,6 +164,9 @@ export interface ProductCategory {
 export interface ProductCategoryForm {
   name: string
   sort: number
+  mobile_limit_days: number
+  mobile_limit_orders: number
+  mobile_limit_processing: number
   remark: string
 }
 

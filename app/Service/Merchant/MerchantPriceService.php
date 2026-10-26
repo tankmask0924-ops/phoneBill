@@ -40,7 +40,7 @@ class MerchantPriceService extends AbstractService
     /**
      * 商品不存在返回 null；商品下架、没开通等由调用方看 product_active / opened_active 判断。
      *
-     * @return null|array{product_id: int, product_code: string, product_name: string, face_value: int, product_active: bool, opened_active: bool, prices: array<string, string>}
+     * @return null|array{product_id: int, product_code: string, product_name: string, face_value: int, category_id: null|int, product_active: bool, opened_active: bool, prices: array<string, string>}
      */
     #[Cacheable(prefix: 'merchant_price', value: '#{merchantId}:#{productCode}', ttl: 300)]
     public function quote(int $merchantId, string $productCode): ?array
@@ -56,6 +56,7 @@ class MerchantPriceService extends AbstractService
             'product_code' => $product->code,
             'product_name' => $product->name,
             'face_value' => $product->face_value,
+            'category_id' => $product->category_id,
             'product_active' => $product->status === 'active',
             'opened_active' => $opened !== null && $opened->status === 'active',
             'prices' => $opened === null ? [] : ($this->merchantPriceDao->pricesFor([$opened->id])[$opened->id] ?? []),

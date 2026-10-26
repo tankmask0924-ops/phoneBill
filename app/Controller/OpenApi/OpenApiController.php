@@ -19,6 +19,7 @@ use App\Exception\OpenApiException;
 use App\Middleware\OpenApiAuthMiddleware;
 use App\Model\Merchant;
 use App\Service\Merchant\MerchantCatalogService;
+use App\Service\Merchant\MerchantRateLimitService;
 use App\Service\Order\OrderService;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpServer\Annotation\Controller;
@@ -45,12 +46,17 @@ class OpenApiController extends AbstractController
     #[Inject]
     protected MerchantCatalogService $catalogService;
 
+    #[Inject]
+    protected MerchantRateLimitService $rateLimitService;
+
     /**
-     * 下单。
+     * 下单。先过商户的下单限流。
      */
     #[PostMapping(path: 'recharge')]
     public function recharge(): array
     {
+        $this->rateLimitService->check($this->merchant());
+
         return $this->ok($this->orderService->present($this->orderService->create($this->merchant(), $this->params())));
     }
 

@@ -17,6 +17,9 @@ export interface Merchant {
   credit_limit: string
   /** 可用额度 = 余额 + 授信额度 */
   available_balance: string
+  /** 下单限流：每 rate_limit_seconds 秒最多 rate_limit_orders 单，任一为 0 不限 */
+  rate_limit_seconds: number
+  rate_limit_orders: number
   notify_url: string | null
   /** IP 或 CIDR，空数组表示不限制 */
   ip_whitelist: string[]
@@ -33,6 +36,8 @@ export interface MerchantForm {
   phone: string
   notify_url: string
   ip_whitelist: string
+  rate_limit_seconds: number
+  rate_limit_orders: number
   remark: string
 }
 
