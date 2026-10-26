@@ -75,7 +75,7 @@ class MerchantOnlinePaymentService extends AbstractService
             'max_amount' => $account?->max_amount,
             'qr_code_url' => $qrCodeUrl,
             'receive_account' => $account?->account,
-            'receive_name' => $account === null ? null : self::maskName($account->account_name),
+            'receive_name' => $account?->account_name,
         ];
     }
 
@@ -181,23 +181,13 @@ class MerchantOnlinePaymentService extends AbstractService
             'amount' => $p->amount,
             'pay_amount' => $p->pay_amount,
             'receive_account' => $p->receive_account,
-            'receive_name' => self::maskName($p->receive_name),
+            'receive_name' => $p->receive_name,
             'status' => $p->status,
             'checked_at' => $p->checked_at?->toDateTimeString(),
             'check_message' => $p->status === MerchantOnlinePayment::STATUS_PENDING ? $p->check_message : null,
             'paid_at' => $p->paid_at?->toDateTimeString(),
             'created_at' => $p->created_at?->toDateTimeString(),
         ];
-    }
-
-    /**
-     * 姓名只露最后一个字，如「*三」。
-     */
-    private static function maskName(string $name): string
-    {
-        $length = mb_strlen($name);
-
-        return $length <= 1 ? $name : str_repeat('*', $length - 1) . mb_substr($name, -1);
     }
 
     /**

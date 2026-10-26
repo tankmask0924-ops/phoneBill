@@ -62,6 +62,15 @@ async function recheck() {
   }
 }
 
+async function copy(text: string) {
+  try {
+    await navigator.clipboard.writeText(text)
+    ElMessage.success('已复制')
+  } catch {
+    ElMessage.warning('复制失败，请手动选中复制')
+  }
+}
+
 /** 没到账时回到表单，改订单号或金额重新提交（同一个订单号会更新原来那笔单） */
 function edit() {
   current.value = null
@@ -69,15 +78,26 @@ function edit() {
 </script>
 
 <template>
-  <el-dialog v-model="visible" title="支付宝转账加款" width="520px" :close-on-click-modal="false">
+  <el-dialog v-model="visible" title="支付宝转账加款" width="680px" :close-on-click-modal="false">
     <template v-if="!current">
       <div class="pay">
         <img v-if="options.qr_code_url" :src="options.qr_code_url" class="qr" alt="支付宝收款码" />
         <el-alert v-else type="warning" :closable="false" show-icon class="block">收款码暂时加载不出来，请按下面的收款账号手动转账。</el-alert>
-        <div class="tip">① 打开支付宝扫一扫，向平台转账（单笔 {{ options.min_amount }} ~ {{ options.max_amount }} 元）</div>
-        <div v-if="options.receive_account" class="tip">收款账号：{{ options.receive_account }}（{{ options.receive_name }}）</div>
+        <div class="step">① 打开支付宝扫一扫，向平台转账（单笔 {{ options.min_amount }} ~ {{ options.max_amount }} 元）</div>
+        <div v-if="options.receive_account" class="receiver">
+          <div class="receiver-row">
+            <span class="receiver-label">收款账号</span>
+            <span class="receiver-value">{{ options.receive_account }}</span>
+            <el-button link type="primary" @click="copy(options.receive_account)">复制</el-button>
+          </div>
+          <div class="receiver-row">
+            <span class="receiver-label">收款人</span>
+            <span class="receiver-value">{{ options.receive_name }}</span>
+          </div>
+          <div class="tip">转账前请核对收款人是否一致</div>
+        </div>
       </div>
-      <el-form label-width="100px" class="form" @submit.prevent="submit">
+      <el-form label-width="110px" size="large" class="form" @submit.prevent="submit">
         <el-form-item label="支付宝订单号">
           <el-input v-model.trim="form.alipay_order_no" maxlength="64" placeholder="转账完成后在支付宝账单里复制" />
           <div class="tip">② 支付宝「我的 - 账单」点开这笔转账，复制「订单号」粘贴到这里</div>
@@ -127,9 +147,9 @@ function edit() {
 }
 
 .qr {
-  width: 220px;
-  height: 220px;
-  margin: 0 auto 8px;
+  width: 280px;
+  height: 280px;
+  margin: 0 auto 12px;
   display: block;
   object-fit: contain;
 }
@@ -140,7 +160,43 @@ function edit() {
 }
 
 .form {
-  margin-top: 16px;
+  margin-top: 20px;
+}
+
+.step {
+  color: #606266;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.receiver {
+  display: inline-block;
+  min-width: 360px;
+  margin-top: 12px;
+  padding: 12px 20px;
+  background: #f5f7fa;
+  border-radius: 6px;
+  text-align: left;
+}
+
+.receiver-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  line-height: 32px;
+}
+
+.receiver-label {
+  width: 64px;
+  color: #909399;
+  font-size: 14px;
+}
+
+.receiver-value {
+  color: #303133;
+  font-size: 20px;
+  font-weight: 600;
+  word-break: break-all;
 }
 
 .tip {

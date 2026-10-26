@@ -224,7 +224,7 @@ class AlipayTransferTest extends HttpTestCase
         $this->bind($mine, $account);
         $this->bind($theirs, $account);
         $options = $this->body($this->jsonRequest('GET', '/merchant/online-payments/options', $token));
-        $this->assertSame([true, '1.00', '5000.00', 'pay@example.com', '*三'], [$options['enabled'], $options['min_amount'], $options['max_amount'], $options['receive_account'], $options['receive_name']]);
+        $this->assertSame([true, '1.00', '5000.00', 'pay@example.com', '张三'], [$options['enabled'], $options['min_amount'], $options['max_amount'], $options['receive_account'], $options['receive_name']]);
         $this->assertStringContainsString('alipay-qr/', (string) $options['qr_code_url']);
         foreach ([['alipay_order_no' => 'abc'], ['alipay_order_no' => ''], ['amount' => '1.234'], ['amount' => '0.5'], ['amount' => '9000']] as $bad) {
             $this->assertSame(422, $this->jsonRequest('POST', '/merchant/online-payments', $token, $bad + ['alipay_order_no' => $first, 'amount' => '100'])->getStatusCode(), json_encode($bad));

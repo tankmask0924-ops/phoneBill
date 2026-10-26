@@ -246,7 +246,7 @@ onMounted(load)
         <el-input v-model="form.account" maxlength="64" placeholder="手机号或邮箱，必须是创建应用的那个支付宝账户" />
       </el-form-item>
       <el-form-item label="收款人姓名" prop="account_name">
-        <el-input v-model="form.account_name" maxlength="64" placeholder="商户页面只显示最后一个字" />
+        <el-input v-model="form.account_name" maxlength="64" placeholder="商户页面完整显示，转账时核对用" />
       </el-form-item>
       <el-form-item label="收款码" required>
         <el-upload

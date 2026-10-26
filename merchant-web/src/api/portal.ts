@@ -197,7 +197,7 @@ export interface OnlinePayment {
   /** 入账金额 */
   pay_amount: string
   receive_account: string
-  /** 收款人姓名，只露最后一个字 */
+  /** 收款人姓名 */
   receive_name: string
   /** pending 未到账 / paid / expired / cancelled */
   status: string
@@ -215,7 +215,7 @@ export interface OnlinePaymentOptions {
   /** 收款码图片的临时链接，取不到时为 null（按收款账号手动转账） */
   qr_code_url: string | null
   receive_account: string | null
-  /** 收款人姓名，只露最后一个字 */
+  /** 收款人姓名 */
   receive_name: string | null
 }
 
