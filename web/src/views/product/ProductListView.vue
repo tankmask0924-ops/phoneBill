@@ -141,6 +141,16 @@ function removeRoute(index: number) {
   form.routes.splice(index, 1)
 }
 
+/** 按成本价从低到高重排优先级（1、2、3…），成本相同的保持原来的先后；只改表单，保存后生效 */
+function sortByCost() {
+  const sorted = form.routes
+    .map((r, index) => ({ r, index }))
+    .sort((a, b) => Number(a.r.supplier_product.cost_price) - Number(b.r.supplier_product.cost_price) || a.r.priority - b.r.priority || a.index - b.index)
+    .map(({ r }, i) => ({ ...r, priority: i + 1 }))
+  form.routes = sorted
+  ElMessage.success('已按成本价从低到高重排优先级，点「保存」后生效')
+}
+
 /** 第三级商品选项：把选商品要看的信息写清楚 */
 function optionLabel(o: SupplierProduct): string {
   const ops = o.operators.map((op) => labelOf(operatorLabels, op)).join('、')
@@ -311,6 +321,9 @@ onMounted(async () => {
       <el-table-column label="绑定" width="70" align="center">
         <template #default="{ row }">{{ row.routes.length }}</template>
       </el-table-column>
+      <el-table-column label="昨日订单" width="90" align="right">
+        <template #default="{ row }">{{ row.yesterday_stats?.order_count ?? 0 }}</template>
+      </el-table-column>
       <el-table-column label="昨日成功率" width="100" align="right">
         <template #default="{ row }">
           {{ row.yesterday_stats?.success_rate != null ? `${row.yesterday_stats.success_rate}%` : '-' }}
@@ -455,7 +468,10 @@ onMounted(async () => {
               </template>
             </el-table-column>
           </el-table>
-          <div class="tip">优先级数字越小越先用；相同时先用成本低的。只有支持该号码运营商、覆盖该号码省份的才会参与选路。</div>
+          <div class="route-footer">
+            <span class="tip">优先级数字越小越先用；相同时先用成本低的。只有支持该号码运营商、覆盖该号码省份的才会参与选路。</span>
+            <el-button v-if="canManage" size="small" :disabled="form.routes.length < 2" @click="sortByCost">按成本价排优先级</el-button>
+          </div>
         </div>
       </el-form-item>
 
@@ -520,6 +536,14 @@ onMounted(async () => {
 
 .routes .tip {
   margin-left: 0;
+}
+
+.route-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 4px;
 }
 
 .pick {
