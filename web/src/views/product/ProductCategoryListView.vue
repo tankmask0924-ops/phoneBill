@@ -29,6 +29,21 @@ function limitText(c: ProductCategory): string {
   return parts.join(' / ') || '不限'
 }
 
+/** 表单里实时说明当前的号码限制 */
+const limitSummary = computed(() => {
+  const parts: string[] = []
+  if (form.mobile_limit_days > 0 && form.mobile_limit_orders > 0) {
+    const period = form.mobile_limit_days === 1 ? '每天' : `每 ${form.mobile_limit_days} 天`
+    parts.push(`同一号码${period}最多充 ${form.mobile_limit_orders} 单`)
+  }
+  if (form.mobile_limit_processing > 0) {
+    parts.push(`同时最多 ${form.mobile_limit_processing} 单在充值中`)
+  }
+  return parts.length ? parts.join('，') : '不限制'
+})
+/** 周期和单数只填了一个 */
+const limitIncomplete = computed(() => (form.mobile_limit_days > 0) !== (form.mobile_limit_orders > 0))
+
 const rules: FormRules = {
   name: [{ required: true, message: '请输入分类名称', trigger: 'blur' }],
 }
@@ -141,36 +156,44 @@ onMounted(async () => {
   <el-dialog
     v-model="dialogVisible"
     :title="editing ? '编辑分类' : '新建分类'"
-    width="480px"
+    width="min(600px, 94vw)"
     @closed="formRef?.clearValidate()"
   >
-    <el-form ref="formRef" :model="form" :rules="rules" label-width="96px">
+    <el-form ref="formRef" :model="form" :rules="rules" label-width="120px" class="category-form">
+      <div class="section-title">基本信息</div>
       <el-form-item label="名称" prop="name">
-        <el-input v-model="form.name" maxlength="32" placeholder="如：话费快充" />
+        <el-input v-model="form.name" maxlength="32" show-word-limit placeholder="如：话费快充" />
       </el-form-item>
       <el-form-item label="排序">
-        <el-input-number v-model="form.sort" :min="0" :max="9999" controls-position="right" />
-        <span class="tip">数字越小越靠前</span>
-      </el-form-item>
-      <el-form-item label="号码限制">
-        <div class="limit">
-          <div>
-            同一号码
-            <el-input-number v-model="form.mobile_limit_days" :min="0" :max="366" size="small" controls-position="right" class="num" />
-            天内最多充
-            <el-input-number v-model="form.mobile_limit_orders" :min="0" :max="9999" size="small" controls-position="right" class="num" />
-            单
-          </div>
-          <div>
-            同时最多
-            <el-input-number v-model="form.mobile_limit_processing" :min="0" :max="9999" size="small" controls-position="right" class="num" />
-            单在充值中
-          </div>
-          <div class="tip">0 表示不限。天数按自然日算（1 = 当天 0 点起）；所有商户合计，失败的单也算；只管这个分类下的商品。</div>
-        </div>
+        <el-input-number v-model="form.sort" :min="0" :max="9999" controls-position="right" class="num" />
+        <span class="hint">数字越小越靠前</span>
       </el-form-item>
       <el-form-item label="备注">
-        <el-input v-model="form.remark" maxlength="255" />
+        <el-input v-model="form.remark" type="textarea" :rows="2" maxlength="255" show-word-limit placeholder="选填" />
+      </el-form-item>
+
+      <div class="section-title">
+        号码限制
+        <span class="section-sub">只管这个分类下的商品，所有商户合计，0 表示不限</span>
+      </div>
+      <el-form-item label="限制周期">
+        <el-input-number v-model="form.mobile_limit_days" :min="0" :max="366" controls-position="right" class="num" />
+        <span class="unit">天</span>
+        <span class="hint">按自然日算，1 = 当天 0 点起</span>
+      </el-form-item>
+      <el-form-item label="周期内最多充值">
+        <el-input-number v-model="form.mobile_limit_orders" :min="0" :max="9999" controls-position="right" class="num" />
+        <span class="unit">单</span>
+        <span class="hint">同一号码，失败的单也算</span>
+      </el-form-item>
+      <el-form-item label="同时充值中最多">
+        <el-input-number v-model="form.mobile_limit_processing" :min="0" :max="9999" controls-position="right" class="num" />
+        <span class="unit">单</span>
+        <span class="hint">还没出结果的单</span>
+      </el-form-item>
+      <el-form-item>
+        <el-alert v-if="limitIncomplete" type="warning" :closable="false" show-icon title="限制周期和周期内单数要一起设置，都填 0 表示不限" />
+        <el-alert v-else type="info" :closable="false" show-icon :title="`当前：${limitSummary}`" />
       </el-form-item>
     </el-form>
     <template #footer>
@@ -206,17 +229,38 @@ onMounted(async () => {
   color: #909399;
 }
 
-.limit {
-  line-height: 32px;
+.section-title {
+  margin: 4px 0 16px;
+  padding-left: 8px;
+  border-left: 3px solid var(--el-color-primary);
+  color: #303133;
+  font-weight: 600;
+  line-height: 18px;
 }
 
-.limit .num {
-  width: 100px;
-  margin: 0 4px;
+.section-title:not(:first-child) {
+  margin-top: 24px;
 }
 
-.limit .tip {
-  margin-left: 0;
-  line-height: 20px;
+.section-sub {
+  margin-left: 8px;
+  color: #909399;
+  font-size: 12px;
+  font-weight: normal;
+}
+
+.category-form .num {
+  width: 140px;
+}
+
+.unit {
+  margin-left: 8px;
+  color: #606266;
+}
+
+.hint {
+  margin-left: 12px;
+  color: #909399;
+  font-size: 12px;
 }
 </style>
