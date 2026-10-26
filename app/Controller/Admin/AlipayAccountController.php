@@ -77,6 +77,15 @@ class AlipayAccountController extends AbstractController
     #[Middleware(AdminAuthMiddleware::class)]
     #[Middleware(AdminPermissionMiddleware::class)]
     #[RequiresPermission('setting.manage')]
+    #[PostMapping(path: 'qr-code')]
+    public function uploadQrCode(): array
+    {
+        return $this->accountService->uploadQrCode($this->request->file('file'));
+    }
+
+    #[Middleware(AdminAuthMiddleware::class)]
+    #[Middleware(AdminPermissionMiddleware::class)]
+    #[RequiresPermission('setting.manage')]
     #[PostMapping(path: '{id:\d+}/test')]
     public function test(int $id): array
     {

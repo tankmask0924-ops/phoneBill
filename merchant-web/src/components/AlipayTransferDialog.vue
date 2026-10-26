@@ -1,189 +1,120 @@
 <script setup lang="ts">
-import { ElMessage, ElMessageBox } from 'element-plus'
-import QRCode from 'qrcode'
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { ElMessage } from 'element-plus'
+import { ref, watch } from 'vue'
 import { type OnlinePayment, type OnlinePaymentOptions, onlinePaymentApi } from '@/api/portal'
 
 /**
- * 支付宝扫码转账加款：输入金额 → 展示二维码、应付金额、支付单号（备注）→ 轮询到账。
- * 传 payment 时直接打开这笔待支付单。
+ * 支付宝转账加款：扫平台的固定收款码转账 → 填支付宝订单号和金额 → 点「已转账」立即查询到账。
+ * 传 payment 时直接打开这笔未到账的单（可以重新查询）。
  */
 const props = defineProps<{ options: OnlinePaymentOptions; payment?: OnlinePayment | null }>()
 const emit = defineEmits<{ changed: [] }>()
 const visible = defineModel<boolean>({ required: true })
 
-const amount = ref('')
-const creating = ref(false)
+const form = ref({ alipay_order_no: '', amount: '' })
+const submitting = ref(false)
 const current = ref<OnlinePayment | null>(null)
-const qrImage = ref('')
-const checking = ref(false)
-const now = ref(Date.now())
-let pollTimer: ReturnType<typeof setInterval> | undefined
-let clockTimer: ReturnType<typeof setInterval> | undefined
-
-const secondsLeft = computed(() => {
-  if (!current.value) {
-    return 0
-  }
-  return Math.max(0, Math.floor((new Date(current.value.expires_at.replace(' ', 'T')).getTime() - now.value) / 1000))
-})
-const countdown = computed(() => {
-  const s = secondsLeft.value
-  return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
-})
 
 watch(visible, (open) => {
   if (open) {
-    amount.value = ''
-    show(props.payment ?? null)
-  } else {
-    stopTimers()
+    current.value = props.payment ?? null
+    form.value = {
+      alipay_order_no: props.payment?.alipay_order_no ?? '',
+      amount: props.payment?.amount ?? '',
+    }
   }
 })
 
-async function show(p: OnlinePayment | null) {
-  current.value = p
-  qrImage.value = p?.qr_content ? await QRCode.toDataURL(p.qr_content, { width: 240, margin: 1 }) : ''
-  stopTimers()
-  if (p?.status === 'pending') {
-    clockTimer = setInterval(() => (now.value = Date.now()), 1000)
-    pollTimer = setInterval(refresh, 5000)
+function notify(p: OnlinePayment) {
+  if (p.status === 'paid') {
+    ElMessage.success(`已到账，加款 ${p.pay_amount} 元`)
   }
 }
 
-function stopTimers() {
-  clearInterval(pollTimer)
-  clearInterval(clockTimer)
-}
-
-async function refresh() {
-  if (!current.value) {
+async function submit() {
+  const alipayOrderNo = form.value.alipay_order_no.trim()
+  if (!/^[0-9A-Za-z]{10,64}$/.test(alipayOrderNo)) {
+    ElMessage.warning('请填写支付宝订单号：在支付宝「账单」里点开这笔转账，复制「订单号」')
     return
   }
-  const p = await onlinePaymentApi.detail(current.value.id)
-  if (p.status !== current.value.status) {
-    await show(p)
+  if (!/^\d{1,9}(\.\d{1,2})?$/.test(form.value.amount) || Number(form.value.amount) <= 0) {
+    ElMessage.warning('请输入正确的转账金额，最多两位小数')
+    return
+  }
+  submitting.value = true
+  try {
+    current.value = await onlinePaymentApi.submit({ alipay_order_no: alipayOrderNo, amount: form.value.amount })
     emit('changed')
-    if (p.status === 'paid') {
-      ElMessage.success(`已到账 ${p.pay_amount} 元`)
-    }
+    notify(current.value)
+  } finally {
+    submitting.value = false
   }
 }
 
-async function create() {
-  if (!/^\d{1,9}(\.\d{1,2})?$/.test(amount.value) || Number(amount.value) <= 0) {
-    ElMessage.warning('请输入正确的金额，最多两位小数')
-    return
-  }
-  creating.value = true
+async function recheck() {
+  submitting.value = true
   try {
-    await show(await onlinePaymentApi.create(amount.value))
+    current.value = await onlinePaymentApi.check(current.value!.id)
     emit('changed')
+    notify(current.value)
   } finally {
-    creating.value = false
+    submitting.value = false
   }
 }
 
-async function paid() {
-  checking.value = true
-  try {
-    const p = await onlinePaymentApi.check(current.value!.id)
-    if (p.status === 'paid') {
-      await show(p)
-      emit('changed')
-      ElMessage.success(`已到账 ${p.pay_amount} 元`)
-    } else {
-      ElMessage.info('暂时还没查到到账，支付宝入账可能有延迟，系统会每分钟自动核对，到账后自动加款')
-    }
-  } finally {
-    checking.value = false
-  }
+/** 没到账时回到表单，改订单号或金额重新提交（同一个订单号会更新原来那笔单） */
+function edit() {
+  current.value = null
 }
-
-async function cancel() {
-  try {
-    await ElMessageBox.confirm('确定取消这笔支付？如果已经转账了请不要取消，等待自动到账。', '取消支付', { type: 'warning' })
-  } catch {
-    return
-  }
-  await show(await onlinePaymentApi.cancel(current.value!.id))
-  emit('changed')
-}
-
-async function copy(text: string) {
-  try {
-    await navigator.clipboard.writeText(text)
-    ElMessage.success('已复制')
-  } catch {
-    ElMessage.warning('复制失败，请手动选中复制')
-  }
-}
-
-onBeforeUnmount(stopTimers)
 </script>
 
 <template>
   <el-dialog v-model="visible" title="支付宝转账加款" width="520px" :close-on-click-modal="false">
     <template v-if="!current">
-      <el-form label-width="80px" @submit.prevent="create">
-        <el-form-item label="加款金额">
-          <el-input v-model.trim="amount" placeholder="输入要加款的金额" style="width: 220px">
+      <div class="pay">
+        <img v-if="options.qr_code_url" :src="options.qr_code_url" class="qr" alt="支付宝收款码" />
+        <el-alert v-else type="warning" :closable="false" show-icon class="block">收款码暂时加载不出来，请按下面的收款账号手动转账。</el-alert>
+        <div class="tip">① 打开支付宝扫一扫，向平台转账（单笔 {{ options.min_amount }} ~ {{ options.max_amount }} 元）</div>
+        <div v-if="options.receive_account" class="tip">收款账号：{{ options.receive_account }}（{{ options.receive_name }}）</div>
+      </div>
+      <el-form label-width="100px" class="form" @submit.prevent="submit">
+        <el-form-item label="支付宝订单号">
+          <el-input v-model.trim="form.alipay_order_no" maxlength="64" placeholder="转账完成后在支付宝账单里复制" />
+          <div class="tip">② 支付宝「我的 - 账单」点开这笔转账，复制「订单号」粘贴到这里</div>
+        </el-form-item>
+        <el-form-item label="转账金额">
+          <el-input v-model.trim="form.amount" placeholder="实际转了多少就填多少" style="width: 220px">
             <template #append>元</template>
           </el-input>
         </el-form-item>
-        <div class="tip">
-          单笔 {{ options.min_amount }} ~ {{ options.max_amount }} 元。为了自动认出你的转账，实际要付的金额会带上随机的几分钱，
-          到账后按实际付的金额加款。
-        </div>
       </el-form>
     </template>
 
-    <template v-else-if="current.status === 'pending'">
-      <div class="pay">
-        <div class="pay-label">请用支付宝转账</div>
-        <div class="pay-amount">¥ {{ current.pay_amount }}</div>
-        <div class="tip">金额必须一分不差，不要改动</div>
-        <template v-if="!current.expired_qr">
-          <img v-if="qrImage" :src="qrImage" class="qr" alt="支付宝转账二维码" />
-          <div class="tip">打开支付宝扫一扫，剩余 <b>{{ countdown }}</b></div>
-        </template>
-        <el-alert v-else type="warning" :closable="false" show-icon class="expired">
-          二维码已到期，请不要再转账。如果已经转了，系统还会核对一段时间，到账后自动加款。
-        </el-alert>
-      </div>
-      <el-descriptions :column="1" border size="small" class="info">
-        <el-descriptions-item label="转账备注">
-          <b>{{ current.order_no }}</b>
-          <el-button link type="primary" @click="copy(current.order_no)">复制</el-button>
-          <div class="warn">备注必须填这个支付单号（扫码会自动填好，不要删改）</div>
-        </el-descriptions-item>
-        <el-descriptions-item label="收款账号">
-          {{ current.receive_account }}（{{ current.receive_name }}）
-          <el-button link type="primary" @click="copy(current.receive_account)">复制</el-button>
-        </el-descriptions-item>
-        <el-descriptions-item label="应付金额">
-          {{ current.pay_amount }} 元
-          <el-button link type="primary" @click="copy(current.pay_amount)">复制</el-button>
-        </el-descriptions-item>
-      </el-descriptions>
-      <div class="tip">扫码打不开时，可以在支付宝里手动转账到上面的账号，金额和备注照填。</div>
-    </template>
-
     <el-result
-      v-else
-      :icon="current.status === 'paid' ? 'success' : 'info'"
-      :title="current.status === 'paid' ? `已到账 ${current.pay_amount} 元` : current.status === 'cancelled' ? '已取消' : '已过期'"
-      :sub-title="current.status === 'paid' ? `已加到账户余额，支付单号 ${current.order_no}` : '如果已经转账但没有到账，请联系平台并提供支付单号 ' + current.order_no"
+      v-else-if="current.status === 'paid'"
+      icon="success"
+      :title="`已到账 ${current.pay_amount} 元`"
+      :sub-title="`已加到账户余额，支付宝订单号 ${current.alipay_order_no ?? '-'}`"
     />
+
+    <template v-else>
+      <el-result icon="warning" :title="current.status === 'pending' ? '暂未到账' : '已取消'">
+        <template #sub-title>
+          <div class="tip">支付宝订单号 {{ current.alipay_order_no ?? '-' }}，金额 {{ current.amount }} 元</div>
+          <div v-if="current.check_message" class="warn">{{ current.check_message }}</div>
+          <div v-if="current.checked_at" class="tip">查询时间 {{ current.checked_at }}</div>
+        </template>
+      </el-result>
+    </template>
 
     <template #footer>
       <template v-if="!current">
         <el-button @click="visible = false">取消</el-button>
-        <el-button type="primary" :loading="creating" @click="create">生成付款码</el-button>
+        <el-button type="primary" :loading="submitting" @click="submit">已转账</el-button>
       </template>
       <template v-else-if="current.status === 'pending'">
-        <el-button @click="cancel">取消支付</el-button>
-        <el-button type="primary" :loading="checking" @click="paid">我已付款</el-button>
+        <el-button @click="edit">修改后重新提交</el-button>
+        <el-button type="primary" :loading="submitting" @click="recheck">重新查询</el-button>
       </template>
       <el-button v-else type="primary" @click="visible = false">关闭</el-button>
     </template>
@@ -195,31 +126,21 @@ onBeforeUnmount(stopTimers)
   text-align: center;
 }
 
-.pay-label {
-  color: #606266;
-}
-
-.pay-amount {
-  margin: 4px 0;
-  color: #f56c6c;
-  font-size: 32px;
-  font-weight: 600;
-}
-
 .qr {
   width: 220px;
   height: 220px;
-  margin: 12px auto 4px;
+  margin: 0 auto 8px;
   display: block;
+  object-fit: contain;
 }
 
-.expired {
-  margin: 12px 0;
+.block {
+  margin-bottom: 8px;
   text-align: left;
 }
 
-.info {
-  margin: 16px 0 8px;
+.form {
+  margin-top: 16px;
 }
 
 .tip {
@@ -230,6 +151,8 @@ onBeforeUnmount(stopTimers)
 
 .warn {
   color: #e6a23c;
-  font-size: 12px;
+  font-size: 13px;
+  line-height: 20px;
+  margin: 4px 0;
 }
 </style>

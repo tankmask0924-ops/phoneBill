@@ -181,7 +181,7 @@ async function confirmPayment(candidate: TransferCandidate | null) {
   let remark = ''
   try {
     const text = candidate
-      ? `按流水 ${candidate.account_log_id}（${candidate.trans_at ?? '-'} 收到 ${candidate.amount} 元）给「${p.merchant_name}」入账 ${p.pay_amount} 元？`
+      ? `按流水 ${candidate.account_log_id}（${candidate.trans_at ?? '-'} 收到 ${candidate.amount} 元）给「${p.merchant_name}」入账 ${candidate.amount} 元？`
       : `没有选到账记录，确认已在支付宝核实收到「${p.merchant_name}」的 ${p.pay_amount} 元？入账后不能撤回。`
     const result = await ElMessageBox.prompt(text, '确认入账', {
       type: 'warning',
@@ -292,14 +292,14 @@ onMounted(async () => {
             </el-select>
           </el-form-item>
           <el-form-item>
-            <el-input v-model="online.filters.keyword" placeholder="支付单号" clearable style="width: 210px" />
+            <el-input v-model="online.filters.keyword" placeholder="支付单号 / 支付宝订单号" clearable style="width: 230px" />
           </el-form-item>
           <el-form-item>
             <el-date-picker
               v-model="online.filters.dates"
               type="daterange"
               value-format="YYYY-MM-DD"
-              start-placeholder="发起日期（待支付不限）"
+              start-placeholder="提交日期（未到账不限）"
               end-placeholder="结束日期"
               style="width: 260px"
             />
@@ -310,12 +310,17 @@ onMounted(async () => {
         </el-form>
 
         <el-table v-loading="online.loading.value" :data="online.rows.value" border>
-          <el-table-column prop="order_no" label="支付单号" width="210" />
+          <el-table-column label="支付单号 / 支付宝订单号" width="250">
+            <template #default="{ row }">
+              {{ row.order_no }}
+              <div class="muted">{{ row.alipay_order_no ?? '-' }}</div>
+            </template>
+          </el-table-column>
           <el-table-column prop="merchant_name" label="商户" min-width="130" />
           <el-table-column label="收款账户" min-width="130">
             <template #default="{ row }">{{ row.alipay_account_name ?? '-' }}</template>
           </el-table-column>
-          <el-table-column label="应付 / 输入金额" width="140" align="right">
+          <el-table-column label="入账 / 填写金额" width="140" align="right">
             <template #default="{ row }">
               <b>{{ row.pay_amount }}</b>
               <div class="muted">{{ row.amount }}</div>
@@ -330,10 +335,11 @@ onMounted(async () => {
                 {{ row.confirm_type === 'auto' ? '自动' : `后台确认（${row.confirmer_name ?? '-'}）` }} · {{ row.paid_at }}
                 <div v-if="row.payer_account" class="muted">付款方 {{ row.payer_account }}</div>
               </template>
+              <span v-else-if="row.status === 'pending' && row.check_message" class="muted">{{ row.check_message }}</span>
               <span v-else class="muted">-</span>
             </template>
           </el-table-column>
-          <el-table-column prop="created_at" label="发起时间" width="170" />
+          <el-table-column prop="created_at" label="提交时间" width="170" />
           <el-table-column label="操作" width="90" fixed="right">
             <template #default="{ row }">
               <el-button link type="primary" @click="openPayment(row as OnlinePayment)">
@@ -413,13 +419,13 @@ onMounted(async () => {
     </el-tabs>
   </el-card>
 
-  <el-drawer v-model="paymentVisible" title="在线支付（支付宝扫码转账）" size="760px">
+  <el-drawer v-model="paymentVisible" title="在线支付（支付宝转账）" size="760px">
     <div v-if="payment" v-loading="paymentBusy">
       <el-descriptions :column="2" border size="small">
         <el-descriptions-item label="支付单号">{{ payment.order_no }}</el-descriptions-item>
         <el-descriptions-item label="商户">{{ payment.merchant_name }}</el-descriptions-item>
-        <el-descriptions-item label="应付金额">
-          <b>{{ payment.pay_amount }}</b> 元（输入 {{ payment.amount }}）
+        <el-descriptions-item label="入账金额">
+          <b>{{ payment.pay_amount }}</b> 元（填写 {{ payment.amount }}）
         </el-descriptions-item>
         <el-descriptions-item label="状态">
           <StatusTag :map="onlinePaymentStatusLabels" :value="payment.status" />
@@ -427,16 +433,18 @@ onMounted(async () => {
         <el-descriptions-item label="收款账号" :span="2">
           {{ payment.alipay_account_name ?? '-' }}：{{ payment.receive_account }} · {{ payment.receive_name }}
         </el-descriptions-item>
-        <el-descriptions-item label="发起时间">{{ payment.created_at }}</el-descriptions-item>
-        <el-descriptions-item label="二维码到期">{{ payment.expires_at }}</el-descriptions-item>
-        <el-descriptions-item label="自动核对到" :span="2">{{ payment.checking_until }}</el-descriptions-item>
+        <el-descriptions-item label="支付宝订单号">{{ payment.alipay_order_no ?? '-' }}</el-descriptions-item>
+        <el-descriptions-item label="提交时间">{{ payment.created_at }}</el-descriptions-item>
+        <el-descriptions-item v-if="payment.status !== 'paid'" label="最近查询" :span="2">
+          {{ payment.checked_at ?? '-' }}
+          <div v-if="payment.check_message" class="muted">{{ payment.check_message }}</div>
+        </el-descriptions-item>
         <template v-if="payment.status === 'paid'">
           <el-descriptions-item label="入账">
-            {{ payment.confirm_type === 'auto' ? '自动核对' : `后台确认（${payment.confirmer_name ?? '-'}）` }} · {{ payment.paid_at }}
+            {{ payment.confirm_type === 'auto' ? '自动入账' : `后台确认（${payment.confirmer_name ?? '-'}）` }} · {{ payment.paid_at }}
           </el-descriptions-item>
           <el-descriptions-item label="支付宝入账时间">{{ payment.trans_at ?? '-' }}</el-descriptions-item>
-          <el-descriptions-item label="账务流水号">{{ payment.account_log_id ?? '-' }}</el-descriptions-item>
-          <el-descriptions-item label="支付宝订单号">{{ payment.alipay_order_no ?? '-' }}</el-descriptions-item>
+          <el-descriptions-item label="账务流水号" :span="2">{{ payment.account_log_id ?? '-' }}</el-descriptions-item>
           <el-descriptions-item label="付款方">{{ payment.payer_account ?? '-' }}</el-descriptions-item>
           <el-descriptions-item label="账务备注">{{ payment.trans_memo ?? '-' }}</el-descriptions-item>
           <el-descriptions-item label="确认备注" :span="2">{{ payment.remark ?? '-' }}</el-descriptions-item>
@@ -446,14 +454,14 @@ onMounted(async () => {
       <template v-if="canReview && payment.status !== 'paid'">
         <h4 class="section">处理</h4>
         <el-alert type="info" :closable="false" show-icon class="tip">
-          自动核对只认核对期内金额完全相等的到账。过期、取消后才到账的，点「查找到账记录」从支付宝账务明细里找金额相等、
-          还没入过账的收入，确认是这个商户付的再入账；实在查不到但已在支付宝里核实到账，可以写明备注直接确认。
+          商户提交时只认这个支付宝订单号、金额完全相等的到账。金额填错、支付宝入账晚的，点「查找到账记录」列出这个订单号还没入过账的收入
+          （改版前的单按金额找），确认是这个商户付的再按流水金额入账；实在查不到但已在支付宝里核实到账，可以写明备注直接确认。
         </el-alert>
         <div class="actions">
           <el-button type="primary" @click="findCandidates">查找到账记录</el-button>
           <el-button @click="confirmPayment(null)">不选记录，直接确认入账</el-button>
         </div>
-        <el-table v-if="candidates" :data="candidates" border size="small" empty-text="没有找到金额相等、还没入过账的到账记录">
+        <el-table v-if="candidates" :data="candidates" border size="small" empty-text="没有找到还没入过账的到账记录">
           <el-table-column prop="trans_at" label="入账时间" width="160" />
           <el-table-column prop="amount" label="金额" width="100" align="right" />
           <el-table-column label="付款方" min-width="140">
@@ -462,7 +470,7 @@ onMounted(async () => {
           <el-table-column label="备注" min-width="160">
             <template #default="{ row }">
               {{ row.memo ?? '-' }}
-              <el-tag v-if="row.memo_matches" type="success" size="small">是这个单号</el-tag>
+              <el-tag v-if="row.memo_matches" type="success" size="small">单号对得上</el-tag>
             </template>
           </el-table-column>
           <el-table-column prop="account_log_id" label="流水号" min-width="150" />

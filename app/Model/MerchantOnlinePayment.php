@@ -15,25 +15,24 @@ namespace App\Model;
 use Carbon\Carbon;
 
 /**
- * 商户在线加款（支付宝扫码转账）：商户按应付金额转账、备注填支付单号，系统查支付宝账务明细认到账后自动入账。
+ * 商户在线加款（支付宝转账）：商户扫平台的固定收款码转账后，填支付宝订单号和金额，系统按订单号查支付宝账务明细，到账就入账。
  *
  * @property int $id
  * @property string $order_no
  * @property int $merchant_id
  * @property null|int $merchant_user_id
  * @property null|int $alipay_account_id 收款的支付宝账户
- * @property string $amount 商户输入的金额
- * @property string $pay_amount 应付金额（加了随机分），入账按这个
- * @property null|string $active_amount 占用中的应付金额（同一个收款账户内唯一），结束并过了核对期后清空
+ * @property string $amount 商户填的转账金额
+ * @property string $pay_amount 入账金额（自动入账时等于填的金额，后台按流水确认时是流水的金额）
  * @property string $receive_account
  * @property string $receive_name
- * @property string $status pending / paid / expired / cancelled
- * @property Carbon $expires_at
- * @property Carbon $checking_until
+ * @property string $status pending 未到账 / paid 已到账 / expired 已过期（只有改版前的单）/ cancelled 已取消
+ * @property null|Carbon $checked_at 最近一次查询支付宝的时间
+ * @property null|string $check_message 最近一次查询的结果
  * @property null|Carbon $paid_at
  * @property null|string $confirm_type auto / manual
  * @property null|string $account_log_id
- * @property null|string $alipay_order_no
+ * @property null|string $alipay_order_no 商户填的支付宝订单号（唯一，一笔转账只能提交一次）
  * @property null|string $payer_account
  * @property null|string $trans_memo
  * @property null|Carbon $trans_at
@@ -66,12 +65,11 @@ class MerchantOnlinePayment extends Model
         'alipay_account_id',
         'amount',
         'pay_amount',
-        'active_amount',
         'receive_account',
         'receive_name',
         'status',
-        'expires_at',
-        'checking_until',
+        'checked_at',
+        'check_message',
         'paid_at',
         'confirm_type',
         'account_log_id',
@@ -85,8 +83,7 @@ class MerchantOnlinePayment extends Model
     ];
 
     protected array $casts = [
-        'expires_at' => 'datetime',
-        'checking_until' => 'datetime',
+        'checked_at' => 'datetime',
         'paid_at' => 'datetime',
         'trans_at' => 'datetime',
     ];

@@ -54,7 +54,7 @@ export const fundingStatusLabels: LabelMap = {
 
 /** 支付宝扫码转账加款状态 */
 export const onlinePaymentStatusLabels: LabelMap = {
-  pending: { label: '待支付', type: 'warning' },
+  pending: { label: '未到账', type: 'warning' },
   paid: { label: '已到账', type: 'success' },
   expired: { label: '已过期', type: 'info' },
   cancelled: { label: '已取消', type: 'info' },

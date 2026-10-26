@@ -26,8 +26,8 @@ use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpMessage\Exception\HttpException;
 
 /**
- * 商户中心 - 加款申请 - 在线支付（支付宝扫码转账）：查看支付单；自动核对没认上的（过期、取消、核对期内备注不对），
- * 查找到账记录后按某条流水确认入账，或者核实后不带流水直接确认入账（必须写备注）。规则见 AlipayTransferService。
+ * 商户中心 - 加款申请 - 在线支付（支付宝转账）：查看商户提交的转账；没自动入账的（查不到、金额不符、改版前过期的单），
+ * 查找到账记录后按某条流水确认入账（按流水金额），或者核实后不带流水直接确认入账（必须写备注）。规则见 AlipayTransferService。
  */
 class OnlinePaymentAdminService extends AbstractService
 {
@@ -58,7 +58,7 @@ class OnlinePaymentAdminService extends AbstractService
     protected AdminOperationLogDao $operationLogDao;
 
     /**
-     * @param array<string, mixed> $query status / merchant_id / alipay_account_id / keyword（支付单号）/ created_from / created_to
+     * @param array<string, mixed> $query status / merchant_id / alipay_account_id / keyword（支付单号或支付宝订单号）/ created_from / created_to
      * @return array{data: list<array<string, mixed>>, total: int, page: int, per_page: int}
      */
     public function list(array $query): array
@@ -78,7 +78,7 @@ class OnlinePaymentAdminService extends AbstractService
         }
         $keyword = trim(is_string($query['keyword'] ?? null) ? $query['keyword'] : '');
         if ($keyword !== '') {
-            $builder->where('order_no', $keyword);
+            $builder->where(fn ($q) => $q->where('order_no', $keyword)->orWhere('alipay_order_no', $keyword));
         }
         // 待支付的、按单号查的不限日期
         $this->applyDateRange($builder, $query, $status === MerchantOnlinePayment::STATUS_PENDING || $keyword !== '');
@@ -155,7 +155,7 @@ class OnlinePaymentAdminService extends AbstractService
         $this->operationLogDao->record($operator->id, self::MODULE, 'confirm_online_payment', 'merchant_online_payment', $p->id, ['status' => $p->status], [
             'status' => MerchantOnlinePayment::STATUS_PAID,
             'merchant_id' => $p->merchant_id,
-            'amount' => $p->pay_amount,
+            'amount' => $entry['amount'] ?? $p->pay_amount,
             'account_log_id' => $entry['account_log_id'] ?? null,
             'remark' => $remark,
         ], $ip);
@@ -193,8 +193,8 @@ class OnlinePaymentAdminService extends AbstractService
             'receive_account' => $p->receive_account,
             'receive_name' => $p->receive_name,
             'status' => $p->status,
-            'expires_at' => $p->expires_at->toDateTimeString(),
-            'checking_until' => $p->checking_until->toDateTimeString(),
+            'checked_at' => $p->checked_at?->toDateTimeString(),
+            'check_message' => $p->check_message,
             'paid_at' => $p->paid_at?->toDateTimeString(),
             'confirm_type' => $p->confirm_type,
             'account_log_id' => $p->account_log_id,

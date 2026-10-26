@@ -24,7 +24,7 @@ use Hyperf\HttpServer\Annotation\Middleware;
 use Hyperf\HttpServer\Annotation\PostMapping;
 
 /**
- * 商户后台 - 支付宝扫码转账加款，规则见 MerchantOnlinePaymentService。
+ * 商户后台 - 支付宝转账加款（固定收款码 + 提交订单号查到账），规则见 MerchantOnlinePaymentService。
  */
 #[Controller(prefix: '/merchant/online-payments')]
 #[Middleware(MerchantAuthMiddleware::class)]

@@ -3,7 +3,7 @@ import AlipayTransferDialog from '@/components/AlipayTransferDialog.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import { recentDays } from '@/utils/date'
 import { usePagedList } from '@/utils/paged'
-import { ElMessage, type FormInstance, type FormRules, type UploadRequestOptions, type UploadUserFile } from 'element-plus'
+import { ElMessage, ElMessageBox, type FormInstance, type FormRules, type UploadRequestOptions, type UploadUserFile } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
@@ -149,7 +149,7 @@ async function openDetail(row: FundingRequest) {
 
 // ---- 支付宝转账加款 ----
 const tab = ref<'offline' | 'online'>('offline')
-const onlineOptions = ref<OnlinePaymentOptions>({ enabled: false, min_amount: null, max_amount: null, expire_minutes: null })
+const onlineOptions = ref<OnlinePaymentOptions>({ enabled: false, min_amount: null, max_amount: null, qr_code_url: null, receive_account: null, receive_name: null })
 const online = usePagedList<OnlinePayment, { status: string; dates: [string, string] | null }>(
   (params) => {
     const { dates, ...rest } = params as Record<string, unknown> & { dates?: [string, string] }
@@ -161,9 +161,24 @@ const online = usePagedList<OnlinePayment, { status: string; dates: [string, str
 const transferVisible = ref(false)
 const transferPayment = ref<OnlinePayment | null>(null)
 
-function openTransfer(row: OnlinePayment | null) {
+async function openTransfer(row: OnlinePayment | null) {
+  if (!row) {
+    // 收款码链接是临时的，每次打开重新取
+    onlineOptions.value = await onlinePaymentApi.options()
+  }
   transferPayment.value = row
   transferVisible.value = true
+}
+
+async function cancelTransfer(row: OnlinePayment) {
+  try {
+    await ElMessageBox.confirm(`取消支付宝订单号 ${row.alipay_order_no} 的这笔提交？如果确实转了账，之后可以重新提交同一个订单号。`, '取消', { type: 'warning' })
+  } catch {
+    return
+  }
+  await onlinePaymentApi.cancel(row.id)
+  ElMessage.success('已取消')
+  online.load()
 }
 
 onMounted(async () => {
@@ -264,24 +279,34 @@ onMounted(async () => {
           <el-button type="primary" :icon="Plus" @click="openTransfer(null)">支付宝转账加款</el-button>
         </div>
         <el-alert type="info" :closable="false" show-icon class="block">
-          扫码用支付宝转账，金额一分不差、备注保持支付单号，系统核对到账后自动加款，一般 1～2 分钟内到账，不用上传凭证。
+          扫平台收款码用支付宝转账，转完在支付宝账单里复制这笔转账的「订单号」，连同金额提交，系统查到到账立即加款，不用上传凭证。
+          支付宝入账偶尔有几分钟延迟，没查到可以稍后「重新查询」。
         </el-alert>
 
         <el-table v-loading="online.loading.value" :data="online.rows.value" border empty-text="还没有支付宝转账记录">
-          <el-table-column prop="created_at" label="发起时间" width="170" />
-          <el-table-column prop="order_no" label="支付单号" width="210" />
-          <el-table-column label="应付金额（元）" width="130" align="right">
-            <template #default="{ row }">{{ row.pay_amount }}</template>
+          <el-table-column prop="created_at" label="提交时间" width="170" />
+          <el-table-column label="支付宝订单号" min-width="230">
+            <template #default="{ row }">{{ row.alipay_order_no ?? '-' }}</template>
+          </el-table-column>
+          <el-table-column label="金额（元）" width="110" align="right">
+            <template #default="{ row }">{{ row.status === 'paid' ? row.pay_amount : row.amount }}</template>
           </el-table-column>
           <el-table-column label="状态" width="100">
             <template #default="{ row }"><StatusTag :map="onlinePaymentStatusLabels" :value="row.status" /></template>
           </el-table-column>
-          <el-table-column label="到账时间" min-width="170">
-            <template #default="{ row }">{{ row.paid_at ?? '-' }}</template>
-          </el-table-column>
-          <el-table-column label="操作" width="90" fixed="right">
+          <el-table-column label="到账时间 / 说明" min-width="220">
             <template #default="{ row }">
-              <el-button v-if="row.status === 'pending'" link type="primary" @click="openTransfer(row as OnlinePayment)">去付款</el-button>
+              <span v-if="row.paid_at">{{ row.paid_at }}</span>
+              <span v-else-if="row.check_message" class="muted">{{ row.check_message }}</span>
+              <span v-else>-</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="130" fixed="right">
+            <template #default="{ row }">
+              <template v-if="row.status === 'pending'">
+                <el-button link type="primary" @click="openTransfer(row as OnlinePayment)">重新查询</el-button>
+                <el-button link type="danger" @click="cancelTransfer(row as OnlinePayment)">取消</el-button>
+              </template>
             </template>
           </el-table-column>
         </el-table>
@@ -411,6 +436,11 @@ onMounted(async () => {
 
 .block {
   margin-bottom: 16px;
+}
+
+.muted {
+  color: #909399;
+  font-size: 12px;
 }
 
 .receiving {

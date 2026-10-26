@@ -110,24 +110,25 @@ export interface OnlinePayment {
   order_no: string
   merchant_id: number
   merchant_name: string | null
-  /** 商户输入的金额 */
+  /** 商户填的转账金额 */
   amount: string
-  /** 应付金额（加了随机分），入账按这个 */
+  /** 入账金额：自动入账时等于填的金额，按流水确认时是流水的金额 */
   pay_amount: string
   alipay_account_id: number | null
   /** 收款的支付宝账户名称 */
   alipay_account_name: string | null
   receive_account: string
   receive_name: string
-  /** pending / paid / expired / cancelled */
+  /** pending 未到账 / paid / expired（只有改版前的单）/ cancelled */
   status: string
-  expires_at: string
-  /** 自动核对截止时间 */
-  checking_until: string
+  /** 最近一次查询支付宝的时间和结果 */
+  checked_at: string | null
+  check_message: string | null
   paid_at: string | null
-  /** auto 自动核对 / manual 后台确认 */
+  /** auto 自动入账 / manual 后台确认 */
   confirm_type: string | null
   account_log_id: string | null
+  /** 商户填的支付宝订单号（改版前的单是流水上的） */
   alipay_order_no: string | null
   payer_account: string | null
   trans_memo: string | null
@@ -138,7 +139,7 @@ export interface OnlinePayment {
   created_at: string | null
 }
 
-/** 查找到账记录：金额相等、下单之后、还没入过账的收入流水 */
+/** 查找到账记录：这个支付宝订单号的（改版前的单是金额相等、下单之后的）、还没入过账的收入流水 */
 export interface TransferCandidate {
   account_log_id: string
   amount: string
@@ -146,7 +147,7 @@ export interface TransferCandidate {
   alipay_order_no: string | null
   payer_account: string | null
   memo: string | null
-  /** 备注里是这单的支付单号 */
+  /** 订单号对得上，或者备注里是这单的支付单号 */
   memo_matches: boolean
 }
 
@@ -158,7 +159,9 @@ export interface AlipayAccount {
   alipay_public_key: string
   account: string
   account_name: string
-  expire_minutes: number
+  /** 固定收款码图片的 key 和预览链接 */
+  qr_code: string | null
+  qr_code_url: string | null
   min_amount: string
   max_amount: string
   status: string
@@ -169,9 +172,11 @@ export interface AlipayAccount {
   merchant_names: string[]
 }
 
-export type AlipayAccountForm = Omit<AlipayAccount, 'id' | 'status' | 'remark' | 'created_at' | 'updated_at' | 'merchant_names'> & {
+export type AlipayAccountForm = Omit<AlipayAccount, 'id' | 'status' | 'remark' | 'qr_code' | 'qr_code_url' | 'created_at' | 'updated_at' | 'merchant_names'> & {
   /** 新建必填，编辑时留空不改 */
   private_key: string
+  /** 新上传的收款码 key，新建必填，编辑时留空不改 */
+  qr_code: string
   remark: string
 }
 
@@ -187,6 +192,11 @@ export const alipayAccountApi = {
   update: (id: number, data: AlipayAccountForm) => http.put<AlipayAccount>(`/admin/alipay-accounts/${id}`, data),
   changeStatus: (id: number, status: string) => http.post<AlipayAccount>(`/admin/alipay-accounts/${id}/status`, { status }),
   test: (id: number) => http.post<{ success: boolean; message: string }>(`/admin/alipay-accounts/${id}/test`),
+  uploadQrCode: (file: File) => {
+    const data = new FormData()
+    data.append('file', file)
+    return http.post<{ key: string; url: string }>('/admin/alipay-accounts/qr-code', data)
+  },
   forMerchant: (merchantId: number) => http.get<MerchantAlipayAccount>(`/admin/merchants/${merchantId}/alipay-account`),
   bindMerchant: (merchantId: number, accountId: number | null) =>
     http.put<MerchantAlipayAccount>(`/admin/merchants/${merchantId}/alipay-account`, { alipay_account_id: accountId }),

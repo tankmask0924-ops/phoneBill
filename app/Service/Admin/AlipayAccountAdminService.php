@@ -21,14 +21,15 @@ use App\Payment\AlipayClient;
 use App\Security\Encrypter;
 use App\Service\AbstractService;
 use App\Service\Payment\AlipayTransferService;
+use App\Service\Storage\ObjectStorageService;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpMessage\Exception\HttpException;
 use Throwable;
 
 /**
- * 系统配置 - 支付宝转账加款账户（可以多个）：开放平台应用（AppID、应用私钥、支付宝公钥，用来查账务明细）、收款账号、
- * 二维码有效期、单笔限额；新增、编辑、启用 / 停用（不提供删除，历史支付单要用）、测试连接。应用私钥加密存储、不回显，
- * 编辑时留空表示不改。
+ * 系统配置 - 支付宝转账加款账户（可以多个）：开放平台应用（AppID、应用私钥、支付宝公钥，用来按订单号查账务明细）、
+ * 收款账号、固定收款码（图片存 COS，新建时必须上传）、单笔限额；新增、编辑、启用 / 停用（不提供删除，历史支付单要用）、
+ * 测试连接。应用私钥加密存储、不回显，编辑时留空表示不改。
  *
  * 商户用哪个账户在商户列表的「收款配置」里指定（一个商户一个），没指定就不能用支付宝转账加款。
  */
@@ -37,6 +38,9 @@ class AlipayAccountAdminService extends AbstractService
     use ValidatesAdminInput;
 
     private const MODULE = 'system';
+
+    /** 收款码图片在 COS 里的目录 */
+    private const QR_CODE_DIR = 'alipay-qr';
 
     #[Inject]
     protected AlipayAccountDao $accountDao;
@@ -51,10 +55,13 @@ class AlipayAccountAdminService extends AbstractService
     protected Encrypter $encrypter;
 
     #[Inject]
+    protected ObjectStorageService $storage;
+
+    #[Inject]
     protected AdminOperationLogDao $operationLogDao;
 
     /**
-     * 全部账户，带指定用它的商户。
+     * 全部账户，带收款码预览链接和指定用它的商户。
      *
      * @return list<array<string, mixed>>
      */
@@ -66,11 +73,11 @@ class AlipayAccountAdminService extends AbstractService
             $merchants[$m->alipay_account_id][] = $m->name;
         }
 
-        return $accounts->map(fn (AlipayAccount $a) => $this->format($a) + ['merchant_names' => $merchants[$a->id] ?? []])->values()->all();
+        return $accounts->map(fn (AlipayAccount $a) => $this->format($a) + ['qr_code_url' => $this->qrCodeUrl($a), 'merchant_names' => $merchants[$a->id] ?? []])->values()->all();
     }
 
     /**
-     * @param array<string, mixed> $data name / app_id / private_key / alipay_public_key / account / account_name / expire_minutes / min_amount / max_amount / remark
+     * @param array<string, mixed> $data name / app_id / private_key / alipay_public_key / account / account_name / qr_code / min_amount / max_amount / remark
      * @return array<string, mixed>
      */
     public function create(AdminUser $operator, array $data, ?string $ip): array
@@ -83,9 +90,9 @@ class AlipayAccountAdminService extends AbstractService
     }
 
     /**
-     * 改了收款账号、限额只影响之后发起的单，已发起的单用发起时的快照。
+     * 改了收款账号、收款码、限额只影响之后提交的单，已提交的单用提交时的快照。
      *
-     * @param array<string, mixed> $data 同 create()，private_key 留空不改
+     * @param array<string, mixed> $data 同 create()，private_key、qr_code 留空不改
      * @return array<string, mixed>
      */
     public function update(AdminUser $operator, int $id, array $data, ?string $ip): array
@@ -100,7 +107,19 @@ class AlipayAccountAdminService extends AbstractService
     }
 
     /**
-     * 停用后指定了它的商户不能再发起，已发起的单照常核对。
+     * 上传收款码图片，返回 key（保存账户时传 qr_code）和预览链接。
+     *
+     * @return array{key: string, url: string}
+     */
+    public function uploadQrCode(mixed $file): array
+    {
+        $key = $this->storage->uploadImage(self::QR_CODE_DIR, $file);
+
+        return ['key' => $key, 'url' => $this->storage->url($key)];
+    }
+
+    /**
+     * 停用后指定了它的商户不能再提交转账，已提交的单还能重新查询。
      *
      * @return array<string, mixed>
      */
@@ -200,9 +219,12 @@ class AlipayAccountAdminService extends AbstractService
         if (preg_match('/^1\d{10}$/', $account) !== 1 && filter_var($account, FILTER_VALIDATE_EMAIL) === false) {
             throw new HttpException(422, '收款支付宝账号填手机号或邮箱');
         }
-        $expire = is_numeric($data['expire_minutes'] ?? null) ? (int) $data['expire_minutes'] : 0;
-        if ($expire < 5 || $expire > 60) {
-            throw new HttpException(422, '二维码有效期为 5～60 分钟');
+        $qrCode = trim(is_string($data['qr_code'] ?? null) ? $data['qr_code'] : '');
+        if ($qrCode === '' && $existing?->qr_code === null) {
+            throw new HttpException(422, '请上传收款码');
+        }
+        if ($qrCode !== '' && $qrCode !== $existing?->qr_code && ! $this->storage->isUnder($qrCode, self::QR_CODE_DIR)) {
+            throw new HttpException(422, '收款码图片不对，请重新上传');
         }
         $min = $this->money($data['min_amount'] ?? null, '单笔最低金额');
         $max = $this->money($data['max_amount'] ?? null, '单笔最高金额');
@@ -215,13 +237,15 @@ class AlipayAccountAdminService extends AbstractService
             'alipay_public_key' => $publicKey,
             'account' => $account,
             'account_name' => $this->requiredString($data['account_name'] ?? null, '收款人姓名', 64),
-            'expire_minutes' => $expire,
             'min_amount' => $min,
             'max_amount' => $max,
             'remark' => $this->remark($data['remark'] ?? null),
         ];
         if ($privateKey !== '') {
             $attrs['private_key'] = $this->encrypter->encrypt($privateKey);
+        }
+        if ($qrCode !== '') {
+            $attrs['qr_code'] = $qrCode;
         }
 
         return $attrs;
@@ -238,7 +262,22 @@ class AlipayAccountAdminService extends AbstractService
     }
 
     /**
-     * 不返回私钥。
+     * 收款码的临时预览链接，存储没配好时为 null。
+     */
+    private function qrCodeUrl(AlipayAccount $a): ?string
+    {
+        if ($a->qr_code === null) {
+            return null;
+        }
+        try {
+            return $this->storage->url($a->qr_code);
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    /**
+     * 不返回私钥（也用来记操作日志，所以不带每次都变的预览链接）。
      *
      * @return array<string, mixed>
      */
@@ -251,7 +290,7 @@ class AlipayAccountAdminService extends AbstractService
             'alipay_public_key' => $a->alipay_public_key,
             'account' => $a->account,
             'account_name' => $a->account_name,
-            'expire_minutes' => $a->expire_minutes,
+            'qr_code' => $a->qr_code,
             'min_amount' => $a->min_amount,
             'max_amount' => $a->max_amount,
             'status' => $a->status,

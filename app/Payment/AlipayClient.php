@@ -24,7 +24,7 @@ use RuntimeException;
  * - 响应：{"<method 点换下划线>_response": {...}, "sign": "..."}，用支付宝公钥对 _response 节点的原始 JSON 字符串验签；
  *   code 是 10000 才算成功。
  *
- * 目前只用账务明细查询（alipay.data.bill.accountlog.query）认转账到账。
+ * 目前只用账务明细查询（alipay.data.bill.accountlog.query）按支付宝订单号认转账到账。
  */
 class AlipayClient
 {
@@ -53,18 +53,23 @@ class AlipayClient
     /**
      * 查一段时间内的账务明细（左闭右开，间隔不能超过 31 天），自动翻页，返回全部 detail_list 条目。
      *
+     * @param null|string $alipayOrderNo 只查这笔支付宝订单的流水
      * @return list<array<string, mixed>>
      */
-    public function accountLogs(string $startTime, string $endTime): array
+    public function accountLogs(string $startTime, string $endTime, ?string $alipayOrderNo = null): array
     {
         $items = [];
         for ($page = 1; $page <= self::MAX_PAGES; ++$page) {
-            $result = $this->call(self::METHOD_ACCOUNT_LOG, [
+            $biz = [
                 'start_time' => $startTime,
                 'end_time' => $endTime,
                 'page_no' => (string) $page,
                 'page_size' => (string) self::PAGE_SIZE,
-            ]);
+            ];
+            if ($alipayOrderNo !== null) {
+                $biz['alipay_order_no'] = $alipayOrderNo;
+            }
+            $result = $this->call(self::METHOD_ACCOUNT_LOG, $biz);
             $list = is_array($result['detail_list'] ?? null) ? array_values(array_filter($result['detail_list'], 'is_array')) : [];
             $items = array_merge($items, $list);
             if (count($list) < self::PAGE_SIZE || count($items) >= (int) ($result['total_size'] ?? 0)) {

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import StatusTag from '@/components/StatusTag.vue'
-import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
+import { ElMessage, ElMessageBox, type FormInstance, type FormRules, type UploadRawFile, type UploadRequestOptions } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { onMounted, reactive, ref } from 'vue'
 import { type AlipayAccount, alipayAccountApi } from '@/api/funding'
@@ -31,7 +31,7 @@ const form = reactive({
   alipay_public_key: '',
   account: '',
   account_name: '',
-  expire_minutes: 15,
+  qr_code: '',
   min_amount: '1.00',
   max_amount: '50000.00',
   remark: '',
@@ -59,7 +59,7 @@ function openForm(row: AlipayAccount | null) {
           alipay_public_key: row.alipay_public_key,
           account: row.account,
           account_name: row.account_name,
-          expire_minutes: row.expire_minutes,
+          qr_code: '',
           min_amount: row.min_amount,
           max_amount: row.max_amount,
           remark: row.remark ?? '',
@@ -71,13 +71,41 @@ function openForm(row: AlipayAccount | null) {
           alipay_public_key: '',
           account: '',
           account_name: '',
-          expire_minutes: 15,
+          qr_code: '',
           min_amount: '1.00',
           max_amount: '50000.00',
           remark: '',
         },
   )
+  qrPreview.value = row?.qr_code_url ?? ''
   dialogVisible.value = true
+}
+
+// 收款码：选好图片立即上传，保存时只传 key；编辑时不重新上传就不改
+const qrPreview = ref('')
+const uploadingQr = ref(false)
+
+function beforeQrUpload(file: UploadRawFile) {
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+    ElMessage.warning('只支持 JPG、PNG、WebP 图片')
+    return false
+  }
+  if (file.size > 5 * 1024 * 1024) {
+    ElMessage.warning('图片不能超过 5MB')
+    return false
+  }
+  return true
+}
+
+async function uploadQr(options: UploadRequestOptions) {
+  uploadingQr.value = true
+  try {
+    const result = await alipayAccountApi.uploadQrCode(options.file)
+    form.qr_code = result.key
+    qrPreview.value = result.url
+  } finally {
+    uploadingQr.value = false
+  }
 }
 
 async function save() {
@@ -86,6 +114,10 @@ async function save() {
   }
   if (!editing.value && !form.private_key.trim()) {
     ElMessage.warning('请粘贴应用私钥')
+    return
+  }
+  if (!form.qr_code && !editing.value?.qr_code) {
+    ElMessage.warning('请上传收款码')
     return
   }
   saving.value = true
@@ -107,7 +139,7 @@ async function toggle(row: AlipayAccount) {
   const disable = row.status === 'active'
   if (disable) {
     try {
-      await ElMessageBox.confirm(`停用「${row.name}」后，指定用它的商户不能再发起支付宝转账加款，已发起的单照常核对。`, '停用账户', {
+      await ElMessageBox.confirm(`停用「${row.name}」后，指定用它的商户不能再提交支付宝转账，已提交的还能重新查询。`, '停用账户', {
         type: 'warning',
       })
     } catch {
@@ -145,8 +177,9 @@ onMounted(load)
       </div>
     </template>
     <el-alert type="info" :closable="false" show-icon class="tip-bar">
-      商户在加款页面扫码，用支付宝向指定的收款账号转账（金额带随机分、备注填支付单号），系统每分钟查一次收款账号的<b>账务明细</b>，
-      金额对上就自动入账。每个账户要在支付宝开放平台为<b>收款账号所在的企业账户</b>创建应用、开通账务明细查询权限，接口加签方式选<b>公钥</b>。
+      商户在加款页面扫这里上传的<b>固定收款码</b>转账，转完填上支付宝<b>订单号</b>和金额，系统按订单号查收款账号的<b>账务明细</b>，
+      金额对上就立即入账。每个账户要在支付宝开放平台为<b>收款账号所在的企业账户</b>创建应用、开通账务明细查询权限，接口加签方式选<b>公钥</b>；
+      收款码必须是这个收款账号的。
       商户用哪个账户在「商户中心 - 商户」的「收款配置」里指定，没指定的商户看不到这个入口。
     </el-alert>
     <el-table :data="accounts" border empty-text="还没有支付宝转账加款账户">
@@ -160,8 +193,11 @@ onMounted(load)
       <el-table-column label="单笔金额" width="150">
         <template #default="{ row }">{{ row.min_amount }} ~ {{ row.max_amount }}</template>
       </el-table-column>
-      <el-table-column label="有效期" width="80">
-        <template #default="{ row }">{{ row.expire_minutes }} 分钟</template>
+      <el-table-column label="收款码" width="80" align="center">
+        <template #default="{ row }">
+          <el-image v-if="row.qr_code_url" :src="row.qr_code_url" :preview-src-list="[row.qr_code_url]" preview-teleported fit="contain" class="qr-thumb" />
+          <span v-else class="muted">{{ row.qr_code ? '加载失败' : '未上传' }}</span>
+        </template>
       </el-table-column>
       <el-table-column label="指定的商户" min-width="160">
         <template #default="{ row }">
@@ -212,9 +248,19 @@ onMounted(load)
       <el-form-item label="收款人姓名" prop="account_name">
         <el-input v-model="form.account_name" maxlength="64" placeholder="商户页面只显示最后一个字" />
       </el-form-item>
-      <el-form-item label="二维码有效期">
-        <el-input-number v-model="form.expire_minutes" :min="5" :max="60" :step="5" controls-position="right" />
-        <span class="unit">分钟，到期后还会再自动核对 10 分钟</span>
+      <el-form-item label="收款码" required>
+        <el-upload
+          v-loading="uploadingQr"
+          class="qr-upload"
+          :show-file-list="false"
+          accept="image/jpeg,image/png,image/webp"
+          :http-request="uploadQr"
+          :before-upload="beforeQrUpload"
+        >
+          <img v-if="qrPreview" :src="qrPreview" class="qr-preview" alt="收款码" />
+          <el-icon v-else class="qr-placeholder"><Plus /></el-icon>
+        </el-upload>
+        <div class="muted qr-tip">这个收款账号的支付宝收款码截图，商户扫它转账，点图片可以换一张</div>
       </el-form-item>
       <el-form-item label="单笔金额" required>
         <el-input v-model="form.min_amount" style="width: 140px" placeholder="最低" />
@@ -252,5 +298,37 @@ onMounted(load)
 .unit {
   margin-left: 8px;
   color: #606266;
+}
+
+.qr-thumb {
+  width: 48px;
+  height: 48px;
+}
+
+.qr-upload :deep(.el-upload) {
+  width: 148px;
+  height: 148px;
+  border: 1px dashed var(--el-border-color);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.qr-preview {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.qr-placeholder {
+  font-size: 28px;
+  color: #8c939d;
+}
+
+.qr-tip {
+  width: 100%;
+  margin-top: 4px;
 }
 </style>
