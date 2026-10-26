@@ -14,6 +14,7 @@ namespace App\Service\Admin;
 
 use App\Dao\AdminOperationLogDao;
 use App\Dao\OrderAttemptDao;
+use App\Dao\ProductDao;
 use App\Dao\ProductRouteDao;
 use App\Dao\SupplierDao;
 use App\Dao\SupplierProductDao;
@@ -22,8 +23,10 @@ use App\Dao\SupplierProductProvinceDao;
 use App\Enum\Operator;
 use App\Enum\Province;
 use App\Model\AdminUser;
+use App\Model\ProductRoute;
 use App\Model\SupplierProduct;
 use App\Service\AbstractService;
+use App\Service\Merchant\MerchantPriceService;
 use App\Service\Product\ProductRouteService;
 use App\Service\Supplier\SupplierGateway;
 use App\Supplier\UpstreamProduct;
@@ -38,7 +41,9 @@ use Throwable;
  * - 覆盖省份必填（可选「全国」），号码所在省份在里面才会选到这个商品；
  * - 所属供应商建好后不能改；
  * - 已经被平台商品绑定的，面值不能改（平台商品只能绑同面值的供应商商品）；
- * - 删除是软删除：被平台商品绑定着、或者有提交了还没出结果的单时不能删；删除后历史订单照常显示名字。
+ * - 删除是软删除：被平台商品绑定着、或者有提交了还没出结果的单时不能删；删除后历史订单照常显示名字；
+ * - 一键解绑：从绑定了它的全部平台商品里去掉（改的是平台商品的配置，要 product.manage），已提交的单不受影响，
+ *   之后换供应商、手动补单时不再用它。
  */
 class SupplierProductAdminService extends AbstractService
 {
@@ -62,6 +67,12 @@ class SupplierProductAdminService extends AbstractService
 
     #[Inject]
     protected ProductRouteDao $productRouteDao;
+
+    #[Inject]
+    protected ProductDao $productDao;
+
+    #[Inject]
+    protected MerchantPriceService $priceService;
 
     #[Inject]
     protected OrderAttemptDao $attemptDao;
@@ -276,6 +287,61 @@ class SupplierProductAdminService extends AbstractService
             $this->operationLogDao->record($operator->id, self::MODULE, 'delete_supplier_product', 'supplier_product', $product->id, $before, null, $ip);
         });
         $this->routeService->flushConfig();
+    }
+
+    /**
+     * 绑定了这个供应商商品的平台商品，带它在每个商品里的优先级、解绑后这个商品还剩几个绑定。
+     *
+     * @return list<array{product_id: int, code: string, name: string, status: string, priority: int, remaining_routes: int}>
+     */
+    public function bindings(int $id): array
+    {
+        $product = $this->findOrFail($id);
+        $productIds = $this->productRouteDao->productIdsForSupplierProduct($product->id);
+        $routes = $this->productRouteDao->routesFor($productIds);
+        $products = $this->productDao->findManyWithTrashed($productIds);
+        $result = [];
+        foreach ($productIds as $productId) {
+            $own = array_values(array_filter($routes[$productId] ?? [], static fn (ProductRoute $r) => $r->supplier_product_id === $product->id));
+            $p = $products[$productId] ?? null;
+            $result[] = [
+                'product_id' => $productId,
+                'code' => $p?->code ?? '',
+                'name' => $p?->name ?? "#{$productId}",
+                'status' => $p?->status ?? '',
+                'priority' => $own[0]->priority ?? 0,
+                'remaining_routes' => count($routes[$productId] ?? []) - count($own),
+            ];
+        }
+
+        return $result;
+    }
+
+    /**
+     * 一键解绑：事务里删掉这个供应商商品的全部绑定，每个受影响的平台商品记一条操作日志（绑定的前后），返回解绑了几个平台商品。
+     */
+    public function unbindAll(AdminUser $operator, int $id, ?string $ip): int
+    {
+        $product = $this->findOrFail($id);
+        $count = Db::transaction(function () use ($operator, $product, $ip) {
+            $productIds = $this->productRouteDao->productIdsForSupplierProduct($product->id);
+            $before = $this->productRouteDao->routesFor($productIds);
+            $this->productRouteDao->deleteForSupplierProduct($product->id);
+            $simplify = static fn (array $routes) => array_map(static fn (ProductRoute $r) => ['supplier_product_id' => $r->supplier_product_id, 'priority' => $r->priority], $routes);
+            foreach ($productIds as $productId) {
+                $routes = $before[$productId] ?? [];
+                $this->operationLogDao->record($operator->id, self::MODULE, 'unbind_supplier_product', 'product', $productId, ['routes' => $simplify($routes)], [
+                    'routes' => $simplify(array_values(array_filter($routes, static fn (ProductRoute $r) => $r->supplier_product_id !== $product->id))),
+                    'unbound_supplier_product_id' => $product->id,
+                ], $ip);
+            }
+
+            return count($productIds);
+        });
+        $this->priceService->flush();
+        $this->routeService->flushConfig();
+
+        return $count;
     }
 
     /**

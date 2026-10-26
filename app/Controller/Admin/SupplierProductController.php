@@ -127,6 +127,27 @@ class SupplierProductController extends AbstractController
         return ['success' => true];
     }
 
+    #[Middleware(AdminAuthMiddleware::class)]
+    #[Middleware(AdminPermissionMiddleware::class)]
+    #[RequiresPermission('supplier_product.view')]
+    #[GetMapping(path: '{id:\d+}/bindings')]
+    public function bindings(int $id): array
+    {
+        return $this->supplierProductAdminService->bindings($id);
+    }
+
+    /**
+     * 一键解绑：改的是平台商品的绑定，所以要 product.manage。
+     */
+    #[Middleware(AdminAuthMiddleware::class)]
+    #[Middleware(AdminPermissionMiddleware::class)]
+    #[RequiresPermission('product.manage')]
+    #[DeleteMapping(path: '{id:\d+}/bindings')]
+    public function unbind(int $id): array
+    {
+        return ['unbound' => $this->supplierProductAdminService->unbindAll($this->admin(), $id, $this->clientIp())];
+    }
+
     private function admin(): AdminUser
     {
         /* @var AdminUser */

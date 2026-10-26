@@ -127,6 +127,21 @@ export const supplierProductApi = {
   changeStatus: (id: number, status: string) => http.post<SupplierProduct>(`/admin/supplier-products/${id}/status`, { status }),
   /** 软删除：被平台商品绑定着、或有充值中的订单时后端拒绝 */
   remove: (id: number) => http.delete<{ success: boolean }>(`/admin/supplier-products/${id}`),
+  /** 绑定了它的平台商品 */
+  bindings: (id: number) => http.get<SupplierProductBinding[]>(`/admin/supplier-products/${id}/bindings`),
+  /** 一键解绑（product.manage），返回解绑了几个平台商品 */
+  unbind: (id: number) => http.delete<{ unbound: number }>(`/admin/supplier-products/${id}/bindings`),
+}
+
+export interface SupplierProductBinding {
+  product_id: number
+  code: string
+  name: string
+  status: string
+  /** 这个供应商商品在该平台商品里的优先级 */
+  priority: number
+  /** 解绑后这个平台商品还剩几个绑定，0 表示商户下单会被拒绝 */
+  remaining_routes: number
 }
 
 /** 商品分类：App\Controller\Admin\ProductCategoryController，只给平台商品用 */

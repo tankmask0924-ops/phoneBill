@@ -47,6 +47,24 @@ class ProductRouteDao extends AbstractDao
         }
     }
 
+    /**
+     * 绑定了这个供应商商品的平台商品 id。
+     *
+     * @return list<int>
+     */
+    public function productIdsForSupplierProduct(int $supplierProductId): array
+    {
+        return $this->newQuery()->where('supplier_product_id', $supplierProductId)->orderBy('product_id')->pluck('product_id')->map(static fn ($v) => (int) $v)->all();
+    }
+
+    /**
+     * 解除这个供应商商品的全部绑定，返回删了几条。
+     */
+    public function deleteForSupplierProduct(int $supplierProductId): int
+    {
+        return $this->newQuery()->where('supplier_product_id', $supplierProductId)->delete();
+    }
+
     public function isSupplierProductBound(int $supplierProductId): bool
     {
         return $this->newQuery()->where('supplier_product_id', $supplierProductId)->exists();

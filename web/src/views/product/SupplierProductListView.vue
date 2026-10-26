@@ -8,6 +8,7 @@ import {
   type OperatorCode,
   type SupplierOption,
   type SupplierProduct,
+  type SupplierProductBinding,
   type UpstreamProduct,
   supplierProductApi,
 } from '@/api/product'
@@ -16,6 +17,8 @@ import { usePermissionStore } from '@/stores/permission'
 
 const permission = usePermissionStore()
 const canManage = computed(() => permission.can('supplier_product.manage'))
+/** 解绑改的是平台商品的配置 */
+const canUnbind = computed(() => permission.can('product.manage'))
 
 const list = usePagedList<
   SupplierProduct,
@@ -210,6 +213,45 @@ async function remove(row: SupplierProduct) {
   await list.load()
 }
 
+// ---- 一键解绑 ----
+const unbindVisible = ref(false)
+const unbindTarget = ref<SupplierProduct | null>(null)
+const bindings = ref<SupplierProductBinding[]>([])
+const bindingsLoading = ref(false)
+const unbinding = ref(false)
+const emptiedCount = computed(() => bindings.value.filter((b) => b.remaining_routes === 0).length)
+
+async function openUnbind(row: SupplierProduct) {
+  unbindTarget.value = row
+  bindings.value = []
+  unbindVisible.value = true
+  bindingsLoading.value = true
+  try {
+    bindings.value = await supplierProductApi.bindings(row.id)
+  } finally {
+    bindingsLoading.value = false
+  }
+}
+
+async function unbindAll() {
+  const row = unbindTarget.value!
+  const warn = emptiedCount.value > 0 ? `其中 ${emptiedCount.value} 个平台商品解绑后没有供应商商品了，商户下单会被拒绝。` : ''
+  try {
+    await ElMessageBox.confirm(`从 ${bindings.value.length} 个平台商品里解绑「${row.name}」？${warn}已提交的订单不受影响。`, '一键解绑', { type: 'warning' })
+  } catch {
+    return
+  }
+  unbinding.value = true
+  try {
+    const result = await supplierProductApi.unbind(row.id)
+    ElMessage.success(`已从 ${result.unbound} 个平台商品解绑`)
+    unbindVisible.value = false
+    await list.load()
+  } finally {
+    unbinding.value = false
+  }
+}
+
 onMounted(async () => {
   await permission.load()
   list.load()
@@ -283,13 +325,16 @@ onMounted(async () => {
       <el-table-column label="状态" width="80">
         <template #default="{ row }"><StatusTag :map="shelfStatusLabels" :value="row.status" /></template>
       </el-table-column>
-      <el-table-column v-if="canManage" label="操作" width="160" fixed="right">
+      <el-table-column v-if="canManage || canUnbind" label="操作" width="200" fixed="right">
         <template #default="{ row }">
-          <el-button link type="primary" @click="openEdit(row as SupplierProduct)">编辑</el-button>
-          <el-button link :type="row.status === 'active' ? 'danger' : 'success'" @click="toggleStatus(row as SupplierProduct)">
-            {{ row.status === 'active' ? '下架' : '上架' }}
-          </el-button>
-          <el-tooltip :disabled="row.bound_product_count === 0" content="还绑定在平台商品上，先解绑" placement="top">
+          <template v-if="canManage">
+            <el-button link type="primary" @click="openEdit(row as SupplierProduct)">编辑</el-button>
+            <el-button link :type="row.status === 'active' ? 'danger' : 'success'" @click="toggleStatus(row as SupplierProduct)">
+              {{ row.status === 'active' ? '下架' : '上架' }}
+            </el-button>
+          </template>
+          <el-button v-if="canUnbind && row.bound_product_count > 0" link type="warning" @click="openUnbind(row as SupplierProduct)">解绑</el-button>
+          <el-tooltip v-if="canManage" :disabled="row.bound_product_count === 0" content="还绑定在平台商品上，先解绑" placement="top">
             <span class="action">
               <el-button link type="danger" :disabled="row.bound_product_count > 0" @click="remove(row as SupplierProduct)">删除</el-button>
             </span>
@@ -382,9 +427,47 @@ onMounted(async () => {
       <el-button type="primary" :loading="saving" @click="save">保存</el-button>
     </template>
   </el-dialog>
+
+  <el-dialog v-model="unbindVisible" :title="`一键解绑 - ${unbindTarget?.name ?? ''}`" width="640px">
+    <div v-loading="bindingsLoading">
+      <el-alert v-if="emptiedCount > 0" type="error" :closable="false" show-icon class="unbind-tip">
+        有 {{ emptiedCount }} 个平台商品解绑后没有供应商商品了，商户下单会被拒绝。
+      </el-alert>
+      <el-table :data="bindings" border size="small" empty-text="没有绑定的平台商品">
+        <el-table-column prop="code" label="商品编码" width="140" />
+        <el-table-column prop="name" label="平台商品" min-width="160" />
+        <el-table-column prop="priority" label="优先级" width="80" align="center" />
+        <el-table-column label="解绑后剩余绑定" width="130" align="center">
+          <template #default="{ row }">
+            <span :class="{ danger: row.remaining_routes === 0 }">{{ row.remaining_routes }}</span>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div class="unbind-note">从上面所有平台商品里去掉这个供应商商品。已提交给上游的订单不受影响，之后换供应商、手动补单时不再用它。</div>
+    </div>
+    <template #footer>
+      <el-button @click="unbindVisible = false">取消</el-button>
+      <el-button type="danger" :loading="unbinding" :disabled="bindings.length === 0" @click="unbindAll">全部解绑</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <style scoped>
+.unbind-tip {
+  margin-bottom: 12px;
+}
+
+.unbind-note {
+  margin-top: 8px;
+  color: #909399;
+  font-size: 12px;
+}
+
+.danger {
+  color: #f56c6c;
+  font-weight: 600;
+}
+
 .action {
   margin-left: 12px;
 }

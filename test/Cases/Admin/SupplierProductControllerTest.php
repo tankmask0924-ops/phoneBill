@@ -12,10 +12,12 @@ declare(strict_types=1);
 
 namespace HyperfTest\Cases\Admin;
 
+use App\Model\AdminOperationLog;
+use App\Model\ProductRoute;
 use HyperfTest\HttpTestCase;
 
 /**
- * 供应商商品：增改、按运营商筛选、被绑定后面值不能改。
+ * 供应商商品：增改、按运营商筛选、被绑定后面值不能改、一键解绑。
  *
  * @internal
  * @coversNothing
@@ -143,6 +145,38 @@ class SupplierProductControllerTest extends HttpTestCase
         $this->assertSame(200, $this->jsonRequest('PUT', "/admin/supplier-products/{$sp->id}", $token, ['face_value' => 100, 'cost_price' => '97.5'])->getStatusCode());
         $this->assertSame(422, $this->jsonRequest('PUT', "/admin/supplier-products/{$sp->id}", $token, ['supplier_id' => $this->createSupplier()->id])->getStatusCode());
         $this->assertSame('disabled', $this->body($this->jsonRequest('POST', "/admin/supplier-products/{$sp->id}/status", $token, ['status' => 'disabled']))['status']);
+    }
+
+    public function testUnbindFromAllProducts()
+    {
+        $supplier = $this->createSupplier();
+        $sp = $this->createSupplierProduct($supplier, ['cmcc']);
+        $other = $this->createSupplierProduct($supplier, ['cmcc']);
+        $shared = $this->createProduct([$sp->id => 2, $other->id => 1]);
+        $only = $this->createProduct([$sp->id => 5]);
+        $untouched = $this->createProduct([$other->id => 1]);
+        $viewer = $this->loginAs($this->createAdminWithPermissions(['supplier_product.view', 'supplier_product.manage']));
+        $manager = $this->loginAs($this->createAdminWithPermissions(['supplier_product.view', 'product.manage']));
+
+        $bindings = $this->body($this->jsonRequest('GET', "/admin/supplier-products/{$sp->id}/bindings", $viewer));
+        $this->assertSame([[$shared->id, 2, 1], [$only->id, 5, 0]], array_map(static fn (array $b) => [$b['product_id'], $b['priority'], $b['remaining_routes']], $bindings));
+        $this->assertSame($shared->code, $bindings[0]['code']);
+        $this->assertSame([], $this->body($this->jsonRequest('GET', "/admin/supplier-products/{$this->createSupplierProduct($supplier, ['cmcc'])->id}/bindings", $viewer)));
+        $this->assertSame(404, $this->jsonRequest('GET', '/admin/supplier-products/999999999/bindings', $viewer)->getStatusCode());
+
+        // 改的是平台商品配置，要 product.manage
+        $this->assertSame(403, $this->jsonRequest('DELETE', "/admin/supplier-products/{$sp->id}/bindings", $viewer)->getStatusCode());
+        $this->assertSame(['unbound' => 2], $this->body($this->jsonRequest('DELETE', "/admin/supplier-products/{$sp->id}/bindings", $manager)));
+        $this->assertSame(0, ProductRoute::where('supplier_product_id', $sp->id)->count());
+        $this->assertSame([$other->id], ProductRoute::where('product_id', $shared->id)->pluck('supplier_product_id')->all());
+        $this->assertSame(1, ProductRoute::where('product_id', $untouched->id)->count());
+        $log = AdminOperationLog::where('action', 'unbind_supplier_product')->where('target_id', $shared->id)->first();
+        $this->assertNotNull($log);
+        $this->assertEquals([['supplier_product_id' => $other->id, 'priority' => 1]], $log->after_data['routes']);
+        $this->assertSame(['unbound' => 0], $this->body($this->jsonRequest('DELETE', "/admin/supplier-products/{$sp->id}/bindings", $manager)), '再点一次没有可解绑的');
+
+        // 解绑后可以删除
+        $this->assertSame(200, $this->jsonRequest('DELETE', "/admin/supplier-products/{$sp->id}", $viewer)->getStatusCode());
     }
 
     public function testListWithNoMatches()
