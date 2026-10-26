@@ -66,6 +66,7 @@ const rules: FormRules = {
 }
 
 const selectedReceiving = computed(() => receivingAccounts.value.find((a) => a.id === form.receiving_account_id))
+const selectedPayer = computed(() => approvedPayers.value.find((a) => a.id === form.payer_account_id))
 
 async function openCreate() {
   ;[receivingAccounts.value, payerAccounts.value] = await Promise.all([fundingApi.receivingAccounts(), fundingApi.payerAccounts()])
@@ -336,7 +337,7 @@ onMounted(async () => {
     <el-form ref="formRef" :model="form" :rules="rules" label-width="96px">
       <el-form-item label="收款账户" prop="receiving_account_id">
         <el-select v-model="form.receiving_account_id" placeholder="打款到哪个账户" style="width: 100%">
-          <el-option v-for="a in receivingAccounts" :key="a.id" :label="accountText(a)" :value="a.id" />
+          <el-option v-for="a in receivingAccounts" :key="a.id" :label="a.account_name" :value="a.id" />
         </el-select>
         <div v-if="selectedReceiving" class="receiving">
           <div>{{ selectedReceiving.type_label }}：{{ selectedReceiving.account_name }}</div>
@@ -347,8 +348,13 @@ onMounted(async () => {
       </el-form-item>
       <el-form-item label="付款账号" prop="payer_account_id">
         <el-select v-model="form.payer_account_id" placeholder="用哪个账号打的款" style="width: 100%">
-          <el-option v-for="a in approvedPayers" :key="a.id" :label="accountText(a)" :value="a.id" />
+          <el-option v-for="a in approvedPayers" :key="a.id" :label="a.account_name" :value="a.id" />
         </el-select>
+        <div v-if="selectedPayer" class="receiving">
+          <div>{{ selectedPayer.type_label }}：{{ selectedPayer.account_name }}</div>
+          <div>账号：<b>{{ selectedPayer.account_no }}</b></div>
+          <div v-if="selectedPayer.bank_name">开户行：{{ selectedPayer.bank_name }}</div>
+        </div>
       </el-form-item>
       <el-form-item label="打款金额" prop="amount">
         <el-input v-model.trim="form.amount" placeholder="和实际打款金额一致" style="width: 200px">

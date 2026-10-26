@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import StatusTag from '@/components/StatusTag.vue'
+import { recentDays } from '@/utils/date'
 import { usePagedList } from '@/utils/paged'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { Plus, WarningFilled } from '@element-plus/icons-vue'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { type AvailableProduct, type Merchant, merchantApi, type MerchantProduct, type MerchantUser } from '@/api/merchant'
+import { type AvailableProduct, balanceLogApi, type BalanceLog, type Merchant, merchantApi, type MerchantProduct, type MerchantUser } from '@/api/merchant'
 import type { OperatorCode } from '@/api/product'
 import { alipayAccountApi, type MerchantAlipayAccount, type ReceivingAccount, receivingAccountApi } from '@/api/funding'
 import { labelOf, operatorLabels, supplierStatusLabels, toOptions } from '@/utils/labels'
@@ -180,6 +181,28 @@ async function saveBalance() {
   } finally {
     balanceSaving.value = false
   }
+}
+
+// ---- 加款记录：这个商户的「加款」类资金流水（线下加款审核、支付宝转账、后台加款）----
+const rechargeVisible = ref(false)
+const rechargeTarget = ref<Merchant | null>(null)
+const recharges = usePagedList<BalanceLog, { merchant_id: number | ''; dates: [string, string] | null }>(
+  (params) => {
+    const { dates, ...rest } = params as Record<string, unknown> & { dates?: [string, string] }
+    // 后端没传开始日期时只查最近 7 天，这里总是带上日期
+    const range = dates ?? recentDays(30)
+    return balanceLogApi.list({ ...rest, type: 'recharge', created_from: range[0], created_to: range[1] })
+  },
+  { merchant_id: '', dates: recentDays(30) },
+  10,
+)
+
+function openRecharges(row: Merchant) {
+  rechargeTarget.value = row
+  Object.assign(recharges.filters, { merchant_id: row.id, dates: recentDays(30) })
+  recharges.rows.value = []
+  rechargeVisible.value = true
+  recharges.search()
 }
 
 // ---- 授信额度 ----
@@ -454,11 +477,12 @@ onMounted(async () => {
       <el-table-column label="状态" width="80">
         <template #default="{ row }"><StatusTag :map="supplierStatusLabels" :value="row.status" /></template>
       </el-table-column>
-      <el-table-column label="操作" width="410" fixed="right">
+      <el-table-column label="操作" width="480" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" @click="openProducts(row as Merchant)">商品与价格</el-button>
           <el-button link type="primary" @click="openUsers(row as Merchant)">后台账号</el-button>
           <el-button v-if="canBalance" link type="primary" @click="openBalance(row as Merchant)">加/扣款</el-button>
+          <el-button link type="primary" @click="openRecharges(row as Merchant)">加款记录</el-button>
           <el-button v-if="canCredit" link type="primary" @click="setCredit(row as Merchant)">授信</el-button>
           <el-button v-if="canFundingConfig" link type="primary" @click="openReceiving(row as Merchant)">收款配置</el-button>
           <template v-if="canManage">
@@ -551,6 +575,47 @@ onMounted(async () => {
       <el-button @click="balanceVisible = false">取消</el-button>
       <el-button type="primary" :loading="balanceSaving" @click="saveBalance">确定</el-button>
     </template>
+  </el-dialog>
+
+  <!-- 加款记录 -->
+  <el-dialog v-model="rechargeVisible" :title="`加款记录 - ${rechargeTarget?.name ?? ''}`" width="min(900px, 94vw)">
+    <el-form inline @submit.prevent="recharges.search">
+      <el-form-item>
+        <el-date-picker
+          v-model="recharges.filters.dates"
+          type="daterange"
+          value-format="YYYY-MM-DD"
+          start-placeholder="开始日期"
+          end-placeholder="结束日期"
+          :clearable="false"
+          style="width: 260px"
+        />
+      </el-form-item>
+      <el-form-item>
+        <el-button type="primary" native-type="submit">查询</el-button>
+      </el-form-item>
+    </el-form>
+    <el-table v-loading="recharges.loading.value" :data="recharges.rows.value" border size="small" empty-text="这段时间没有加款记录">
+      <el-table-column prop="created_at" label="时间" width="170" />
+      <el-table-column label="金额（元）" width="120" align="right">
+        <template #default="{ row }"><span class="plus">+{{ row.amount }}</span></template>
+      </el-table-column>
+      <el-table-column prop="balance_after" label="加款后余额" width="120" align="right" />
+      <el-table-column label="备注" min-width="220">
+        <template #default="{ row }">{{ row.remark ?? '-' }}</template>
+      </el-table-column>
+      <el-table-column label="操作人" width="110">
+        <template #default="{ row }">{{ row.admin_name ?? (row.admin_user_id ? `#${row.admin_user_id}` : '系统') }}</template>
+      </el-table-column>
+    </el-table>
+    <el-pagination
+      v-model:current-page="recharges.page.value"
+      v-model:page-size="recharges.perPage.value"
+      class="pagination"
+      layout="total, prev, pager, next"
+      :total="recharges.total.value"
+      @current-change="recharges.load"
+    />
   </el-dialog>
 
   <!-- 商品与价格 -->
@@ -704,6 +769,10 @@ onMounted(async () => {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
+}
+
+.plus {
+  color: #67c23a;
 }
 
 .pagination {
