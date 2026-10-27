@@ -386,6 +386,7 @@ onMounted(async () => {
       </el-form-item>
       <el-form-item>
         <el-button type="primary" native-type="submit">查询</el-button>
+        <el-button @click="list.reset">重置</el-button>
         <el-button :icon="Download" :loading="exporting" @click="exportCsv">导出</el-button>
         <el-button v-if="canManage" type="primary" plain :disabled="selected.length === 0" @click="openNotify(selected, false)">
           批量手动回调{{ selected.length ? `（${selected.length}）` : '' }}

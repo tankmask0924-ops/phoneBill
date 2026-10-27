@@ -19,6 +19,8 @@ export interface PagedList<T, F> {
   load: () => Promise<void>
   /** 筛选条件变了：回到第一页再加载 */
   search: () => Promise<void>
+  /** 筛选条件恢复成打开页面时的样子，再回到第一页加载 */
+  reset: () => Promise<void>
 }
 
 /**
@@ -59,5 +61,10 @@ export function usePagedList<T, F extends object>(
     await load()
   }
 
-  return { rows, total, page, perPage, loading, filters, load, search }
+  async function reset() {
+    Object.assign(filters, initialFilters)
+    await search()
+  }
+
+  return { rows, total, page, perPage, loading, filters, load, search, reset }
 }
