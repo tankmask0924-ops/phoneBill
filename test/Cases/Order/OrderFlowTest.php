@@ -21,6 +21,7 @@ use App\Model\OrderAttempt;
 use App\Model\OrderNotifyLog;
 use App\Model\Product;
 use App\Model\Supplier;
+use App\Model\SystemSetting;
 use App\Network\HttpClient;
 use App\Security\OpenApiSigner;
 use App\Service\MerchantPortal\MerchantBatchOrderService;
@@ -30,11 +31,13 @@ use App\Service\Order\OrderDispatcher;
 use App\Service\Order\OrderProcessService;
 use App\Service\Order\OrderService;
 use App\Service\Product\CategoryMobileLimitService;
+use App\Service\Setting\OrderSettingService;
 use Hyperf\Context\ApplicationContext;
 use Hyperf\Contract\ApplicationInterface;
 use Hyperf\Di\Container;
 use Hyperf\Di\Definition\DefinitionSourceFactory;
 use Hyperf\Testing\Client;
+use HyperfTest\Cases\Admin\CreatesAdmins;
 use HyperfTest\Cases\Admin\CreatesCatalog;
 use HyperfTest\HttpTestCase;
 use HyperfTest\Support\FakeHttpClient;
@@ -53,7 +56,11 @@ use function Hyperf\Support\make;
  */
 class OrderFlowTest extends HttpTestCase
 {
+    use CreatesAdmins;
     use CreatesCatalog;
+
+    /** CreatesAdmins 建管理员用的密码 */
+    private const PASSWORD = 'correct-password';
 
     private FakeOrderDispatcher $dispatcher;
 
@@ -73,6 +80,7 @@ class OrderFlowTest extends HttpTestCase
     protected function tearDown(): void
     {
         $this->cleanUpCatalog();
+        $this->cleanUpAdmins();
         parent::tearDown();
     }
 
@@ -269,6 +277,42 @@ class OrderFlowTest extends HttpTestCase
         $done = Order::find($order->id);
         $this->assertSame([Order::STATUS_SUCCESS, '98.00'], [$done->status, $done->cost_price]);
         $this->assertSame([['order_id' => $order->id, 'attempt_no' => 1, 'delay' => 0]], $this->dispatcher->notifies);
+    }
+
+    public function testTimeoutMinutesComeFromSystemSetting()
+    {
+        $original = SystemSetting::where('key', OrderSettingService::KEY)->first()?->value;
+        try {
+            [$merchant, $product, $mobile] = $this->scenario([['provinces' => ['*'], 'operators' => ['cmcc'], 'cost' => '98.00', 'result' => 'processing']]);
+            $admin = $this->loginAs($this->createAdminWithPermissions(['setting.manage']));
+            foreach ([9, 4321, 'x', 1.5, null] as $bad) {
+                $this->assertSame(422, $this->jsonRequest('PUT', '/admin/settings/order', $admin, ['timeout_minutes' => $bad])->getStatusCode(), var_export($bad, true));
+            }
+            $before = make(OrderSettingService::class)->duplicateWindowMinutes();
+            $saved = $this->body($this->jsonRequest('PUT', '/admin/settings/order', $admin, ['timeout_minutes' => 30]));
+            $this->assertSame(['duplicate_window_minutes' => $before, 'timeout_minutes' => 30], $saved, '只改超时，拦截时间不动');
+
+            // 下单 40 分钟没结果：默认 120 分钟不会超时，设成 30 分钟后转超时
+            $order = $this->placeOrder($merchant, $product, $mobile);
+            $this->process()->submit($order->id);
+            Order::where('id', $order->id)->update(['created_at' => date('Y-m-d H:i:s', time() - 40 * 60)]);
+            $this->process()->markTimeout();
+            $this->assertSame(Order::STATUS_TIMEOUT, Order::find($order->id)->status);
+
+            // 改回 120 分钟：立即生效，40 分钟的单不再转
+            $this->jsonRequest('PUT', '/admin/settings/order', $admin, ['timeout_minutes' => 120]);
+            $other = $this->placeOrder($merchant, $product, $this->createSegment('cmcc', '广东'));
+            $this->process()->submit($other->id);
+            Order::where('id', $other->id)->update(['created_at' => date('Y-m-d H:i:s', time() - 40 * 60)]);
+            $this->process()->markTimeout();
+            $this->assertSame(Order::STATUS_PROCESSING, Order::find($other->id)->status);
+        } finally {
+            SystemSetting::where('key', OrderSettingService::KEY)->delete();
+            if ($original !== null) {
+                SystemSetting::create(['key' => OrderSettingService::KEY, 'value' => $original]);
+            }
+            make(OrderSettingService::class)->flush();
+        }
     }
 
     public function testUnsubmittedOrderTimesOutToAbnormal()
@@ -557,10 +601,5 @@ class OrderFlowTest extends HttpTestCase
     private function process(): OrderProcessService
     {
         return ApplicationContext::getContainer()->get(OrderProcessService::class);
-    }
-
-    private function body($response): array
-    {
-        return json_decode((string) $response->getBody(), true) ?? [];
     }
 }

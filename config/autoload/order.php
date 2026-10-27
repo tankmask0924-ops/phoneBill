@@ -17,7 +17,7 @@ use function Hyperf\Support\env;
 return [
     // 同一手机号、同一面值，多少分钟内只允许一笔进行中的订单；后台「系统配置 - 下单设置」改过以后以后台为准，0 表示不拦截
     'duplicate_window_minutes' => (int) env('ORDER_DUPLICATE_WINDOW_MINUTES', 10),
-    // 下单后多少分钟仍没有结果，转为异常订单人工处理
+    // 订单超时时间：下单后多少分钟仍没有结果，已提交的转超时、没提交出去的转异常；后台「系统配置 - 下单设置」改过以后以后台为准
     'abnormal_after_minutes' => (int) env('ORDER_ABNORMAL_AFTER_MINUTES', 120),
     // 提交给供应商多少分钟后还没结果，开始主动查单
     'query_after_minutes' => 5,

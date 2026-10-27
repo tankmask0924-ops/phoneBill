@@ -20,6 +20,7 @@ use App\Model\OrderAttempt;
 use App\Service\AbstractService;
 use App\Service\Merchant\MerchantBalanceService;
 use App\Service\Product\ProductRouteService;
+use App\Service\Setting\OrderSettingService;
 use App\Service\Supplier\SupplierGateway;
 use App\Supplier\RechargeResult;
 use App\Supplier\RechargeStatus;
@@ -64,6 +65,9 @@ class OrderProcessService extends AbstractService
 
     #[Inject]
     protected ConfigInterface $config;
+
+    #[Inject]
+    protected OrderSettingService $orderSettingService;
 
     #[Inject]
     protected LoggerFactory $loggerFactory;
@@ -431,7 +435,7 @@ class OrderProcessService extends AbstractService
     }
 
     /**
-     * 定时任务：下单后超过时限还没结果的订单。
+     * 定时任务：下单后超过超时时间（后台下单设置，见 OrderSettingService::timeoutMinutes()）还没结果的订单。
      * - 已提交（处理中）的转为超时：照常查单、收回调，上游成功就改成功，失败就直接退款，都通知商户；
      * - 一直没提交出去（等待中）的不会有回调，转为异常订单，等人工处理（不自动退款）。
      *
@@ -439,7 +443,7 @@ class OrderProcessService extends AbstractService
      */
     public function markTimeout(int $limit = 500): int
     {
-        $minutes = (int) $this->config->get('order.abnormal_after_minutes', 120);
+        $minutes = $this->orderSettingService->timeoutMinutes();
         $rows = $this->orderDao->newQuery()
             ->whereIn('status', [Order::STATUS_PENDING, Order::STATUS_PROCESSING])
             ->where('created_at', '<=', date('Y-m-d H:i:s', time() - $minutes * 60))

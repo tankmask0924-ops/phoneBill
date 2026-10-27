@@ -212,6 +212,13 @@ export interface StorageSetting {
   path_prefix: string
 }
 
+export interface OrderSetting {
+  /** 同一号码同一面值在这么多分钟内有进行中的订单就拒绝下单，0 表示不拦截 */
+  duplicate_window_minutes: number
+  /** 下单后这么多分钟还没结果：已提交的转超时，没提交出去的转异常 */
+  timeout_minutes: number
+}
+
 export const settingApi = {
   /** 不用登录：系统名称（空字符串表示用默认名称） */
   publicInfo: () => http.get<{ site_name: string }>('/admin/settings/public'),
@@ -225,8 +232,7 @@ export const settingApi = {
   /** 回调域名：供应商回调地址 = 回调域名 + /notify/supplier/{供应商编码} */
   notify: () => http.get<{ base_url: string }>('/admin/settings/notify'),
   saveNotify: (baseUrl: string) => http.put<{ base_url: string }>('/admin/settings/notify', { base_url: baseUrl }),
-  /** 下单设置：同一号码同一面值在这么多分钟内有进行中的订单就拒绝下单，0 表示不拦截 */
-  order: () => http.get<{ duplicate_window_minutes: number }>('/admin/settings/order'),
-  saveOrder: (minutes: number) =>
-    http.put<{ duplicate_window_minutes: number }>('/admin/settings/order', { duplicate_window_minutes: minutes }),
+  /** 下单设置 */
+  order: () => http.get<OrderSetting>('/admin/settings/order'),
+  saveOrder: (data: OrderSetting) => http.put<OrderSetting>('/admin/settings/order', data),
 }

@@ -187,13 +187,14 @@ class MerchantBatchOrderTest extends HttpTestCase
 
             // 后台没设置过：用环境变量的默认值
             $default = (int) make(ConfigInterface::class)->get('order.duplicate_window_minutes');
-            $this->assertSame(['duplicate_window_minutes' => $default], $this->body($this->jsonRequest('GET', '/admin/settings/order', $admin)));
+            $timeout = (int) make(ConfigInterface::class)->get('order.abnormal_after_minutes');
+            $this->assertSame(['duplicate_window_minutes' => $default, 'timeout_minutes' => $timeout], $this->body($this->jsonRequest('GET', '/admin/settings/order', $admin)));
             foreach ([-1, 1441, 'x', 1.5, null] as $bad) {
                 $this->assertSame(422, $this->jsonRequest('PUT', '/admin/settings/order', $admin, ['duplicate_window_minutes' => $bad])->getStatusCode(), var_export($bad, true));
             }
 
             // 设成 0：不拦截，同号码同面值连着下两单都成功
-            $this->assertSame(['duplicate_window_minutes' => 0], $this->body($this->jsonRequest('PUT', '/admin/settings/order', $admin, ['duplicate_window_minutes' => 0])));
+            $this->assertSame(['duplicate_window_minutes' => 0, 'timeout_minutes' => $timeout], $this->body($this->jsonRequest('PUT', '/admin/settings/order', $admin, ['duplicate_window_minutes' => 0])), '只改传了的项');
             $this->assertTrue($submit()['ok']);
             $this->assertTrue($preview()['ok'], '预览也不再标出来');
             $this->assertTrue($submit()['ok']);

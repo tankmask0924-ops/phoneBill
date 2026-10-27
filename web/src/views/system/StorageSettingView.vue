@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { onMounted, reactive, ref } from 'vue'
-import { settingApi } from '@/api/funding'
+import { settingApi, type OrderSetting } from '@/api/funding'
 import AlipayAccountCard from './AlipayAccountCard.vue'
 import { useSiteStore } from '@/stores/site'
 
@@ -37,14 +37,14 @@ async function saveNotify() {
 }
 
 // ---- 下单设置 ----
-const duplicateWindow = ref(10)
+const orderSetting = reactive<OrderSetting>({ duplicate_window_minutes: 10, timeout_minutes: 120 })
 const orderSaving = ref(false)
 
 async function saveOrder() {
   orderSaving.value = true
   try {
-    duplicateWindow.value = (await settingApi.saveOrder(duplicateWindow.value)).duplicate_window_minutes
-    ElMessage.success(duplicateWindow.value === 0 ? '已保存，不再拦截重复充值' : '已保存，新下的订单立即生效')
+    Object.assign(orderSetting, await settingApi.saveOrder({ ...orderSetting }))
+    ElMessage.success('已保存，立即生效')
   } finally {
     orderSaving.value = false
   }
@@ -112,7 +112,7 @@ onMounted(async () => {
   load()
   settingApi.site().then((s) => (siteName.value = s.name))
   notifyBase.value = (await settingApi.notify()).base_url
-  duplicateWindow.value = (await settingApi.order()).duplicate_window_minutes
+  Object.assign(orderSetting, await settingApi.order())
 })
 </script>
 
@@ -147,11 +147,33 @@ onMounted(async () => {
   <el-card shadow="never" header="下单设置" class="block">
     <el-form label-width="110px" style="max-width: 560px" @submit.prevent="saveOrder">
       <el-form-item label="重复充值拦截">
-        <el-input-number v-model="duplicateWindow" :min="0" :max="1440" :step="1" step-strictly controls-position="right" />
+        <el-input-number
+          v-model="orderSetting.duplicate_window_minutes"
+          :min="0"
+          :max="1440"
+          :step="1"
+          step-strictly
+          controls-position="right"
+        />
         <span class="unit">分钟</span>
         <div class="tip">
           同一号码、同一面值在这段时间内还有充值中的订单时，新的下单直接拒绝（「该号码 N 分钟内有正在处理的同面值订单」），
           批量下单预览里也会标出来。填 0 表示不拦截。
+        </div>
+      </el-form-item>
+      <el-form-item label="订单超时">
+        <el-input-number
+          v-model="orderSetting.timeout_minutes"
+          :min="10"
+          :max="4320"
+          :step="10"
+          step-strictly
+          controls-position="right"
+        />
+        <span class="unit">分钟</span>
+        <div class="tip">
+          从下单时间算起，超过这么久还没出结果：已提交给供应商的转为「超时」，照常查单、收回调，上游成功就改成功，失败就直接退款（不再换供应商）；
+          一直没提交出去的转为「异常」，等人工处理。10 ~ 4320 分钟（3 天）。
         </div>
       </el-form-item>
       <el-form-item>
