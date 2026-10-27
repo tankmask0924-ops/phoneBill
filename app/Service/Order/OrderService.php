@@ -30,6 +30,7 @@ use App\Support\RedisLock;
 use Hyperf\Database\Exception\QueryException;
 use Hyperf\DbConnection\Db;
 use Hyperf\Di\Annotation\Inject;
+use Hyperf\Logger\LoggerFactory;
 
 /**
  * 商户下单（docs/project.md 3.1）：校验 → 识别号码 → 定价 → 选路预检 → 扣款建单 → 推进队列。
@@ -74,6 +75,9 @@ class OrderService extends AbstractService
     #[Inject]
     protected CategoryMobileLimitService $categoryLimitService;
 
+    #[Inject]
+    protected LoggerFactory $loggerFactory;
+
     /**
      * @param array<string, mixed> $params product_code / mobile / merchant_order_no / notify_url（可选）
      */
@@ -93,7 +97,7 @@ class OrderService extends AbstractService
         if ($notifyUrl !== '' && (mb_strlen($notifyUrl) > 500 || filter_var($notifyUrl, FILTER_VALIDATE_URL) === false || ! preg_match('#^https?://#i', $notifyUrl))) {
             throw new OpenApiException(OpenApiException::INVALID_PARAMS, 'notify_url 必须是 http:// 或 https:// 开头的网址');
         }
-        ['quote' => $quote, 'operator' => $operator, 'province' => $province, 'price' => $price] = $this->check($merchant, $this->string($params, 'product_code'), $mobile);
+        ['quote' => $quote, 'operator' => $operator, 'segment_operator' => $segmentOperator, 'province' => $province, 'price' => $price] = $this->check($merchant, $this->string($params, 'product_code'), $mobile);
 
         // 商品分类的号码限制：同一号码同一分类串行处理，防止并发请求同时通过检查
         $categoryId = $quote['category_id'] ?? null;
@@ -159,6 +163,14 @@ class OrderService extends AbstractService
             }
         }
 
+        if ($order->operator !== $segmentOperator) {
+            // 号段和商品的运营商不一致，按商品下单：可能是携号转网，也可能是商户下错了，记下来方便排查
+            $this->loggerFactory->get('order')->info('号段运营商和商品不一致，按商品的运营商下单', [
+                'order_no' => $order->order_no,
+                'segment_operator' => $segmentOperator,
+                'operator' => $order->operator,
+            ]);
+        }
         $this->dispatcher->submit($order->id);
 
         return $order;
@@ -167,8 +179,9 @@ class OrderService extends AbstractService
     /**
      * 下单前的检查（不含重复充值和余额）：手机号、商品、黑名单、号段、价格、可用通道。
      * 开放接口下单和商户后台批量下单的预览共用，不通过时抛 OpenApiException。
+     * operator 是下单用的运营商，可能和号段识别的 segment_operator 不同（见 orderOperator()）。
      *
-     * @return array{quote: array<string, mixed>, operator: string, province: string, price: string}
+     * @return array{quote: array<string, mixed>, operator: string, segment_operator: string, province: string, price: string}
      */
     public function check(Merchant $merchant, string $productCode, string $mobile): array
     {
@@ -186,41 +199,22 @@ class OrderService extends AbstractService
         if ($segment === null || $segment->is_virtual) {
             throw new OpenApiException(OpenApiException::UNSUPPORTED_MOBILE, $segment === null ? '无法识别该号码的运营商' : '暂不支持虚拟运营商号码');
         }
-        $price = $quote['prices'][$segment->operator] ?? null;
-        if ($price === null) {
+        $operator = self::orderOperator($segment->operator, $quote['prices']);
+        if ($operator === null) {
             throw new OpenApiException(OpenApiException::PRICE_NOT_SET, '该商品暂不支持这个号码的运营商');
         }
         $productId = $quote['product_id'];
-        if (($this->productRouteService->candidates([$productId], $segment->operator, $segment->province)[$productId] ?? []) === []) {
+        if (($this->productRouteService->candidates([$productId], $operator, $segment->province)[$productId] ?? []) === []) {
             throw new OpenApiException(OpenApiException::NO_CHANNEL, '该号码所在地区暂时无法充值');
         }
 
-        return ['quote' => $quote, 'operator' => $segment->operator, 'province' => $segment->province, 'price' => (string) $price];
-    }
-
-    /**
-     * 商品分类的号码限制（docs/project.md 4.4），所有商户合计：
-     * - 同时充值中（没出结果的）的单数不超过 processing；
-     * - 周期（自然日，1 表示当天 0 点起）内下的单（所有状态都算）不超过 orders。
-     *
-     * @param array{days: int, orders: int, processing: int} $limits
-     */
-    private function checkMobileLimit(string $mobile, int $categoryId, array $limits): void
-    {
-        if ($limits['processing'] > 0) {
-            $count = $this->orderDao->countForMobileInCategory($mobile, $categoryId, null, self::IN_PROGRESS);
-            if ($count >= $limits['processing']) {
-                throw new OpenApiException(OpenApiException::MOBILE_LIMITED, "该号码已有 {$count} 笔订单在充值中，请等出结果后再充");
-            }
-        }
-        if ($limits['days'] > 0 && $limits['orders'] > 0) {
-            $since = date('Y-m-d 00:00:00', strtotime('-' . ($limits['days'] - 1) . ' days'));
-            $count = $this->orderDao->countForMobileInCategory($mobile, $categoryId, $since, null);
-            if ($count >= $limits['orders']) {
-                $period = $limits['days'] === 1 ? '今天' : "近 {$limits['days']} 天";
-                throw new OpenApiException(OpenApiException::MOBILE_LIMITED, "该号码{$period}已充值 {$count} 单，达到上限");
-            }
-        }
+        return [
+            'quote' => $quote,
+            'operator' => $operator,
+            'segment_operator' => $segment->operator,
+            'province' => $segment->province,
+            'price' => (string) $quote['prices'][$operator],
+        ];
     }
 
     /**
@@ -261,6 +255,46 @@ class OrderService extends AbstractService
             'created_at' => $order->created_at?->toDateTimeString(),
             'finished_at' => $order->resultVisibleToMerchant() ? $order->finished_at?->toDateTimeString() : null,
         ];
+    }
+
+    /**
+     * 按哪个运营商下单（docs/project.md 2.3）：商品有号段运营商的价格就按号段；没有、而商品只设了一个运营商的价格，
+     * 就按商品的运营商（号段库认不出携号转网，以商户选的商品为准，号码实际不是这个运营商会充值失败退款）；都不满足返回 null。
+     *
+     * @param array<string, mixed> $prices 运营商 => 价格
+     */
+    private static function orderOperator(string $segmentOperator, array $prices): ?string
+    {
+        if (isset($prices[$segmentOperator])) {
+            return $segmentOperator;
+        }
+
+        return count($prices) === 1 ? (string) array_key_first($prices) : null;
+    }
+
+    /**
+     * 商品分类的号码限制（docs/project.md 4.4），所有商户合计：
+     * - 同时充值中（没出结果的）的单数不超过 processing；
+     * - 周期（自然日，1 表示当天 0 点起）内下的单（所有状态都算）不超过 orders。
+     *
+     * @param array{days: int, orders: int, processing: int} $limits
+     */
+    private function checkMobileLimit(string $mobile, int $categoryId, array $limits): void
+    {
+        if ($limits['processing'] > 0) {
+            $count = $this->orderDao->countForMobileInCategory($mobile, $categoryId, null, self::IN_PROGRESS);
+            if ($count >= $limits['processing']) {
+                throw new OpenApiException(OpenApiException::MOBILE_LIMITED, "该号码已有 {$count} 笔订单在充值中，请等出结果后再充");
+            }
+        }
+        if ($limits['days'] > 0 && $limits['orders'] > 0) {
+            $since = date('Y-m-d 00:00:00', strtotime('-' . ($limits['days'] - 1) . ' days'));
+            $count = $this->orderDao->countForMobileInCategory($mobile, $categoryId, $since, null);
+            if ($count >= $limits['orders']) {
+                $period = $limits['days'] === 1 ? '今天' : "近 {$limits['days']} 天";
+                throw new OpenApiException(OpenApiException::MOBILE_LIMITED, "该号码{$period}已充值 {$count} 单，达到上限");
+            }
+        }
     }
 
     /**

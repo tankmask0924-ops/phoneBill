@@ -23,6 +23,7 @@ use App\Model\Product;
 use App\Model\Supplier;
 use App\Network\HttpClient;
 use App\Security\OpenApiSigner;
+use App\Service\MerchantPortal\MerchantBatchOrderService;
 use App\Service\MerchantPortal\MerchantPortalService;
 use App\Service\Order\MerchantNotifyService;
 use App\Service\Order\OrderDispatcher;
@@ -356,13 +357,16 @@ class OrderFlowTest extends HttpTestCase
         } while (MobileSegment::where('segment', substr($unknown, 0, 7))->exists());
         $poor = $this->createMerchant('10.00');
         $this->openProduct($poor, $product, ['cmcc' => '99.50']);
+        // 商品设了多个运营商的价格、都不是号段运营商：猜不出按哪个，拒绝
+        $multi = $this->createMerchant('200.00');
+        $this->openProduct($multi, $product, ['cmcc' => '99.50', 'cucc' => '99.60']);
 
         $cases = [
             'INVALID_PARAMS' => [$merchant, ['product_code' => $product->code, 'mobile' => '138', 'merchant_order_no' => 'R1']],
             'PRODUCT_NOT_AVAILABLE' => [$merchant, ['product_code' => 'NO_SUCH', 'mobile' => $mobile, 'merchant_order_no' => 'R2']],
             'BLACKLISTED' => [$merchant, ['product_code' => $product->code, 'mobile' => $blocked, 'merchant_order_no' => 'R3']],
             'UNSUPPORTED_MOBILE' => [$merchant, ['product_code' => $product->code, 'mobile' => $this->createSegment('cmcc', '广东', true), 'merchant_order_no' => 'R4']],
-            'PRICE_NOT_SET' => [$merchant, ['product_code' => $product->code, 'mobile' => $this->createSegment('ctcc', '广东'), 'merchant_order_no' => 'R5']],
+            'PRICE_NOT_SET' => [$multi, ['product_code' => $product->code, 'mobile' => $this->createSegment('ctcc', '广东'), 'merchant_order_no' => 'R5']],
             'NO_CHANNEL' => [$merchant, ['product_code' => $product->code, 'mobile' => $this->createSegment('cmcc', '湖南'), 'merchant_order_no' => 'R6']],
             'INSUFFICIENT_BALANCE' => [$poor, ['product_code' => $product->code, 'mobile' => $mobile, 'merchant_order_no' => 'R7']],
         ];
@@ -377,8 +381,43 @@ class OrderFlowTest extends HttpTestCase
 
         $this->assertSame(1, Order::where('merchant_id', $merchant->id)->count());
         $this->assertSame(0, Order::where('merchant_id', $poor->id)->count());
+        $this->assertSame(0, Order::where('merchant_id', $multi->id)->count());
         $this->assertSame('100.50', Merchant::find($merchant->id)->balance);
         $this->assertSame('10.00', Merchant::find($poor->id)->balance);
+    }
+
+    public function testOrderFollowsProductOperatorWhenSegmentDiffers()
+    {
+        [$merchant, $product, , [$cmccSupplier]] = $this->scenario([
+            ['provinces' => ['*'], 'operators' => ['cmcc'], 'cost' => '98.80'],
+            ['provinces' => ['*'], 'operators' => ['ctcc'], 'cost' => '98.00'],
+        ]);
+
+        // 号段是电信、商品只开了移动价（比如携号转网）：不拦截，按移动下单、扣移动价、只走移动通道
+        $order = $this->placeOrder($merchant, $product, $this->createSegment('ctcc', '广东'));
+        $this->assertSame('cmcc', $order->operator);
+        $this->assertSame('广东', $order->province);
+        $this->assertSame('99.50', $order->sale_price);
+        $this->assertSame('100.50', Merchant::find($merchant->id)->balance);
+        $this->process()->submit($order->id);
+        $order = Order::find($order->id);
+        $this->assertSame(Order::STATUS_SUCCESS, $order->status);
+        $this->assertSame($cmccSupplier->id, $order->supplier_id);
+
+        // 号码其实不是移动：移动通道都失败就退款，不会换到电信通道
+        $this->setMockResult($cmccSupplier, 'failed');
+        $wrong = $this->placeOrder($merchant, $product, $this->createSegment('ctcc', '广东'));
+        $this->process()->submit($wrong->id);
+        $this->assertSame(Order::STATUS_FAILED, Order::find($wrong->id)->status);
+        $this->assertSame([$cmccSupplier->id], OrderAttempt::where('order_id', $wrong->id)->pluck('supplier_id')->all());
+        $this->assertSame('100.50', Merchant::find($merchant->id)->balance);
+
+        // 批量下单预览：运营商按商品，另外带上号段运营商给页面提示
+        $item = make(MerchantBatchOrderService::class)->preview($merchant, ['product_code' => $product->code, 'mobiles' => [$this->createSegment('ctcc', '广东')]])['items'][0];
+        $this->assertTrue($item['ok'], (string) $item['error']);
+        $this->assertSame('cmcc', $item['operator']);
+        $this->assertSame('ctcc', $item['segment_operator']);
+        $this->assertSame('99.50', $item['price']);
     }
 
     public function testCreditLimitAllowsNegativeBalance()

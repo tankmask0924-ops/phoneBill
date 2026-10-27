@@ -58,7 +58,7 @@ class MerchantBatchOrderService extends AbstractService
         $seen = [];
         $faceValue = null;
         foreach ($mobiles as $mobile) {
-            $item = ['mobile' => $mobile, 'ok' => false, 'operator' => null, 'province' => null, 'price' => null, 'error' => null];
+            $item = ['mobile' => $mobile, 'ok' => false, 'operator' => null, 'segment_operator' => null, 'province' => null, 'price' => null, 'error' => null];
             if (isset($seen[$mobile])) {
                 // 同一号码同一面值同时只能有一笔进行中的订单，同一批里重复的号码提交时一定会被拒
                 $items[] = array_replace($item, ['error' => '号码重复（同一批里出现多次），同一号码同一面值同时只能有一笔订单']);
@@ -73,7 +73,7 @@ class MerchantBatchOrderService extends AbstractService
 
                 continue;
             }
-            $items[] = array_replace($item, ['ok' => true, 'operator' => $checked['operator'], 'province' => $checked['province'], 'price' => $checked['price']]);
+            $items[] = array_replace($item, ['ok' => true, 'operator' => $checked['operator'], 'segment_operator' => $checked['segment_operator'], 'province' => $checked['province'], 'price' => $checked['price']]);
             $faceValue = (int) $checked['quote']['face_value'];
         }
 

@@ -67,23 +67,24 @@ class MerchantBatchOrderTest extends HttpTestCase
     {
         [$merchant, $product, $mobile] = $this->scenario('300.00');
         $token = $this->login($merchant);
-        $unpriced = $this->createSegment('ctcc', '广东');
+        // 号段是电信、商品只开了移动价：按商品的运营商可以下单（docs/project.md 2.3）
+        $ported = $this->createSegment('ctcc', '广东');
         $virtual = $this->createSegment('cmcc', '广东', true);
 
         $result = $this->body($this->jsonRequest('POST', '/merchant/batch-orders/preview', $token, [
             'product_code' => $product->code,
-            'mobiles' => [" {$mobile} ", '', $mobile, '123', $unpriced, $virtual],
+            'mobiles' => [" {$mobile} ", '', $mobile, '123', $ported, $virtual],
         ]));
 
-        $this->assertSame([$mobile, $mobile, '123', $unpriced, $virtual], array_column($result['items'], 'mobile'), '去掉空白和空行，保留顺序');
-        $this->assertSame([true, false, false, false, false], array_column($result['items'], 'ok'));
-        $this->assertSame(['mobile' => $mobile, 'ok' => true, 'operator' => 'cmcc', 'province' => '广东', 'price' => '99.50', 'error' => null], $result['items'][0]);
+        $this->assertSame([$mobile, $mobile, '123', $ported, $virtual], array_column($result['items'], 'mobile'), '去掉空白和空行，保留顺序');
+        $this->assertSame([true, false, false, true, false], array_column($result['items'], 'ok'));
+        $this->assertSame(['mobile' => $mobile, 'ok' => true, 'operator' => 'cmcc', 'segment_operator' => 'cmcc', 'province' => '广东', 'price' => '99.50', 'error' => null], $result['items'][0]);
         $this->assertStringContainsString('号码重复', $result['items'][1]['error']);
         $this->assertSame('手机号格式不对，要 11 位手机号', $result['items'][2]['error']);
-        $this->assertStringContainsString('运营商', $result['items'][3]['error']);
+        $this->assertSame(['mobile' => $ported, 'ok' => true, 'operator' => 'cmcc', 'segment_operator' => 'ctcc', 'province' => '广东', 'price' => '99.50', 'error' => null], $result['items'][3]);
         $this->assertStringContainsString('虚拟运营商', $result['items'][4]['error']);
-        $this->assertSame(1, $result['valid_count']);
-        $this->assertSame('99.50', $result['total_amount']);
+        $this->assertSame(2, $result['valid_count']);
+        $this->assertSame('199.00', $result['total_amount']);
         $this->assertSame('300.00', $result['balance']);
 
         // 预览不建单、不扣款

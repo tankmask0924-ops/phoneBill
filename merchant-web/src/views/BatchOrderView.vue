@@ -173,7 +173,12 @@ onMounted(async () => {
         </el-table-column>
         <el-table-column label="检查结果" min-width="220">
           <template #default="{ row }">
-            <el-tag v-if="row.ok" type="success" disable-transitions>可下单</el-tag>
+            <template v-if="row.ok">
+              <el-tag type="success" disable-transitions>可下单</el-tag>
+              <span v-if="row.segment_operator && row.segment_operator !== row.operator" class="warning">
+                号段为{{ labelOf(operatorLabels, row.segment_operator) }}，按{{ labelOf(operatorLabels, row.operator) }}充值，号码不是{{ labelOf(operatorLabels, row.operator) }}会失败退款
+              </span>
+            </template>
             <span v-else class="error">{{ row.error }}</span>
           </template>
         </el-table-column>
@@ -259,6 +264,12 @@ onMounted(async () => {
 
 .error {
   color: #f56c6c;
+}
+
+.warning {
+  margin-left: 8px;
+  color: #e6a23c;
+  font-size: 12px;
 }
 
 .muted {

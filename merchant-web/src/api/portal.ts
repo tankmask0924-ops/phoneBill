@@ -231,7 +231,10 @@ export const onlinePaymentApi = {
 export interface BatchPreviewItem {
   mobile: string
   ok: boolean
+  /** 下单用的运营商：号段运营商和商品不一致时按商品的 */
   operator: string | null
+  /** 号段识别的运营商 */
+  segment_operator: string | null
   province: string | null
   price: string | null
   /** 不能下单的原因 */

@@ -146,7 +146,7 @@ public static String sign(Map<String, Object> params, String secret) throws Exce
 | `DUPLICATE_NONCE` | nonce 重复或超过 64 位 | 每次请求换一个 nonce |
 | `PRODUCT_NOT_AVAILABLE` | 商品不存在、已下架或没有为你开通 | 用「查商品」确认商品编码 |
 | `UNSUPPORTED_MOBILE` | 无法识别号码运营商，或是虚拟运营商号码 | 不支持该号码 |
-| `PRICE_NOT_SET` | 该商品不支持这个号码的运营商 | 看「查商品」里的 `prices` |
+| `PRICE_NOT_SET` | 商品设了多个运营商的价格，但没有这个号码的运营商（只设了一个运营商价格的商品不会报这个，见 3.1） | 看「查商品」里的 `prices` |
 | `NO_CHANNEL` | 该号码所在地区暂时无法充值 | 稍后再试 |
 | `BLACKLISTED` | 号码暂不支持充值 | |
 | `DUPLICATE_RECHARGE` | 该号码 10 分钟内有正在处理的同面值订单 | 等上一单出结果 |
@@ -178,6 +178,8 @@ public static String sign(Map<String, Object> params, String secret) throws Exce
 | `mobile` | 是 | 11 位手机号 |
 | `merchant_order_no` | 是 | 你的订单号，1~64 位字母、数字、`_` 或 `-`，**在你的商户内唯一** |
 | `notify_url` | 否 | 本单的结果通知地址，`http://` 或 `https://` 开头，最长 500 位；不传用平台配置的 |
+
+**运营商**：平台按号段识别号码的运营商和地区。商品只设了一个运营商的价格时，号码识别出来的运营商和商品不一致也照常下单，**按商品的运营商充值和扣款**（比如携号转网的号码，选对应运营商的商品即可）；号码实际不是这个运营商的会充值失败并退款。
 
 请求示例：
 
@@ -258,7 +260,7 @@ GET {BASE}/open/v1/order?app_key=ak_demo&merchant_order_no=M20261010001&timestam
 
 ### 3.4 查商品
 
-`GET {BASE}/open/v1/products`，只需要公共参数。返回为你开通的商品，`prices` 是各运营商的价格，**`prices` 里没有的运营商不能下单**：
+`GET {BASE}/open/v1/products`，只需要公共参数。返回为你开通的商品，`prices` 是各运营商的价格。`prices` 只有一个运营商时按它下单（见 3.1）；有多个运营商时，**`prices` 里没有的运营商不能下单**：
 
 ```json
 {
