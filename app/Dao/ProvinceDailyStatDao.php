@@ -67,4 +67,24 @@ class ProvinceDailyStatDao extends AbstractDao
             ->get()
             ->all();
     }
+
+    /**
+     * $date 之前（不含）所有日子的合计，首页累计用。
+     *
+     * @return array{order_count: int, success_amount: string, profit: string}
+     */
+    public function totalsBefore(string $date): array
+    {
+        $row = $this->newQuery()
+            ->where('stat_date', '<', $date)
+            ->selectRaw('coalesce(sum(order_count), 0) as order_count, coalesce(sum(success_amount), 0) as success_amount, coalesce(sum(profit), 0) as profit')
+            ->toBase()
+            ->first();
+
+        return [
+            'order_count' => (int) $row->order_count,
+            'success_amount' => bcadd((string) $row->success_amount, '0', 2),
+            'profit' => bcadd((string) $row->profit, '0', 2),
+        ];
+    }
 }

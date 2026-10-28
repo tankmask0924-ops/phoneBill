@@ -136,7 +136,7 @@ onMounted(async () => {
     <div class="actions">
       <el-button @click="load(); loadOrderTodos(); canViewTodos && loadTodos()">刷新</el-button>
       <router-link to="/order/orders"><el-button type="primary" plain>查看订单</el-button></router-link>
-      <span class="tip">销售额、利润只算成功的订单；累计数据每分钟更新一次</span>
+      <span class="tip">销售额、利润只算成功的订单；今日数据实时，累计 = 昨天及以前的整点统计 + 今日</span>
     </div>
   </div>
 

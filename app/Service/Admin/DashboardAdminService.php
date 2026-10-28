@@ -32,6 +32,7 @@ use Hyperf\HttpMessage\Exception\HttpException;
 
 /**
  * 管理后台首页汇总：全部订单的累计数据 + 今天的数据。销售额、利润只算成功的订单，按下单时间归属日期。
+ * 累计 = 昨天及以前的省份统计（每小时整点重算当天，0～3 点补算前一天）+ 今天实时查的，不扫全部订单。
  * 另外有待办数量（待审核的付款账号、加款申请），实时查，不缓存。
  * 经营统计按日期范围汇总省份统计、省份商品统计两张日表（每小时整点重算当天），不扫订单表。
  */
@@ -98,9 +99,15 @@ class DashboardAdminService extends AbstractService
     public function summary(): array
     {
         $today = $this->orderDao->aggregate(date('Y-m-d 00:00:00'));
+        $history = $this->historyTotals(date('Y-m-d'));
 
         return [
-            'total' => $this->totals(),
+            'total' => [
+                'sales' => bcadd($history['success_amount'], $today['sales'], 2),
+                'merchant_count' => $this->merchantDao->newQuery()->count(),
+                'order_count' => $history['order_count'] + $today['order_count'],
+                'profit' => bcadd($history['profit'], $today['profit'], 2),
+            ],
             'today' => [
                 'order_count' => $today['order_count'],
                 'success_count' => $today['success_count'],
@@ -182,21 +189,15 @@ class DashboardAdminService extends AbstractService
     }
 
     /**
-     * 累计数据要扫全部订单，缓存 1 分钟。
+     * $today 之前的累计，来自省份统计。历史数据只在整点重算时变，缓存 1 分钟；
+     * 缓存键带上日期，过了零点自然换成新的一份。
      *
-     * @return array{sales: string, merchant_count: int, order_count: int, profit: string}
+     * @return array{order_count: int, success_amount: string, profit: string}
      */
-    #[Cacheable(prefix: 'admin_dashboard', value: 'totals', ttl: 60)]
-    public function totals(): array
+    #[Cacheable(prefix: 'admin_dashboard', value: 'history:#{today}', ttl: 60)]
+    public function historyTotals(string $today): array
     {
-        $all = $this->orderDao->aggregate();
-
-        return [
-            'sales' => $all['sales'],
-            'merchant_count' => $this->merchantDao->newQuery()->count(),
-            'order_count' => $all['order_count'],
-            'profit' => $all['profit'],
-        ];
+        return $this->provinceStatDao->totalsBefore($today);
     }
 
     /**

@@ -24,6 +24,7 @@ use Hyperf\Testing\Client;
 use HyperfTest\HttpTestCase;
 use HyperfTest\Support\FakeHttpClient;
 use HyperfTest\Support\FakeOrderDispatcher;
+use Psr\SimpleCache\CacheInterface;
 
 use function Hyperf\Support\make;
 
@@ -138,6 +139,27 @@ class DashboardStatsTest extends HttpTestCase
         $this->assertSame(200, $this->jsonRequest('GET', '/admin/dashboard/stats?date_from=2001-01-01&date_to=2001-04-02', $token)->getStatusCode(), '正好 92 天');
 
         $this->assertSame(403, $this->jsonRequest('GET', '/admin/dashboard/stats', $this->loginAs($this->createAdminWithPermissions(['product.view'])))->getStatusCode());
+    }
+
+    public function testDashboardTotalsAddHistoryStatsToToday()
+    {
+        $token = $this->loginAs($this->createAdminWithPermissions(['order.view']));
+        $this->forgetHistoryCache();
+        $before = $this->body($this->jsonRequest('GET', '/admin/dashboard', $token))['total'];
+
+        $this->provinceRow('2001-04-01', '广东', 'cmcc', 0, 4, 3, 1, '300.00', '4.50');
+        $this->forgetHistoryCache();
+        $after = $this->body($this->jsonRequest('GET', '/admin/dashboard', $token));
+
+        $this->assertSame($before['order_count'] + 4, $after['total']['order_count'], '历史取自省份统计');
+        $this->assertSame(bcadd($before['sales'], '300.00', 2), $after['total']['sales']);
+        $this->assertSame(bcadd($before['profit'], '4.50', 2), $after['total']['profit']);
+        $this->assertGreaterThanOrEqual($after['today']['order_count'], $after['total']['order_count'], '累计含今天实时的');
+    }
+
+    private function forgetHistoryCache(): void
+    {
+        ApplicationContext::getContainer()->get(CacheInterface::class)->delete('admin_dashboard:history:' . date('Y-m-d'));
     }
 
     private function provinceRow(string $date, string $province, string $operator, int $supplierId, int $orders, int $success, int $failed, string $amount, string $profit): void
