@@ -293,6 +293,32 @@ export const provinceStatsApi = {
   get: (params: Query) => http.get<ProvinceStatsResult>('/admin/product-stats/provinces', params),
 }
 
+/** 省份商品统计：GET /admin/product-stats/province-products，跟省份统计一起每小时整点重算当天 */
+export interface ProvinceProductItemStat extends ProvinceStatTotals {
+  product_id: number
+  /** 商品不存在了为 null */
+  product_code: string | null
+  product_name: string | null
+  face_value: number | null
+}
+
+export interface ProvinceProductStat extends ProvinceStatTotals {
+  province: string
+  products: ProvinceProductItemStat[]
+}
+
+export interface ProvinceProductStatsResult {
+  stat_date: string
+  /** 这一天最近一次统计的时间，还没统计过为 null */
+  computed_at: string | null
+  summary: ProvinceStatTotals
+  provinces: ProvinceProductStat[]
+}
+
+export const provinceProductStatsApi = {
+  get: (params: Query) => http.get<ProvinceProductStatsResult>('/admin/product-stats/province-products', params),
+}
+
 /** 号段查询：App\Controller\Admin\SegmentController */
 export interface RouteCandidate {
   supplier_product_id: number

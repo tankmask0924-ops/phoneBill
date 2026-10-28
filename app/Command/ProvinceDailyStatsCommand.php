@@ -12,6 +12,7 @@ declare(strict_types=1);
 
 namespace App\Command;
 
+use App\Service\Product\ProvinceProductStatsService;
 use App\Service\Product\ProvinceStatsService;
 use Hyperf\Command\Annotation\Command;
 use Hyperf\Command\Command as HyperfCommand;
@@ -19,21 +20,23 @@ use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputOption;
 
 /**
- * 重算省份统计：`docker exec pb php bin/hyperf.php stats:province-daily 2026-10-05 --days=7`。
+ * 重算省份统计和省份商品统计：`docker exec pb php bin/hyperf.php stats:province-daily 2026-10-05 --days=7`。
  *
  * 平时由 StatsCrontab 每小时算当天；人工处理完异常订单、或者补历史数据时用它重算，结果覆盖原来的。
  */
 #[Command]
 class ProvinceDailyStatsCommand extends HyperfCommand
 {
-    public function __construct(private readonly ProvinceStatsService $statsService)
-    {
+    public function __construct(
+        private readonly ProvinceStatsService $statsService,
+        private readonly ProvinceProductStatsService $productStatsService,
+    ) {
         parent::__construct('stats:province-daily');
     }
 
     public function configure(): void
     {
-        $this->setDescription('重算省份统计（按省份、运营商、供应商的成功率、金额、利润），覆盖已有结果');
+        $this->setDescription('重算省份统计和省份商品统计（按省份、运营商、供应商 / 商品的成功率、金额、利润），覆盖已有结果');
         $this->addArgument('date', InputArgument::OPTIONAL, '要算的日期 Y-m-d，默认今天');
         $this->addOption('days', null, InputOption::VALUE_REQUIRED, '从 date 往前一共算几天', '1');
 
@@ -51,7 +54,7 @@ class ProvinceDailyStatsCommand extends HyperfCommand
         }
         for ($i = $days - 1; $i >= 0; --$i) {
             $day = date('Y-m-d', strtotime("{$date} -{$i} day"));
-            $this->line("{$day}：" . $this->statsService->compute($day) . ' 行');
+            $this->line("{$day}：省份统计 " . $this->statsService->compute($day) . ' 行，省份商品统计 ' . $this->productStatsService->compute($day) . ' 行');
         }
 
         return self::SUCCESS;

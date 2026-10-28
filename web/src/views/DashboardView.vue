@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { type AdminDashboard, dashboardApi } from '@/api/dashboard'
+import DashboardStatsCard from './DashboardStatsCard.vue'
 import { useAuthStore } from '@/stores/auth'
 import { usePermissionStore } from '@/stores/permission'
 import { useTodoStore } from '@/stores/todo'
@@ -149,6 +150,9 @@ onMounted(async () => {
       </el-descriptions-item>
     </el-descriptions>
   </el-card>
+
+  <!-- 经营统计：按日期范围汇总每小时整点算好的日统计，跟上面的汇总一样要 order.view -->
+  <DashboardStatsCard v-if="canViewStats" />
 </template>
 
 <style scoped>

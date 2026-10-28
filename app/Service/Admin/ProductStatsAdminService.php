@@ -15,17 +15,19 @@ namespace App\Service\Admin;
 use App\Dao\ProductDailyStatDao;
 use App\Dao\ProductDao;
 use App\Dao\ProvinceDailyStatDao;
+use App\Dao\ProvinceProductDailyStatDao;
 use App\Dao\SupplierDao;
 use App\Enum\Operator;
 use App\Model\ProductDailyStat;
 use App\Model\ProvinceDailyStat;
+use App\Model\ProvinceProductDailyStat;
 use App\Service\AbstractService;
 use App\Service\Product\ProductStatsService;
 use Hyperf\Database\Model\Builder;
 use Hyperf\Di\Annotation\Inject;
 
 /**
- * 商品中心 - 商品统计（只读）：商品日统计由 ProductStatsService 每天汇总，省份统计由 ProvinceStatsService 每小时重算当天。
+ * 商品中心 - 商品统计（只读）：商品日统计由 ProductStatsService 每天汇总，省份统计、省份商品统计由 ProvinceStatsCrontab 每小时重算当天。
  */
 class ProductStatsAdminService extends AbstractService
 {
@@ -42,6 +44,9 @@ class ProductStatsAdminService extends AbstractService
 
     #[Inject]
     protected ProvinceDailyStatDao $provinceStatDao;
+
+    #[Inject]
+    protected ProvinceProductDailyStatDao $provinceProductStatDao;
 
     #[Inject]
     protected SupplierDao $supplierDao;
@@ -146,6 +151,54 @@ class ProductStatsAdminService extends AbstractService
     }
 
     /**
+     * 某一天的省份商品统计：每个省份的合计，展开是这个省份下各商品的数字。
+     *
+     * @param array<string, mixed> $query date（默认今天）/ operator
+     * @return array{stat_date: string, computed_at: null|string, summary: array<string, mixed>, provinces: list<array<string, mixed>>}
+     */
+    public function provinceProducts(array $query): array
+    {
+        $date = $this->dateParam($query['date'] ?? null) ?? date('Y-m-d');
+        $operator = in_array($query['operator'] ?? null, Operator::values(), true) ? $query['operator'] : null;
+        $stats = $this->provinceProductStatDao->forDay($date, $operator);
+        // 含已删除的商品，历史统计照常显示名字
+        $products = $this->productDao->findManyWithTrashed($stats->pluck('product_id')->unique()->values()->all());
+
+        $summary = null;
+        $provinces = [];
+        $byProduct = [];
+        foreach ($stats as $s) {
+            $summary = self::addUp($summary, $s);
+            $province = $s->province === '' ? '未知' : $s->province;
+            $provinces[$province] = self::addUp($provinces[$province] ?? null, $s);
+            $byProduct[$province][$s->product_id] = self::addUp($byProduct[$province][$s->product_id] ?? null, $s);
+        }
+        $rows = [];
+        foreach ($provinces as $province => $totals) {
+            $productRows = [];
+            foreach ($byProduct[$province] as $productId => $productTotals) {
+                $product = $products[$productId] ?? null;
+                $productRows[] = [
+                    'product_id' => $productId,
+                    'product_code' => $product?->code,
+                    'product_name' => $product?->name,
+                    'face_value' => $product?->face_value,
+                ] + self::withRate($productTotals);
+            }
+            usort($productRows, static fn (array $a, array $b) => $b['order_count'] <=> $a['order_count']);
+            $rows[] = ['province' => $province] + self::withRate($totals) + ['products' => $productRows];
+        }
+        usort($rows, static fn (array $a, array $b) => $b['order_count'] <=> $a['order_count']);
+
+        return [
+            'stat_date' => $date,
+            'computed_at' => $stats->max('computed_at'),
+            'summary' => self::withRate($summary ?? self::addUp(null, null)),
+            'provinces' => $rows,
+        ];
+    }
+
+    /**
      * 多行合起来的成功率和平均耗时（按成功单数加权）。
      *
      * @return array{order_count: int, success_count: int, failed_count: int, success_rate: null|string, avg_duration: null|int}
@@ -162,12 +215,12 @@ class ProductStatsAdminService extends AbstractService
     }
 
     /**
-     * 累加一行省份统计，$row 为 null 时返回全 0。
+     * 累加一行省份统计或省份商品统计，$row 为 null 时返回全 0。
      *
      * @param null|array{order_count: int, success_count: int, failed_count: int, unfinished_count: int, success_amount: string, profit: string} $totals
      * @return array{order_count: int, success_count: int, failed_count: int, unfinished_count: int, success_amount: string, profit: string}
      */
-    private static function addUp(?array $totals, ?ProvinceDailyStat $row): array
+    private static function addUp(?array $totals, ProvinceDailyStat|ProvinceProductDailyStat|null $row): array
     {
         $totals ??= ['order_count' => 0, 'success_count' => 0, 'failed_count' => 0, 'unfinished_count' => 0, 'success_amount' => '0.00', 'profit' => '0.00'];
         if ($row === null) {

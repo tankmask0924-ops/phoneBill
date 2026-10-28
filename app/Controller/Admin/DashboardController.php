@@ -24,7 +24,7 @@ use Hyperf\HttpServer\Annotation\Middleware;
 
 /**
  * 首页汇总，含销售额和利润，要有查看订单的权限；待办（待审核的付款账号、加款申请）要有查看加款申请的权限；
- * 订单待办（异常订单数）要有查看订单的权限。
+ * 订单待办（异常订单数）、经营统计（按日期范围汇总的成功金额和利润）要有查看订单的权限。
  */
 #[Controller(prefix: '/admin/dashboard')]
 class DashboardController extends AbstractController
@@ -57,5 +57,14 @@ class DashboardController extends AbstractController
     public function orderTodos(): array
     {
         return $this->dashboardAdminService->orderTodos();
+    }
+
+    #[Middleware(AdminAuthMiddleware::class)]
+    #[Middleware(AdminPermissionMiddleware::class)]
+    #[RequiresPermission('order.view')]
+    #[GetMapping(path: 'stats')]
+    public function stats(): array
+    {
+        return $this->dashboardAdminService->stats($this->request->all());
     }
 }
