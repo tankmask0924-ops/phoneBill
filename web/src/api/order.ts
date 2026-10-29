@@ -17,6 +17,8 @@ export interface Order {
   mobile: string
   operator: OperatorCode
   province: string
+  /** 号码归属的市，号段库查不到的为 null */
+  city: string | null
   face_value: number
   sale_price: string
   cost_price: string | null

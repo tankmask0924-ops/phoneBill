@@ -78,10 +78,12 @@ class OrderControllerTest extends HttpTestCase
         [$merchant, $product, $sp] = $this->fixture();
         $success = $this->createOrder($merchant, $product, $sp, Order::STATUS_SUCCESS);
         $abnormal = $this->createOrder($merchant, $product, $sp, Order::STATUS_ABNORMAL);
+        $success->update(['city' => '广州']);
 
         $all = $this->body($this->jsonRequest('GET', "/admin/orders?merchant_id={$merchant->id}", $token));
         $this->assertSame([$abnormal->id, $success->id], array_column($all['data'], 'id'), '新的在前');
         $this->assertSame($merchant->name, $all['data'][0]['merchant_name']);
+        $this->assertSame([null, '广州'], array_column($all['data'], 'city'), '号码归属的市，没有的为空');
 
         $filtered = $this->body($this->jsonRequest('GET', "/admin/orders?merchant_id={$merchant->id}&status=abnormal", $token));
         $this->assertSame([$abnormal->id], array_column($filtered['data'], 'id'));
@@ -99,6 +101,8 @@ class OrderControllerTest extends HttpTestCase
 
         $csv = (string) $this->jsonRequest('GET', "/admin/orders/export?merchant_id={$merchant->id}", $token)->getBody();
         $this->assertStringStartsWith("\xEF\xBB\xBF平台订单号", $csv);
+        $this->assertStringContainsString('运营商,省份,市,面值', $csv);
+        $this->assertStringContainsString(',广州,', $csv);
         $this->assertStringContainsString($success->order_no, $csv);
         $this->assertStringContainsString($abnormal->order_no, $csv);
 

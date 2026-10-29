@@ -445,7 +445,7 @@ onMounted(async () => {
       <el-table-column label="号码" width="210">
         <template #default="{ row }">
           {{ row.mobile }}
-          <span class="muted">{{ labelOf(operatorLabels, row.operator) }} {{ row.province }}</span>
+          <span class="muted">{{ labelOf(operatorLabels, row.operator) }} {{ row.province }} {{ row.city ?? '' }}</span>
         </template>
       </el-table-column>
       <el-table-column label="面值 / 扣款" width="120" align="right">
@@ -528,7 +528,7 @@ onMounted(async () => {
           <el-descriptions-item label="商户">{{ detail.merchant_name }}</el-descriptions-item>
           <el-descriptions-item label="商品">{{ detail.product_name }}（{{ detail.product_code }}）</el-descriptions-item>
           <el-descriptions-item label="号码">
-            {{ detail.mobile }} {{ labelOf(operatorLabels, detail.operator) }} {{ detail.province }}
+            {{ detail.mobile }} {{ labelOf(operatorLabels, detail.operator) }} {{ detail.province }} {{ detail.city ?? '' }}
           </el-descriptions-item>
           <el-descriptions-item label="面值">{{ detail.face_value }} 元</el-descriptions-item>
           <el-descriptions-item label="扣款">{{ detail.sale_price }} 元</el-descriptions-item>

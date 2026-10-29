@@ -162,11 +162,11 @@ class OrderAdminService extends AbstractService
         $rows = $this->formatMany($builder->orderByDesc('id')->get()->all());
 
         $statusLabels = ['pending' => '充值中', 'processing' => '充值中', 'abnormal' => '异常', 'timeout' => '超时', 'success' => '成功', 'failed' => '失败'];
-        $lines = [['平台订单号', '商户订单号', '商户', '商品', '手机号', '运营商', '省份', '面值', '扣款金额', '成本', '利润', '供应商', '状态', '失败原因', '下单时间', '完成时间', '耗时（秒）']];
+        $lines = [['平台订单号', '商户订单号', '商户', '商品', '手机号', '运营商', '省份', '市', '面值', '扣款金额', '成本', '利润', '供应商', '状态', '失败原因', '下单时间', '完成时间', '耗时（秒）']];
         foreach ($rows as $r) {
             $lines[] = [
                 $r['order_no'] . "\t", $r['merchant_order_no'] . "\t", $r['merchant_name'], $r['product_name'], $r['mobile'] . "\t",
-                Operator::tryFrom($r['operator'])?->label() ?? $r['operator'], $r['province'], $r['face_value'], $r['sale_price'],
+                Operator::tryFrom($r['operator'])?->label() ?? $r['operator'], $r['province'], $r['city'] ?? '', $r['face_value'], $r['sale_price'],
                 $r['cost_price'] ?? '', $r['profit'] ?? '', $r['supplier_name'] ?? '', ($statusLabels[$r['status']] ?? $r['status']) . ($r['abnormal'] && $r['status'] !== Order::STATUS_ABNORMAL ? '（异常）' : ''), $r['fail_reason'] ?? '',
                 $r['created_at'], $r['finished_at'] ?? '', $r['duration'] ?? '',
             ];
@@ -590,6 +590,8 @@ class OrderAdminService extends AbstractService
             'mobile' => $o->mobile,
             'operator' => $o->operator,
             'province' => $o->province,
+            // 号码归属的市（统一写法），号段库查不到的为空
+            'city' => $o->city,
             'face_value' => $o->face_value,
             'sale_price' => $o->sale_price,
             'cost_price' => $o->cost_price,
