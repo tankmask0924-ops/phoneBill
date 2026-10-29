@@ -7,7 +7,7 @@ import {
   type ProvinceStatTotals,
   provinceProductStatsApi,
 } from '@/api/product'
-import { operatorLabels, toOptions } from '@/utils/labels'
+import { labelOf, operatorLabels, toOptions } from '@/utils/labels'
 
 const filters = reactive({ date: recentDays(1)[1], operator: '' })
 const result = ref<ProvinceProductStatsResult | null>(null)
@@ -26,6 +26,11 @@ const rate = (value: string | null | undefined) => (value != null ? `${value}%` 
 const byNumber = (key: keyof ProvinceStatTotals) => (a: ProvinceStatTotals, b: ProvinceStatTotals) =>
   Number(a[key] ?? -1) - Number(b[key] ?? -1)
 const productName = (row: ProvinceProductItemStat) => row.product_name ?? `#${row.product_id}`
+/** 收起时一行列出这个省份的商品，同一商品多个运营商只列一次 */
+const productNames = (rows: ProvinceProductItemStat[]) => [...new Set(rows.map(productName))].join('、')
+const operatorTag = (operator: string) => operatorLabels[operator]?.type ?? 'info'
+/** 展开的商品行按运营商上底色 */
+const operatorRowClass = ({ row }: { row: ProvinceProductItemStat }) => `op-${operatorTag(row.operator)}`
 
 onMounted(load)
 </script>
@@ -71,11 +76,16 @@ onMounted(load)
     <el-table v-loading="loading" :data="result?.provinces ?? []" row-key="province" border>
       <el-table-column type="expand">
         <template #default="{ row }">
-          <el-table :data="row.products" size="small" class="products">
+          <el-table :data="row.products" size="small" class="products" :row-class-name="operatorRowClass">
             <el-table-column label="商品" min-width="200">
               <template #default="{ row: p }">
                 {{ productName(p as ProvinceProductItemStat) }}
                 <span class="muted">{{ p.product_code }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="运营商" width="80" align="center">
+              <template #default="{ row: p }">
+                <el-tag :type="operatorTag(p.operator)" size="small" effect="dark">{{ labelOf(operatorLabels, p.operator) }}</el-tag>
               </template>
             </el-table-column>
             <el-table-column prop="face_value" label="面值" width="80" align="right" />
@@ -97,7 +107,7 @@ onMounted(load)
       </el-table-column>
       <el-table-column prop="province" label="省份" width="90" />
       <el-table-column label="商品" min-width="160" show-overflow-tooltip>
-        <template #default="{ row }">{{ row.products.map(productName).join('、') }}</template>
+        <template #default="{ row }">{{ productNames(row.products) }}</template>
       </el-table-column>
       <el-table-column prop="order_count" label="订单数" width="100" align="right" sortable />
       <el-table-column prop="success_count" label="成功" width="80" align="right" />
@@ -140,5 +150,22 @@ onMounted(load)
 
 .warn {
   color: #e6a23c;
+}
+
+/* 按运营商给展开的商品行上浅底色，跟运营商标签同色系 */
+.products :deep(.op-success > td.el-table__cell) {
+  background-color: var(--el-color-success-light-9);
+}
+
+.products :deep(.op-warning > td.el-table__cell) {
+  background-color: var(--el-color-warning-light-9);
+}
+
+.products :deep(.op-primary > td.el-table__cell) {
+  background-color: var(--el-color-primary-light-9);
+}
+
+.products :deep(.op-danger > td.el-table__cell) {
+  background-color: var(--el-color-danger-light-9);
 }
 </style>

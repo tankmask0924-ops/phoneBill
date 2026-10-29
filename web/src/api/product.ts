@@ -300,6 +300,8 @@ export interface ProvinceProductItemStat extends ProvinceStatTotals {
   product_code: string | null
   product_name: string | null
   face_value: number | null
+  /** 同一商品不同运营商各一行 */
+  operator: OperatorCode
 }
 
 export interface ProvinceProductStat extends ProvinceStatTotals {

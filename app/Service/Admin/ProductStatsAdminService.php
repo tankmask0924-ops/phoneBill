@@ -151,7 +151,8 @@ class ProductStatsAdminService extends AbstractService
     }
 
     /**
-     * 某一天的省份商品统计：每个省份的合计，展开是这个省份下各商品的数字。
+     * 某一天的省份商品统计：每个省份的合计，展开是这个省份下「商品 + 运营商」的数字。
+     * 展开的行按商品的订单数从多到少，同一商品的几个运营商挨着，按运营商的固定顺序排。
      *
      * @param array<string, mixed> $query date（默认今天）/ operator
      * @return array{stat_date: string, computed_at: null|string, summary: array<string, mixed>, provinces: list<array<string, mixed>>}
@@ -171,21 +172,26 @@ class ProductStatsAdminService extends AbstractService
             $summary = self::addUp($summary, $s);
             $province = $s->province === '' ? '未知' : $s->province;
             $provinces[$province] = self::addUp($provinces[$province] ?? null, $s);
-            $byProduct[$province][$s->product_id] = self::addUp($byProduct[$province][$s->product_id] ?? null, $s);
+            $byProduct[$province][$s->product_id][$s->operator] = self::addUp($byProduct[$province][$s->product_id][$s->operator] ?? null, $s);
         }
         $rows = [];
         foreach ($provinces as $province => $totals) {
+            $byOperator = $byProduct[$province];
+            uksort($byOperator, static fn (int $a, int $b) => array_sum(array_column($byOperator[$b], 'order_count')) <=> array_sum(array_column($byOperator[$a], 'order_count')));
             $productRows = [];
-            foreach ($byProduct[$province] as $productId => $productTotals) {
+            foreach ($byOperator as $productId => $operatorTotals) {
                 $product = $products[$productId] ?? null;
-                $productRows[] = [
-                    'product_id' => $productId,
-                    'product_code' => $product?->code,
-                    'product_name' => $product?->name,
-                    'face_value' => $product?->face_value,
-                ] + self::withRate($productTotals);
+                uksort($operatorTotals, static fn (string $a, string $b) => array_search($a, Operator::values(), true) <=> array_search($b, Operator::values(), true));
+                foreach ($operatorTotals as $productOperator => $productTotals) {
+                    $productRows[] = [
+                        'product_id' => $productId,
+                        'product_code' => $product?->code,
+                        'product_name' => $product?->name,
+                        'face_value' => $product?->face_value,
+                        'operator' => $productOperator,
+                    ] + self::withRate($productTotals);
+                }
             }
-            usort($productRows, static fn (array $a, array $b) => $b['order_count'] <=> $a['order_count']);
             $rows[] = ['province' => $province] + self::withRate($totals) + ['products' => $productRows];
         }
         usort($rows, static fn (array $a, array $b) => $b['order_count'] <=> $a['order_count']);

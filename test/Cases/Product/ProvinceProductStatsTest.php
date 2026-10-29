@@ -74,13 +74,15 @@ class ProvinceProductStatsTest extends HttpTestCase
         $this->order($merchant, $p100, '广东', 'cmcc', Order::STATUS_FAILED);
         $this->order($merchant, $p100, '广东', 'cmcc', Order::STATUS_PROCESSING);
         $this->order($merchant, $p50, '广东', 'cmcc', Order::STATUS_SUCCESS);
+        // 广东联通：100 元成功一单，跟移动的分开算
+        $this->order($merchant, $p100, '广东', 'cucc', Order::STATUS_SUCCESS);
         // 广西联通：50 元成功一单
         $this->order($merchant, $p50, '广西', 'cucc', Order::STATUS_SUCCESS);
         // 前一天下的单不算
         $this->order($merchant, $p50, '广西', 'cucc', Order::STATUS_SUCCESS, '2001-03-04 23:59:59');
 
-        $this->assertSame(3, $this->stats()->compute(self::DAY));
-        $this->assertSame(3, $this->stats()->compute(self::DAY), '重算覆盖，不会多出行');
+        $this->assertSame(4, $this->stats()->compute(self::DAY));
+        $this->assertSame(4, $this->stats()->compute(self::DAY), '重算覆盖，不会多出行');
 
         // 删掉的商品，历史统计照常显示名字
         $p50->delete();
@@ -90,29 +92,33 @@ class ProvinceProductStatsTest extends HttpTestCase
         $this->assertSame(self::DAY, $result['stat_date']);
         $this->assertNotNull($result['computed_at']);
         $this->assertSame([
-            'order_count' => 5, 'success_count' => 3, 'failed_count' => 1, 'unfinished_count' => 1,
-            'success_amount' => '298.50', 'profit' => '4.50', 'success_rate' => '75.00',
+            'order_count' => 6, 'success_count' => 4, 'failed_count' => 1, 'unfinished_count' => 1,
+            'success_amount' => '398.00', 'profit' => '6.00', 'success_rate' => '80.00',
         ], $result['summary']);
 
         [$guangdong, $guangxi] = $result['provinces'];
         $this->assertSame('广东', $guangdong['province'], '按订单数从多到少');
-        $this->assertSame(4, $guangdong['order_count']);
-        $this->assertSame('66.66', $guangdong['success_rate'], '成功率截断不四舍五入，和其他统计一致');
-        $this->assertSame([$p100->id, $p50->id], array_column($guangdong['products'], 'product_id'), '按订单数从多到少');
+        $this->assertSame(5, $guangdong['order_count']);
+        $this->assertSame('75.00', $guangdong['success_rate']);
+        $this->assertSame([$p100->id, $p100->id, $p50->id], array_column($guangdong['products'], 'product_id'), '商品按订单数从多到少，同一商品的运营商挨着');
+        $this->assertSame(['cmcc', 'cucc', 'cmcc'], array_column($guangdong['products'], 'operator'), '同一商品按运营商的固定顺序');
         $item = $guangdong['products'][0];
         $this->assertSame($p100->code, $item['product_code']);
         $this->assertSame($p100->name, $item['product_name']);
         $this->assertSame(100, $item['face_value']);
         $this->assertSame(['order_count' => 3, 'success_count' => 1, 'failed_count' => 1, 'unfinished_count' => 1], array_intersect_key($item, array_flip(['order_count', 'success_count', 'failed_count', 'unfinished_count'])));
         $this->assertSame('50.00', $item['success_rate'], '还在充值的不进分母');
-        $this->assertSame($p50->name, $guangdong['products'][1]['product_name']);
+        $this->assertSame(1, $guangdong['products'][1]['order_count']);
+        $this->assertSame('100.00', $guangdong['products'][1]['success_rate']);
+        $this->assertSame($p50->name, $guangdong['products'][2]['product_name']);
 
         $this->assertSame('广西', $guangxi['province']);
         $this->assertSame([$p50->id], array_column($guangxi['products'], 'product_id'));
 
         $cucc = $this->body($this->jsonRequest('GET', '/admin/product-stats/province-products?date=' . self::DAY . '&operator=cucc', $token));
-        $this->assertSame(['广西'], array_column($cucc['provinces'], 'province'));
-        $this->assertSame(1, $cucc['summary']['order_count']);
+        $this->assertEqualsCanonicalizing(['广东', '广西'], array_column($cucc['provinces'], 'province'));
+        $this->assertSame(2, $cucc['summary']['order_count']);
+        $this->assertSame(['cucc', 'cucc'], array_merge(...array_map(static fn ($p) => array_column($p['products'], 'operator'), $cucc['provinces'])));
 
         $this->assertSame(403, $this->jsonRequest('GET', '/admin/product-stats/province-products', $this->loginAs($this->createAdminWithPermissions(['product.view'])))->getStatusCode());
     }

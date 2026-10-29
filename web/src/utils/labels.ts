@@ -47,11 +47,12 @@ export const shelfStatusLabels: LabelMap = {
 }
 
 /** 运营商，见 App\Enum\Operator */
+/** type 也用来给按运营商区分的表格行上底色（见省份商品统计） */
 export const operatorLabels: LabelMap = {
-  cmcc: { label: '移动' },
-  cucc: { label: '联通' },
-  ctcc: { label: '电信' },
-  cbn: { label: '广电' },
+  cmcc: { label: '移动', type: 'success' },
+  cucc: { label: '联通', type: 'warning' },
+  ctcc: { label: '电信', type: 'primary' },
+  cbn: { label: '广电', type: 'danger' },
 }
 
 /** 资金流水类型，见 App\Model\MerchantBalanceLog */
