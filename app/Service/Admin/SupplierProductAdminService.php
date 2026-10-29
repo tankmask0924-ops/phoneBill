@@ -87,7 +87,7 @@ class SupplierProductAdminService extends AbstractService
     protected SupplierGateway $supplierGateway;
 
     /**
-     * @param array<string, mixed> $query keyword / supplier_id / operator / province / face_value / status
+     * @param array<string, mixed> $query keyword / supplier_id / operator / province / nationwide（1 / 0）/ face_value / status / cost_sort（asc / desc）
      * @return array{data: list<array<string, mixed>>, total: int, page: int, per_page: int}
      */
     public function list(array $query): array
@@ -115,9 +115,20 @@ class SupplierProductAdminService extends AbstractService
         if (is_string($query['province'] ?? null) && Province::isValid($query['province'])) {
             $builder->whereIn('id', fn ($q) => $q->select('supplier_product_id')->from('supplier_product_provinces')->whereIn('province', [$query['province'], Province::ALL]));
         }
+        // 是否全国：1 只看覆盖全国的，0 只看按省份覆盖的
+        if (in_array($query['nationwide'] ?? null, ['0', '1'], true)) {
+            $nationwide = fn ($q) => $q->select('supplier_product_id')->from('supplier_product_provinces')->where('province', Province::ALL);
+            $query['nationwide'] === '1' ? $builder->whereIn('id', $nationwide) : $builder->whereNotIn('id', $nationwide);
+        }
 
         $total = (clone $builder)->count();
-        $products = $builder->orderBy('supplier_id')->orderBy('face_value')->orderBy('id')->forPage($page, $perPage)->get();
+        // 按成本价排序（asc / desc），不传按供应商、面值
+        if (in_array($query['cost_sort'] ?? null, ['asc', 'desc'], true)) {
+            $builder->orderBy('cost_price', $query['cost_sort']);
+        } else {
+            $builder->orderBy('supplier_id')->orderBy('face_value');
+        }
+        $products = $builder->orderBy('id')->forPage($page, $perPage)->get();
 
         return [
             'data' => $this->formatMany($products->all()),

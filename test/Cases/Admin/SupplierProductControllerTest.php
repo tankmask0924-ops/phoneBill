@@ -179,6 +179,27 @@ class SupplierProductControllerTest extends HttpTestCase
         $this->assertSame(200, $this->jsonRequest('DELETE', "/admin/supplier-products/{$sp->id}", $viewer)->getStatusCode());
     }
 
+    public function testListFiltersNationwideAndSortsByCost()
+    {
+        $token = $this->loginAs($this->createAdminWithPermissions(['supplier_product.view']));
+        $supplier = $this->createSupplier();
+        $cheapAll = $this->createSupplierProduct($supplier, ['cmcc'], 100, '97.50', 'active', ['*']);
+        $dearAll = $this->createSupplierProduct($supplier, ['cmcc'], 100, '99.10', 'active', ['*']);
+        $guangdong = $this->createSupplierProduct($supplier, ['cmcc'], 100, '98.20', 'active', ['广东', '广西']);
+        $ids = static fn (array $body) => array_column($body['data'], 'id');
+
+        $all = $this->body($this->jsonRequest('GET', "/admin/supplier-products?supplier_id={$supplier->id}&nationwide=1", $token));
+        $this->assertSame([$cheapAll->id, $dearAll->id], $ids($all), '只看全国');
+        $byProvince = $this->body($this->jsonRequest('GET', "/admin/supplier-products?supplier_id={$supplier->id}&nationwide=0", $token));
+        $this->assertSame([$guangdong->id], $ids($byProvince), '只看非全国');
+
+        $asc = $this->body($this->jsonRequest('GET', "/admin/supplier-products?supplier_id={$supplier->id}&cost_sort=asc", $token));
+        $this->assertSame([$cheapAll->id, $guangdong->id, $dearAll->id], $ids($asc));
+        $desc = $this->body($this->jsonRequest('GET', "/admin/supplier-products?supplier_id={$supplier->id}&cost_sort=desc", $token));
+        $this->assertSame([$dearAll->id, $guangdong->id, $cheapAll->id], $ids($desc));
+        $this->assertSame(3, $this->body($this->jsonRequest('GET', "/admin/supplier-products?supplier_id={$supplier->id}&cost_sort=bad&nationwide=x", $token))['total'], '不认识的值不筛选、不排序');
+    }
+
     public function testListWithNoMatches()
     {
         $token = $this->loginAs($this->createAdminWithPermissions(['supplier_product.view']));

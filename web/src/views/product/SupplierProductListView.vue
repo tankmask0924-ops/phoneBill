@@ -22,9 +22,26 @@ const canUnbind = computed(() => permission.can('product.manage'))
 
 const list = usePagedList<
   SupplierProduct,
-  { keyword: string; supplier_id: number | ''; operator: string; province: string; face_value: string; status: string }
->(supplierProductApi.list, { keyword: '', supplier_id: '', operator: '', province: '', face_value: '', status: '' })
+  {
+    keyword: string
+    supplier_id: number | ''
+    operator: string
+    province: string
+    /** '1' 只看全国，'0' 只看按省份覆盖的 */
+    nationwide: string
+    face_value: string
+    status: string
+    /** 成本价排序：asc / desc，空为默认（按供应商、面值） */
+    cost_sort: string
+  }
+>(supplierProductApi.list, { keyword: '', supplier_id: '', operator: '', province: '', nationwide: '', face_value: '', status: '', cost_sort: '' })
 const { rows, total, page, perPage, loading, filters } = list
+
+/** 点成本价表头的上下箭头：分页在后端，排序也交给后端 */
+function onSortChange({ order }: { order: 'ascending' | 'descending' | null }) {
+  filters.cost_sort = order === 'ascending' ? 'asc' : order === 'descending' ? 'desc' : ''
+  list.search()
+}
 
 const suppliers = ref<SupplierOption[]>([])
 const provinces = ref<string[]>([])
@@ -285,6 +302,12 @@ onMounted(async () => {
           </el-select>
         </el-form-item>
         <el-form-item>
+          <el-select v-model="filters.nationwide" placeholder="是否全国" clearable style="width: 110px">
+            <el-option label="全国" value="1" />
+            <el-option label="非全国" value="0" />
+          </el-select>
+        </el-form-item>
+        <el-form-item>
           <el-input v-model="filters.face_value" placeholder="面值" clearable style="width: 90px" />
         </el-form-item>
         <el-form-item>
@@ -299,7 +322,7 @@ onMounted(async () => {
       <el-button v-if="canManage" type="primary" :icon="Plus" @click="openCreate">新建供应商商品</el-button>
     </div>
 
-    <el-table v-loading="loading" :data="rows" border>
+    <el-table v-loading="loading" :data="rows" border @sort-change="onSortChange">
       <el-table-column prop="id" label="ID" width="70" />
       <el-table-column label="供应商" min-width="130">
         <template #default="{ row }">
@@ -319,7 +342,7 @@ onMounted(async () => {
       <el-table-column label="面值" width="80" align="right">
         <template #default="{ row }">{{ row.face_value }} 元</template>
       </el-table-column>
-      <el-table-column prop="cost_price" label="成本价" width="90" align="right" />
+      <el-table-column prop="cost_price" label="成本价" width="100" align="right" sortable="custom" :sort-orders="['ascending', 'descending', null]" />
       <el-table-column prop="external_code" label="供应商商品编码" min-width="130" />
       <el-table-column prop="bound_product_count" label="被绑定" width="80" align="center" />
       <el-table-column label="状态" width="80">
