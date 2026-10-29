@@ -30,6 +30,10 @@ use Carbon\Carbon;
  * @property null|string $response
  * @property Carbon $submitted_at
  * @property null|Carbon $last_queried_at
+ * @property null|string $query_status 最后一次查单结果
+ * @property null|string $query_message
+ * @property null|string $query_request 最后一次查单的原始报文
+ * @property null|string $query_response
  * @property null|Carbon $finished_at
  * @property Carbon $created_at
  * @property Carbon $updated_at
@@ -57,6 +61,10 @@ class OrderAttempt extends Model
         'response',
         'submitted_at',
         'last_queried_at',
+        'query_status',
+        'query_message',
+        'query_request',
+        'query_response',
         'finished_at',
     ];
 

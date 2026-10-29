@@ -338,18 +338,49 @@ class OrderControllerTest extends HttpTestCase
         // 模拟供应商查单返回成功
         $queried = $this->body($this->jsonRequest('POST', "/admin/orders/{$processing->id}/query", $token));
         $this->assertSame('success', $queried['status']);
-        $this->assertSame([['attempt_no' => $processing->order_no . '01', 'status' => 'success', 'message' => null]], $queried['query_results']);
+        $this->assertSame([['attempt_no' => $processing->order_no . '01', 'status' => 'success', 'message' => null, 'applied' => true]], $queried['query_results']);
+        $this->assertSame('success', $queried['attempts'][0]['query_status'], '查单结果记在提交上，详情里展示');
+        $this->assertNotNull($queried['attempts'][0]['last_queried_at']);
 
-        // 异常订单查到供应商失败：提交记为失败，订单保持异常、不退款，等人工置为失败；返回里告诉前端查到的是失败
+        // 异常订单（人工处理单）人工查到供应商失败：提交记为失败，订单交回正常流程、推任务换下一个供应商，先不退款
         $failingSp = $this->createSupplierProduct($this->createSupplier(['*'], 'active', 'failed'), ['cmcc']);
         $abnormal = $this->createOrder($merchant, $product, $failingSp, Order::STATUS_ABNORMAL);
+        $abnormal->update(['manual_only' => true]);
         $balance = Merchant::find($merchant->id)->balance;
+        $this->dispatcher->submits = [];
         $result = $this->body($this->jsonRequest('POST', "/admin/orders/{$abnormal->id}/query", $token));
-        $this->assertSame('abnormal', $result['status']);
+        $this->assertSame(['processing', false], [$result['status'], $result['manual_only']]);
         $this->assertSame('failed', $result['query_results'][0]['status']);
         $this->assertSame(OrderAttempt::STATUS_FAILED, OrderAttempt::where('order_id', $abnormal->id)->first()->status);
+        $this->assertSame([$abnormal->id], array_column($this->dispatcher->submits, 'order_id'));
         $this->assertSame($balance, Merchant::find($merchant->id)->balance);
-        $this->assertSame(422, $this->jsonRequest('POST', "/admin/orders/{$done->id}/query", $token)->getStatusCode(), '没有处理中的提交');
+
+        // 人工处理单人工查到成功：改成功并通知商户
+        $manual = $this->createOrder($merchant, $product, $sp, Order::STATUS_ABNORMAL);
+        $manual->update(['manual_only' => true]);
+        $this->dispatcher->notifies = [];
+        $result = $this->body($this->jsonRequest('POST', "/admin/orders/{$manual->id}/query", $token));
+        $this->assertSame(['success', false], [$result['status'], $result['manual_only']]);
+        $this->assertSame([$manual->id], array_column($this->dispatcher->notifies, 'order_id'));
+        // 已经有结果的订单也能查：只记录，不改提交和订单
+        $recorded = $this->body($this->jsonRequest('POST', "/admin/orders/{$done->id}/query", $token));
+        $this->assertSame([['attempt_no' => $done->order_no . '01', 'status' => 'success', 'message' => null, 'applied' => false]], $recorded['query_results']);
+        $this->assertSame('success', $recorded['status']);
+        $this->assertSame([], $recorded['warnings']);
+
+        // 成功的单查到上游失败：不改订单、不退款，详情标红提醒核对
+        $reverted = $this->createOrder($merchant, $product, $failingSp, Order::STATUS_SUCCESS);
+        $balance = Merchant::find($merchant->id)->balance;
+        $checked = $this->body($this->jsonRequest('POST', "/admin/orders/{$reverted->id}/query", $token));
+        $this->assertSame('success', $checked['status']);
+        $this->assertSame(['success', 'failed'], [$checked['attempts'][0]['status'], $checked['attempts'][0]['query_status']]);
+        $this->assertSame('模拟失败', $checked['attempts'][0]['query_message']);
+        $this->assertStringContainsString('最后一次查单上游返回失败', implode("\n", $checked['warnings']));
+        $this->assertSame($balance, Merchant::find($merchant->id)->balance);
+
+        // 还没提交给供应商的没法查
+        OrderAttempt::where('order_id', $reverted->id)->delete();
+        $this->assertSame(422, $this->jsonRequest('POST', "/admin/orders/{$reverted->id}/query", $token)->getStatusCode());
 
         // 手动回调：每次开新一轮通知
         $this->dispatcher->notifies = [];

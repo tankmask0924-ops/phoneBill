@@ -97,10 +97,12 @@ flowchart LR
 - 超过订单超时时间还**没提交出去**（等待中）的订单不会有回调，转为异常订单，人工处理，**不自动退款**。
 - 提交给供应商时**接口调用异常**（连不上、连接超时、等响应超时、HTTPS 握手失败、域名解析失败等）的订单**立即**转异常订单，并标为**人工处理单**：上游可能已经建单（实测商腾连接超时的单照样建了），换下一家可能重复充值。
     - 之后上游**回调**明确成功 / 失败（还没人工处理过时）：说明上游确实收到了这笔单，取消人工处理单、交回正常流程——成功改成功并通知商户，失败换下一家供应商（都失败了就退款并通知）（2026-10-29 定）；
-    - **查单**结果仍**只记录**在提交记录里，不改订单状态、不通知商户：下单没拿到返回时，上游查不到单可能只是还没建好；
+    - 后台订单详情里**人工点「向供应商查单」**拿到明确成功 / 失败，跟回调一样交回正常流程（2026-10-29 定）；所有异常订单都这样处理，不只是人工处理单；
+    - **定时查单**结果仍**只记录**在提交记录里，不改订单状态、不通知商户：下单没拿到返回时，上游查不到单可能只是还没建好；
     - 人工「置为成功 / 置为失败并退款」后也**不自动通知**；商户查单一律看到 `processing`，直到人工「手动回调」，查单和回调才同时给出结果；
     - 确认上游没有充上的，可以「手动补单」重新提交（同一笔订单，不重复扣款），补单后按正常流程自动处理。
-- 不是人工处理单的异常订单（等待中超时转来的、上线前转来的老异常单）：上游后来明确成功的自动改为成功并通知商户；明确失败的保持异常，人工置为失败并退款。
+- 不是人工处理单的异常订单（等待中超时转来的、上线前转来的老异常单）：上游后来明确成功的自动改为成功并通知商户；明确失败的保持异常，人工置为失败并退款（人工点查单查到失败的换下一个供应商，见上）。
+- **查单记录**：每次查单（定时和人工）的结果、说明和原始报文记在提交上（`order_attempts.query_status` / `query_message` / `query_request` / `query_response`），订单详情「供应商提交」展开可看。任何有提交的订单都能点「向供应商查单」；已经有结果的提交只记录、不改订单，查到相反结果时详情标红提醒核对。
 - **手动回调**：所有订单都可以，推商户当前看到的状态（没出结果、人工处理单没手动回调过的都是 `processing`）。每次开新一轮通知（`orders.notify_round` 加 1），之前排队的通知（含自动重试）作废。
     - 成功 / 失败的订单手动回调后记「已手动回调」（`manual_notified_at`）：之后上游再来的结果只记录、不改订单、不推给商户；和订单结果矛盾时记 error 日志，订单详情标红提醒核对资金。
     - 没出结果的订单手动回调只推 `processing`，不记「已手动回调」，后续照常自动处理，出结果后自动通知（人工处理单仍要人工置为成功 / 失败后再手动回调）。
@@ -175,8 +177,8 @@ stateDiagram-v2
     timeout --> success: 上游确认成功 / 人工确认成功
     timeout --> failed: 上游确认失败（退款）/ 人工确认失败（退款）
     timeout --> processing: 手动补单
-    abnormal --> success: 人工确认成功 / 上游确认成功（人工处理单只认回调）
-    abnormal --> processing: 人工处理单收到上游失败回调（换下一家）
+    abnormal --> success: 人工确认成功 / 上游确认成功（人工处理单只认回调和人工查单）
+    abnormal --> processing: 人工处理单收到上游失败回调 / 人工查单查到失败（换下一家）
     abnormal --> processing: 手动补单
     abnormal --> failed: 人工确认失败（退款）
     success --> failed: 人工冲正（退款）
@@ -406,7 +408,7 @@ erDiagram
 | `system_settings` | 系统设置 | `key`（唯一）、`value`（JSON，整段加密） |
 | **订单** | | |
 | `orders` | 订单 | `order_no`（唯一）、`merchant_id`、`merchant_order_no`、`product_id`、`product_name`、`mobile`、`operator`、`province`、`face_value`、`sale_price`、`cost_price`、`profit`（利润）、`supplier_id`、`supplier_product_id`、`status`、`fail_reason`、`notify_url`、`notify_status`、`manual_only`（人工处理单）、`manual_notified_at`（最近一次手动回调）、`notify_round`（通知轮次）、`finished_at`；唯一 `(merchant_id, merchant_order_no)` |
-| `order_attempts` | 每次提交给供应商的记录 | `order_id`、`supplier_id`、`supplier_product_id`、`supplier_order_no`、`cost_price`、`status`、`request`、`response`、`submitted_at`、`finished_at` |
+| `order_attempts` | 每次提交给供应商的记录 | `order_id`、`supplier_id`、`supplier_product_id`、`supplier_order_no`、`cost_price`、`status`、`request`、`response`、`submitted_at`、`last_queried_at`、`query_status` / `query_message` / `query_request` / `query_response`（最后一次查单）、`finished_at` |
 | `order_notify_logs` | 通知商户的记录 | `order_id`、`attempt_no`、`http_status`、`response`、`next_retry_at` |
 
 说明：`orders.sale_price` 是下单时该商户该运营商的价格快照；`cost_price` 和 `supplier_id` 记录最终成功的那一次尝试，用于利润统计。

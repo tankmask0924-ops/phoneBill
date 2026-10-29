@@ -168,7 +168,7 @@ class OrderProcessService extends AbstractService
     public function applyCallback(int $attemptId, RechargeResult $result): void
     {
         if ($result->status !== RechargeStatus::Processing) {
-            $this->releaseManualOnly($attemptId, $result->status);
+            $this->releaseAbnormal($attemptId, $result->status, true);
         }
         $this->applyResult($attemptId, $result);
     }
@@ -435,14 +435,29 @@ class OrderProcessService extends AbstractService
     }
 
     /**
-     * 向供应商查一次单并处理结果。
+     * 向供应商查一次单，结果和报文记在提交上（订单详情展示）。还在处理中的提交按结果处理；
+     * 已经有结果的（人工在详情里查的）只记录，不改提交和订单。
+     *
+     * @param bool $byAdmin 人工在详情里点的查单：异常订单（含人工处理单）查到明确成功 / 失败就交回正常流程，
+     *                      同回调；定时查单对人工处理单仍只记录（下单没拿到返回时，上游查不到单可能只是还没建好）
      */
-    public function queryAttempt(OrderAttempt $attempt): RechargeResult
+    public function queryAttempt(OrderAttempt $attempt, bool $byAdmin = false): RechargeResult
     {
         $order = $this->orderDao->find($attempt->order_id);
         $result = $this->gateway->query($order, $attempt);
-        $this->attemptDao->newQuery()->where('id', $attempt->id)->update(['last_queried_at' => date('Y-m-d H:i:s')]);
-        $this->applyResult($attempt->id, $result);
+        $this->attemptDao->newQuery()->where('id', $attempt->id)->update([
+            'last_queried_at' => date('Y-m-d H:i:s'),
+            'query_status' => $result->status->value,
+            'query_message' => $result->message === null ? null : mb_substr($result->message, 0, 255),
+            'query_request' => $result->request,
+            'query_response' => $result->response,
+        ]);
+        if ($attempt->status === OrderAttempt::STATUS_PROCESSING) {
+            if ($byAdmin && $result->status !== RechargeStatus::Processing) {
+                $this->releaseAbnormal($attempt->id, $result->status, false);
+            }
+            $this->applyResult($attempt->id, $result);
+        }
 
         return $result;
     }
@@ -528,23 +543,29 @@ class OrderProcessService extends AbstractService
         }
     }
 
-    private function releaseManualOnly(int $attemptId, RechargeStatus $upstream): void
+    /**
+     * 异常订单拿到上游明确的成功 / 失败：取消人工处理单、交回正常流程，之后由 applyResult() 改成功或换下一个供应商。
+     *
+     * @param bool $manualOnly 只处理人工处理单（回调）；人工点的查单所有异常订单都处理
+     */
+    private function releaseAbnormal(int $attemptId, RechargeStatus $upstream, bool $manualOnly): void
     {
         $attempt = $this->attemptDao->find($attemptId);
         if ($attempt === null || $attempt->status !== OrderAttempt::STATUS_PROCESSING) {
             return;
         }
         $order = $this->orderDao->find($attempt->order_id);
-        if ($order === null || $order->status !== Order::STATUS_ABNORMAL || ! $order->manual_only || $order->manual_notified_at !== null) {
+        if ($order === null || $order->status !== Order::STATUS_ABNORMAL || ($manualOnly && ! $order->manual_only) || $order->manual_notified_at !== null) {
             return;
         }
         // 失败要先回到处理中，applyResult 才会换下一个供应商；成功从异常直接改成功
         $to = $upstream === RechargeStatus::Failed ? Order::STATUS_PROCESSING : Order::STATUS_ABNORMAL;
         if ($this->orderDao->transition($order->id, [Order::STATUS_ABNORMAL], $to, ['manual_only' => false])) {
-            $this->logger()->info('人工处理单收到上游明确回调，交回正常流程', [
+            $this->logger()->info('异常订单拿到上游明确结果，交回正常流程', [
                 'order_id' => $order->id,
                 'attempt_no' => $attempt->attempt_no,
                 'upstream' => $upstream->value,
+                'by' => $manualOnly ? 'callback' : 'admin_query',
             ]);
         }
     }

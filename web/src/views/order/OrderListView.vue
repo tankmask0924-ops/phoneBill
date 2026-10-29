@@ -148,25 +148,30 @@ async function query() {
   }
   const lines = result.query_results.map((r) => {
     const reason = r.message ? `（${r.message}）` : ''
+    // 已有结果的提交只记录，不改提交和订单
+    const recorded = r.applied ? '' : '，这次提交之前已有结果，只记录'
     if (r.status === 'success') {
-      return `${r.attempt_no}：供应商确认成功${reason}`
+      return `${r.attempt_no}：供应商确认成功${reason}${recorded}`
     }
     if (r.status === 'failed') {
-      return `${r.attempt_no}：供应商确认失败${reason}`
+      return `${r.attempt_no}：供应商确认失败${reason}${recorded}`
     }
-    return `${r.attempt_no}：供应商还没有明确结果${reason}，订单状态不变`
+    return `${r.attempt_no}：供应商还没有明确结果${reason}${r.applied ? '，订单状态不变' : recorded}`
   })
+  lines.push('查单报文可以在「供应商提交」里点开查看')
   let next = ''
-  if (result.manual_only) {
-    next = '这是人工处理单：查单结果只记录，订单状态不会自动变（上游回调明确成功 / 失败时会自动交回正常流程）。请核实后置为成功 / 失败，再手动回调；确认上游没有充上也可以手动补单。'
+  if (!result.query_results.some((r) => r.applied)) {
+    next = '订单已经有结果，这次查单只用来核对上游，不改订单。'
+  } else if (result.manual_only) {
+    next = '这是人工处理单，上游还没有明确结果，可以稍后再查；也可以到上游核实后置为成功 / 失败，再手动回调，确认上游没有充上也可以手动补单。'
   } else if (result.status === 'success') {
     next = '订单已改为成功，会通知商户。'
   } else if (result.status === 'failed') {
     next = '订单已失败并退款，会通知商户。'
   } else if (result.status === 'timeout') {
     next = '订单仍是超时，上游出结果后会自动处理，也可以到供应商后台核实后人工处理。'
-  } else if (result.status === 'abnormal' && result.query_results.some((r) => r.status === 'failed')) {
-    next = '异常订单不会自动退款：请到供应商后台核实没有充值到账后，点「置为失败并退款」。'
+  } else if (result.status === 'processing' && result.query_results.some((r) => r.applied && r.status === 'failed')) {
+    next = '上游确认失败，已在排队换下一个供应商重新提交，稍后点「刷新」看结果；没有其他供应商可换时会失败退款并通知商户。'
   } else if (result.status === 'abnormal') {
     next = '订单仍是异常，可以稍后再查，或到供应商后台核实后人工处理。'
   }
@@ -328,7 +333,7 @@ onMounted(async () => {
       :closable="false"
       show-icon
       class="tip-bar"
-      title="两种情况会进这里：① 提交给供应商时接口异常（标「人工」）：上游回调明确成功的自动改成功并通知商户，回调失败的自动换下一个供应商；查单结果只记录，人工置为成功 / 失败后要再点「手动回调」商户才会知道；② 下单超过 2 小时还没提交出去的。上游确认没有充上的，可以「手动补单」重新提交（同一笔订单，不重复扣款）。已提交、超过 2 小时没结果的是「超时」订单，不在这里：上游成功自动改成功，失败自动退款，都会通知商户。"
+      title="两种情况会进这里：① 提交给供应商时接口异常（标「人工」）：上游回调或在详情里点「向供应商查单」拿到明确成功的，自动改成功并通知商户，明确失败的自动换下一个供应商（定时查单只记录）；人工置为成功 / 失败后要再点「手动回调」商户才会知道；② 下单超过 2 小时还没提交出去的。上游确认没有充上的，可以「手动补单」重新提交（同一笔订单，不重复扣款）。已提交、超过 2 小时没结果的是「超时」订单，不在这里：上游成功自动改成功，失败自动退款，都会通知商户。"
     />
     <el-form inline @submit.prevent="list.search">
       <el-form-item>
@@ -499,7 +504,7 @@ onMounted(async () => {
       <template v-if="detail">
         <div class="actions">
           <el-button @click="refreshDetail">刷新</el-button>
-          <el-button v-if="canManage && detail.attempts.some((a) => a.status === 'processing')" @click="query">向供应商查单</el-button>
+          <el-button v-if="canManage && detail.attempts.length" @click="query">向供应商查单</el-button>
           <template v-if="canManage && (detail.status === 'abnormal' || detail.status === 'timeout')">
             <el-button type="success" @click="confirmSuccess">置为成功</el-button>
             <el-button type="danger" @click="confirmFailed">置为失败并退款</el-button>
@@ -548,7 +553,15 @@ onMounted(async () => {
               <div class="raw">
                 <div><b>请求：</b>{{ row.request ?? '-' }}</div>
                 <div><b>响应：</b>{{ row.response ?? '-' }}</div>
-                <div><b>最后查单：</b>{{ row.last_queried_at ?? '-' }}</div>
+                <div>
+                  <b>最后查单：</b>{{ row.last_queried_at ?? '-' }}
+                  <template v-if="row.query_status">
+                    <StatusTag :map="attemptStatusLabels" :value="row.query_status" class="manual-tag" />
+                    {{ row.query_message ?? '' }}
+                  </template>
+                </div>
+                <div v-if="row.last_queried_at"><b>查单请求：</b>{{ row.query_request ?? '-' }}</div>
+                <div v-if="row.last_queried_at"><b>查单响应：</b>{{ row.query_response ?? '-' }}</div>
               </div>
             </template>
           </el-table-column>

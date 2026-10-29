@@ -79,6 +79,11 @@ export interface OrderAttempt {
   response: string | null
   submitted_at: string | null
   last_queried_at: string | null
+  /** 最后一次查单的结果、说明和原始报文（定时和人工查单都会记） */
+  query_status: string | null
+  query_message: string | null
+  query_request: string | null
+  query_response: string | null
   finished_at: string | null
   /** 提交给供应商到出结果（回调或查单）的秒数 */
   duration: number | null
@@ -132,9 +137,11 @@ export const orderApi = {
   list: (params: Query) => http.get<Paged<Order> & { summary: OrderSummary }>('/admin/orders', params),
   filterOptions: () => http.get<OrderFilterOptions>('/admin/orders/filter-options'),
   detail: (id: number) => http.get<OrderDetail>(`/admin/orders/${id}`),
-  /** 人工查单，query_results 是这次每个处理中的提交查到的结果 */
+  /** 人工查单，query_results 是这次每个提交查到的结果；applied 为 false 的是已有结果的提交，只记录 */
   query: (id: number) =>
-    http.post<OrderDetail & { query_results: { attempt_no: string; status: string; message: string | null }[] }>(`/admin/orders/${id}/query`),
+    http.post<OrderDetail & { query_results: { attempt_no: string; status: string; message: string | null; applied: boolean }[] }>(
+      `/admin/orders/${id}/query`,
+    ),
   confirmSuccess: (id: number, remark: string) => http.post<OrderDetail>(`/admin/orders/${id}/success`, { remark }),
   confirmFailed: (id: number, remark: string) => http.post<OrderDetail>(`/admin/orders/${id}/fail`, { remark }),
   reverse: (id: number, remark: string) => http.post<OrderDetail>(`/admin/orders/${id}/reverse`, { remark }),

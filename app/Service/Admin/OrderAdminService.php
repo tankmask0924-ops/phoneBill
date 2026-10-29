@@ -209,6 +209,10 @@ class OrderAdminService extends AbstractService
                 'response' => $a->response,
                 'submitted_at' => $a->submitted_at?->toDateTimeString(),
                 'last_queried_at' => $a->last_queried_at?->toDateTimeString(),
+                'query_status' => $a->query_status,
+                'query_message' => $a->query_message,
+                'query_request' => $a->query_request,
+                'query_response' => $a->query_response,
                 'finished_at' => $a->finished_at?->toDateTimeString(),
                 // 提交给供应商到出结果（回调或查单）的秒数
                 'duration' => self::seconds($a->submitted_at, $a->finished_at),
@@ -233,7 +237,8 @@ class OrderAdminService extends AbstractService
     }
 
     /**
-     * 人工查单：对还在处理中的提交立即查一次单并按结果处理（成功会把订单改为成功；失败时异常订单保持异常，等人工置为失败）。
+     * 人工查单：这笔订单的每个提交都立即查一次单，结果和报文记在提交上。还在处理中的按结果更新订单：成功改成功并通知商户，
+     * 失败换下一个供应商（异常订单、人工处理单也一样，见 OrderProcessService::queryAttempt()）；已经有结果的只记录，方便核对上游现在的状态。
      * 返回详情和这次每个提交查到的结果，前端据此提示下一步。
      *
      * @return array<string, mixed>
@@ -241,14 +246,20 @@ class OrderAdminService extends AbstractService
     public function query(AdminUser $operator, int $id, ?string $ip): array
     {
         $order = $this->findOrFail($id);
-        $processing = $this->attemptDao->forOrder($order->id)->where('status', OrderAttempt::STATUS_PROCESSING);
-        if ($processing->isEmpty()) {
-            throw new HttpException(422, '这个订单没有在处理中的供应商提交，不用查单');
+        $attempts = $this->attemptDao->forOrder($order->id);
+        if ($attempts->isEmpty()) {
+            throw new HttpException(422, '这个订单还没有提交给供应商，没法查单');
         }
         $results = [];
-        foreach ($processing as $attempt) {
-            $result = $this->processService->queryAttempt($attempt);
-            $results[] = ['attempt_no' => $attempt->attempt_no, 'status' => $result->status->value, 'message' => $result->message];
+        foreach ($attempts as $attempt) {
+            $result = $this->processService->queryAttempt($attempt, true);
+            $results[] = [
+                'attempt_no' => $attempt->attempt_no,
+                'status' => $result->status->value,
+                'message' => $result->message,
+                // 提交本来还在处理中、这次按查单结果处理了；已有结果的只记录
+                'applied' => $attempt->status === OrderAttempt::STATUS_PROCESSING,
+            ];
         }
         $this->operationLogDao->record($operator->id, self::MODULE, 'query_order', 'order', $order->id, null, ['results' => $results], $ip);
 
@@ -627,10 +638,17 @@ class OrderAdminService extends AbstractService
         if ($order->status === Order::STATUS_SUCCESS && $attempts !== [] && end($attempts)->status === OrderAttempt::STATUS_FAILED) {
             $warnings[] = '最后一次供应商提交是失败的，但订单是成功，请核对是否到账';
         }
+        // 提交已有结果，后来查单查到的是相反的结果：上游可能撤销了或者记错了
+        $labels = [OrderAttempt::STATUS_SUCCESS => '成功', OrderAttempt::STATUS_FAILED => '失败'];
+        foreach ($attempts as $a) {
+            if (isset($labels[$a->status], $labels[$a->query_status ?? '']) && $a->query_status !== $a->status) {
+                $warnings[] = "提交 {$a->attempt_no} 是{$labels[$a->status]}，但最后一次查单上游返回{$labels[$a->query_status]}，请到上游核对";
+            }
+        }
         if ($order->manual_only && $order->manual_notified_at === null) {
             $warnings[] = $order->isFinal()
                 ? '人工处理单：结果还没有回调给商户（商户查单看到的是处理中），核实无误后请点「手动回调」'
-                : '人工处理单：提交时接口异常，查单结果只记录不自动处理（上游回调明确成功 / 失败时会自动处理）。请到上游核实后置为成功 / 失败，或确认上游没有充上后手动补单';
+                : '人工处理单：提交时接口异常，定时查单结果只记录不自动处理；上游回调或点「向供应商查单」拿到明确成功 / 失败时会自动处理。也可以到上游核实后置为成功 / 失败，或确认上游没有充上后手动补单';
         }
 
         return $warnings;
