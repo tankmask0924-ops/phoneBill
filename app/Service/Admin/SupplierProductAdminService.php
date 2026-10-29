@@ -24,6 +24,7 @@ use App\Enum\Operator;
 use App\Enum\Province;
 use App\Model\AdminUser;
 use App\Model\ProductRoute;
+use App\Model\Supplier;
 use App\Model\SupplierProduct;
 use App\Service\AbstractService;
 use App\Service\Merchant\MerchantPriceService;
@@ -145,22 +146,60 @@ class SupplierProductAdminService extends AbstractService
      */
     public function upstreamProducts(mixed $supplierId): array
     {
-        $supplier = is_numeric($supplierId) ? $this->supplierDao->find((int) $supplierId) : null;
-        if ($supplier === null) {
-            throw new HttpException(404, '供应商不存在');
-        }
-        if (! $this->supplierGateway->supportsUpstreamProducts($supplier)) {
-            throw new HttpException(422, '该供应商的接口不支持查询商品，请手动填写供应商商品编码');
-        }
-        try {
-            $products = $this->supplierGateway->upstreamProducts($supplier);
-        } catch (Throwable $e) {
-            throw new HttpException(422, mb_substr('查询上游商品失败：' . $e->getMessage(), 0, 255));
-        }
+        $supplier = $this->findSupplier($supplierId);
+        $products = $this->fetchUpstream($supplier, '该供应商的接口不支持查询商品，请手动填写供应商商品编码');
         $codes = array_map(static fn (UpstreamProduct $p) => $p->code, $products);
         $added = array_flip($codes === [] ? [] : $this->supplierProductDao->existingExternalCodes($supplier->id, $codes));
 
         return array_map(static fn (UpstreamProduct $p) => $p->toArray() + ['added' => isset($added[$p->code])], $products);
+    }
+
+    /**
+     * 按上游商品列表同步某个供应商名下供应商商品的成本价：按供应商商品编码对上上游商品，用上游给的进价（四舍五入到分）。
+     * 上游没有这个编码、或者没给价格的不动，只列出来。$apply 为 false 时只返回会改哪些（预览），不保存；
+     * 保存时每次重新查上游，记一条操作日志，事务提交后清选路缓存（成本影响排序）。
+     *
+     * @return array{applied: bool, changed: list<array<string, mixed>>, unchanged_count: int, missing: list<array<string, mixed>>, no_price: list<array<string, mixed>>}
+     */
+    public function syncCostPrices(AdminUser $operator, mixed $supplierId, bool $apply, ?string $ip): array
+    {
+        $supplier = $this->findSupplier($supplierId);
+        $upstream = [];
+        foreach ($this->fetchUpstream($supplier, '该供应商的接口不支持查询商品，没法同步成本价') as $p) {
+            $upstream[$p->code] = $p;
+        }
+        $changed = [];
+        $missing = [];
+        $noPrice = [];
+        $unchanged = 0;
+        foreach ($this->supplierProductDao->forSupplier($supplier->id) as $sp) {
+            $row = ['id' => $sp->id, 'name' => $sp->name, 'external_code' => $sp->external_code, 'face_value' => $sp->face_value, 'status' => $sp->status, 'cost_price' => $sp->cost_price];
+            $product = $upstream[$sp->external_code] ?? null;
+            $price = $product === null ? null : self::upstreamPrice($product->price);
+            if ($product === null) {
+                $missing[] = $row;
+            } elseif ($price === null) {
+                $noPrice[] = $row;
+            } elseif (bccomp($price, $sp->cost_price, 2) === 0) {
+                ++$unchanged;
+            } else {
+                $changed[] = $row + ['new_cost_price' => $price, 'upstream_on_sale' => $product->onSale];
+            }
+        }
+        $applied = $apply && $changed !== [];
+        if ($applied) {
+            Db::transaction(function () use ($operator, $supplier, $changed, $ip) {
+                foreach ($changed as $c) {
+                    $this->supplierProductDao->update($c['id'], ['cost_price' => $c['new_cost_price']]);
+                }
+                $this->operationLogDao->record($operator->id, self::MODULE, 'sync_supplier_product_cost', 'supplier', $supplier->id, null, [
+                    'changes' => array_map(static fn (array $c) => ['supplier_product_id' => $c['id'], 'external_code' => $c['external_code'], 'from' => $c['cost_price'], 'to' => $c['new_cost_price']], $changed),
+                ], $ip);
+            });
+            $this->routeService->flushConfig();
+        }
+
+        return ['applied' => $applied, 'changed' => $changed, 'unchanged_count' => $unchanged, 'missing' => $missing, 'no_price' => $noPrice];
     }
 
     /**
@@ -383,6 +422,44 @@ class SupplierProductAdminService extends AbstractService
         $products = $this->supplierProductDao->newQuery()->whereIn('id', $ids)->get()->all();
 
         return array_column($this->formatMany($products), null, 'id');
+    }
+
+    private function findSupplier(mixed $supplierId): Supplier
+    {
+        $supplier = is_numeric($supplierId) ? $this->supplierDao->find((int) $supplierId) : null;
+        if ($supplier === null) {
+            throw new HttpException(404, '供应商不存在');
+        }
+
+        return $supplier;
+    }
+
+    /**
+     * @return list<UpstreamProduct>
+     */
+    private function fetchUpstream(Supplier $supplier, string $unsupported): array
+    {
+        if (! $this->supplierGateway->supportsUpstreamProducts($supplier)) {
+            throw new HttpException(422, $unsupported);
+        }
+        try {
+            return $this->supplierGateway->upstreamProducts($supplier);
+        } catch (Throwable $e) {
+            throw new HttpException(422, mb_substr('查询上游商品失败：' . $e->getMessage(), 0, 255));
+        }
+    }
+
+    /**
+     * 上游给的进价转成两位小数（四舍五入），不是大于 0 的数字返回 null。
+     */
+    private static function upstreamPrice(?string $price): ?string
+    {
+        $price = trim((string) $price);
+        if (preg_match('/^\d{1,9}(\.\d+)?$/', $price) !== 1 || bccomp($price, '0', 4) <= 0) {
+            return null;
+        }
+
+        return bcadd($price, '0.005', 2);
     }
 
     private function findOrFail(int $id): SupplierProduct

@@ -89,6 +89,30 @@ class SupplierProductController extends AbstractController
         return $this->supplierProductAdminService->upstreamProducts($this->request->input('supplier_id'));
     }
 
+    /**
+     * 同步成本价预览：按上游商品列表算出这个供应商名下哪些成本价会变，不保存。
+     */
+    #[Middleware(AdminAuthMiddleware::class)]
+    #[Middleware(AdminPermissionMiddleware::class)]
+    #[RequiresPermission('supplier_product.manage')]
+    #[GetMapping(path: 'sync-cost')]
+    public function syncCostPreview(): array
+    {
+        return $this->supplierProductAdminService->syncCostPrices($this->admin(), $this->request->input('supplier_id'), false, $this->clientIp());
+    }
+
+    /**
+     * 按上游商品列表同步这个供应商名下供应商商品的成本价。
+     */
+    #[Middleware(AdminAuthMiddleware::class)]
+    #[Middleware(AdminPermissionMiddleware::class)]
+    #[RequiresPermission('supplier_product.manage')]
+    #[PostMapping(path: 'sync-cost')]
+    public function syncCost(): array
+    {
+        return $this->supplierProductAdminService->syncCostPrices($this->admin(), $this->request->input('supplier_id'), true, $this->clientIp());
+    }
+
     #[Middleware(AdminAuthMiddleware::class)]
     #[Middleware(AdminPermissionMiddleware::class)]
     #[RequiresPermission('supplier_product.manage')]

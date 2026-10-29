@@ -13,6 +13,7 @@ declare(strict_types=1);
 namespace App\Dao;
 
 use App\Model\SupplierProduct;
+use Hyperf\Database\Model\Collection;
 
 class SupplierProductDao extends AbstractDao
 {
@@ -49,6 +50,16 @@ class SupplierProductDao extends AbstractDao
     public function countForSupplier(int $supplierId): int
     {
         return $this->newQuery()->where('supplier_id', $supplierId)->count();
+    }
+
+    /**
+     * 某个供应商名下的全部供应商商品（不含已删除），按面值、id 排。
+     *
+     * @return Collection<int, SupplierProduct>
+     */
+    public function forSupplier(int $supplierId): Collection
+    {
+        return SupplierProduct::query()->where('supplier_id', $supplierId)->orderBy('face_value')->orderBy('id')->get();
     }
 
     /**

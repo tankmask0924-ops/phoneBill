@@ -6,6 +6,7 @@ import { Plus, Refresh } from '@element-plus/icons-vue'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import {
   type OperatorCode,
+  type CostSyncResult,
   type SupplierOption,
   type SupplierProduct,
   type SupplierProductBinding,
@@ -269,6 +270,47 @@ async function unbindAll() {
   }
 }
 
+/** 同步成本价：按筛选里选中的供应商，先预览会改哪些，确认后保存 */
+const costSyncVisible = ref(false)
+const costSyncLoading = ref(false)
+const costSyncing = ref(false)
+const costSync = ref<CostSyncResult | null>(null)
+const costSyncSupplier = computed(() => suppliers.value.find((s) => s.id === filters.supplier_id) ?? null)
+
+async function openCostSync() {
+  const supplier = costSyncSupplier.value
+  if (!supplier) {
+    ElMessage.warning('请先在筛选里选择一个供应商')
+    return
+  }
+  if (!supplier.supports_upstream_products) {
+    ElMessage.warning(`「${supplier.name}」的接口不支持查询商品，没法同步成本价`)
+    return
+  }
+  costSync.value = null
+  costSyncVisible.value = true
+  costSyncLoading.value = true
+  try {
+    costSync.value = await supplierProductApi.previewCostSync(supplier.id)
+  } catch {
+    costSyncVisible.value = false
+  } finally {
+    costSyncLoading.value = false
+  }
+}
+
+async function confirmCostSync() {
+  costSyncing.value = true
+  try {
+    const result = await supplierProductApi.syncCost(costSyncSupplier.value!.id)
+    ElMessage.success(result.applied ? `已更新 ${result.changed.length} 个供应商商品的成本价` : '成本价都是最新的，没有要改的')
+    costSyncVisible.value = false
+    await list.load()
+  } finally {
+    costSyncing.value = false
+  }
+}
+
 onMounted(async () => {
   await permission.load()
   list.load()
@@ -319,7 +361,10 @@ onMounted(async () => {
           <el-button type="primary" native-type="submit">查询</el-button>
         </el-form-item>
       </el-form>
-      <el-button v-if="canManage" type="primary" :icon="Plus" @click="openCreate">新建供应商商品</el-button>
+      <div>
+        <el-button v-if="canManage" :icon="Refresh" @click="openCostSync">同步成本价</el-button>
+        <el-button v-if="canManage" type="primary" :icon="Plus" @click="openCreate">新建供应商商品</el-button>
+      </div>
     </div>
 
     <el-table v-loading="loading" :data="rows" border @sort-change="onSortChange">
@@ -473,9 +518,63 @@ onMounted(async () => {
       <el-button type="danger" :loading="unbinding" :disabled="bindings.length === 0" @click="unbindAll">全部解绑</el-button>
     </template>
   </el-dialog>
+
+  <el-dialog v-model="costSyncVisible" :title="`同步成本价 - ${costSyncSupplier?.name ?? ''}`" width="760px">
+    <div v-loading="costSyncLoading" style="min-height: 120px">
+      <template v-if="costSync">
+        <div class="sync-summary">
+          按上游商品列表的进价同步，按「供应商商品编码」对应。
+          要改 <b>{{ costSync.changed.length }}</b> 个，已经一致 {{ costSync.unchanged_count }} 个，上游没有这个编码
+          {{ costSync.missing.length }} 个，上游没给价格 {{ costSync.no_price.length }} 个（这两种不改）。
+        </div>
+        <el-table :data="costSync.changed" border size="small" max-height="360" empty-text="成本价都是最新的，没有要改的">
+          <el-table-column prop="name" label="商品名称" min-width="150" />
+          <el-table-column prop="external_code" label="供应商商品编码" min-width="130" />
+          <el-table-column label="面值" width="70" align="right">
+            <template #default="{ row }">{{ row.face_value }}</template>
+          </el-table-column>
+          <el-table-column prop="cost_price" label="原成本价" width="90" align="right" />
+          <el-table-column label="新成本价" width="100" align="right">
+            <template #default="{ row }">
+              <span :class="Number(row.new_cost_price) > Number(row.cost_price) ? 'danger' : 'gain'">{{ row.new_cost_price }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="上游" width="80">
+            <template #default="{ row }">
+              <el-tag v-if="!row.upstream_on_sale" size="small" type="info">已下架</el-tag>
+            </template>
+          </el-table-column>
+        </el-table>
+        <el-collapse v-if="costSync.missing.length || costSync.no_price.length" class="sync-skipped">
+          <el-collapse-item v-if="costSync.missing.length" :title="`上游没有这个编码（${costSync.missing.length}）`">
+            <div v-for="i in costSync.missing" :key="i.id">{{ i.name }}（{{ i.external_code }}）成本 {{ i.cost_price }}</div>
+          </el-collapse-item>
+          <el-collapse-item v-if="costSync.no_price.length" :title="`上游没给价格（${costSync.no_price.length}）`">
+            <div v-for="i in costSync.no_price" :key="i.id">{{ i.name }}（{{ i.external_code }}）成本 {{ i.cost_price }}</div>
+          </el-collapse-item>
+        </el-collapse>
+      </template>
+    </div>
+    <template #footer>
+      <el-button @click="costSyncVisible = false">取消</el-button>
+      <el-button type="primary" :loading="costSyncing" :disabled="!costSync || costSync.changed.length === 0" @click="confirmCostSync">
+        确认同步
+      </el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <style scoped>
+.sync-summary {
+  margin-bottom: 12px;
+  color: #606266;
+  font-size: 13px;
+}
+
+.sync-skipped {
+  margin-top: 12px;
+}
+
 .unbind-tip {
   margin-bottom: 12px;
 }
@@ -488,6 +587,11 @@ onMounted(async () => {
 
 .danger {
   color: #f56c6c;
+  font-weight: 600;
+}
+
+.gain {
+  color: #67c23a;
   font-weight: 600;
 }
 

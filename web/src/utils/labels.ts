@@ -151,6 +151,7 @@ export const operationActionLabels: LabelMap = {
   disable_supplier: { label: '停用供应商' },
   create_supplier_product: { label: '新建供应商商品' },
   update_supplier_product: { label: '修改供应商商品' },
+  sync_supplier_product_cost: { label: '同步供应商商品成本价' },
   enable_supplier_product: { label: '上架供应商商品' },
   disable_supplier_product: { label: '下架供应商商品' },
   create_product_category: { label: '新建商品分类' },

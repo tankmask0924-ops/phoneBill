@@ -116,7 +116,31 @@ export interface UpstreamProduct {
   added: boolean
 }
 
+/** 同步成本价时对不上 / 不改的供应商商品 */
+export interface CostSyncItem {
+  id: number
+  name: string
+  external_code: string
+  face_value: number
+  status: string
+  cost_price: string
+}
+
+/** 同步成本价的结果：changed 是成本价会变（预览）或已经改了（applied 为 true）的 */
+export interface CostSyncResult {
+  applied: boolean
+  changed: (CostSyncItem & { new_cost_price: string; upstream_on_sale: boolean })[]
+  unchanged_count: number
+  /** 上游商品列表里没有这个编码 */
+  missing: CostSyncItem[]
+  /** 上游没给价格 */
+  no_price: CostSyncItem[]
+}
+
 export const supplierProductApi = {
+  /** 按上游商品列表同步某个供应商的成本价：preview 只算不改，sync 保存 */
+  previewCostSync: (supplierId: number) => http.get<CostSyncResult>('/admin/supplier-products/sync-cost', { supplier_id: supplierId }),
+  syncCost: (supplierId: number) => http.post<CostSyncResult>('/admin/supplier-products/sync-cost', { supplier_id: supplierId }),
   meta: () => http.get<{ provinces: string[] }>('/admin/supplier-products/meta'),
   supplierOptions: () => http.get<SupplierOption[]>('/admin/supplier-products/supplier-options'),
   upstreamProducts: (supplierId: number) =>

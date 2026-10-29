@@ -14,6 +14,7 @@ namespace HyperfTest\Cases\Admin;
 
 use App\Model\AdminOperationLog;
 use App\Model\ProductRoute;
+use App\Model\SupplierProduct;
 use HyperfTest\HttpTestCase;
 
 /**
@@ -177,6 +178,53 @@ class SupplierProductControllerTest extends HttpTestCase
 
         // 解绑后可以删除
         $this->assertSame(200, $this->jsonRequest('DELETE', "/admin/supplier-products/{$sp->id}", $viewer)->getStatusCode());
+    }
+
+    public function testSyncCostPricesFromUpstream()
+    {
+        $token = $this->loginAs($this->createAdminWithPermissions(['supplier_product.view', 'supplier_product.manage']));
+        $supplier = $this->createSupplier();
+        $make = function (string $code, string $cost) use ($supplier) {
+            $sp = $this->createSupplierProduct($supplier, ['cmcc'], 100, $cost);
+            $sp->update(['external_code' => $code]);
+
+            return $sp;
+        };
+        // 模拟上游：MOCK_CMCC_100 98.50、MOCK_CUCC_100 98.80、MOCK_OFF 9.90（已下架）
+        $cheaper = $make('MOCK_CMCC_100', '97.00');
+        $same = $make('MOCK_CUCC_100', '98.80');
+        $off = $make('MOCK_OFF', '9.00');
+        $gone = $make('NOT_UPSTREAM', '50.00');
+        $url = "/admin/supplier-products/sync-cost?supplier_id={$supplier->id}";
+
+        // 预览：只算不改
+        $preview = $this->body($this->jsonRequest('GET', $url, $token));
+        $this->assertFalse($preview['applied']);
+        $this->assertSame([[$cheaper->id, '97.00', '98.50', true], [$off->id, '9.00', '9.90', false]], array_map(static fn (array $c) => [$c['id'], $c['cost_price'], $c['new_cost_price'], $c['upstream_on_sale']], $preview['changed']));
+        $this->assertSame(1, $preview['unchanged_count']);
+        $this->assertSame([$gone->id], array_column($preview['missing'], 'id'), '上游没有这个编码的不改');
+        $this->assertSame([], $preview['no_price']);
+        $this->assertSame('97.00', SupplierProduct::find($cheaper->id)->cost_price);
+
+        // 确认同步：保存、记一条操作日志
+        $synced = $this->body($this->jsonRequest('POST', '/admin/supplier-products/sync-cost', $token, ['supplier_id' => $supplier->id]));
+        $this->assertTrue($synced['applied']);
+        $this->assertSame(['98.50', '98.80', '9.90', '50.00'], [SupplierProduct::find($cheaper->id)->cost_price, SupplierProduct::find($same->id)->cost_price, SupplierProduct::find($off->id)->cost_price, SupplierProduct::find($gone->id)->cost_price]);
+        $log = AdminOperationLog::where('action', 'sync_supplier_product_cost')->where('target_id', $supplier->id)->first();
+        $this->assertNotNull($log);
+        $this->assertEquals(['from' => '97.00', 'to' => '98.50'], array_intersect_key($log->after_data['changes'][0], ['from' => 0, 'to' => 0]));
+        $this->assertSame(0, AdminOperationLog::where('admin_user_id', $log->admin_user_id)->where('action', 'sync_cost')->count(), '手动记过，兜底的不会再自动多记一条');
+
+        // 再同步一次：都一致了
+        $again = $this->body($this->jsonRequest('POST', '/admin/supplier-products/sync-cost', $token, ['supplier_id' => $supplier->id]));
+        $this->assertSame([false, [], 3], [$again['applied'], $again['changed'], $again['unchanged_count']]);
+
+        // 不存在的供应商、驱动不支持查商品、只有查看权限
+        $this->assertSame(404, $this->jsonRequest('GET', '/admin/supplier-products/sync-cost?supplier_id=999999999', $token)->getStatusCode());
+        $viewer = $this->loginAs($this->createAdminWithPermissions(['supplier_product.view']));
+        $this->assertSame(403, $this->jsonRequest('POST', '/admin/supplier-products/sync-cost', $viewer, ['supplier_id' => $supplier->id])->getStatusCode());
+        $supplier->update(['driver' => 'no_such_driver']);
+        $this->assertSame(422, $this->jsonRequest('GET', $url, $token)->getStatusCode());
     }
 
     public function testListFiltersNationwideAndSortsByCost()
