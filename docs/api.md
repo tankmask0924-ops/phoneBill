@@ -286,7 +286,7 @@ GET {BASE}/open/v1/order?app_key=ak_demo&merchant_order_no=M20261010001&timestam
 | `face_value` | int | 面值（元） |
 | `amount` | string | 扣款金额（元，两位小数） |
 | `status` | string | `processing` 充值中 / `success` 成功 / `failed` 失败（已退款） |
-| `fail_reason` | string \| null | 失败原因，仅失败时有值 |
+| `fail_reason` | string \| null | 失败原因，仅失败时有值：`充值失败` / `暂无可用充值通道` / `订单已冲正` |
 | `created_at` | string | 下单时间，`yyyy-MM-dd HH:mm:ss` |
 | `finished_at` | string \| null | 完成时间，充值中为 null |
 

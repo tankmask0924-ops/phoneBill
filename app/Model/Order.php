@@ -38,7 +38,7 @@ use Carbon\Carbon;
  * @property null|string $notify_url
  * @property string $notify_status
  * @property null|Carbon $notified_at
- * @property bool $manual_only 人工处理单：提交时接口异常，上游结果只记录，状态和回调全部人工
+ * @property bool $manual_only 人工处理单：提交时接口异常，查单结果只记录，上游回调明确成功 / 失败时交回正常流程
  * @property null|Carbon $manual_notified_at 最近一次手动回调时间
  * @property int $notify_round 通知轮次，每次手动回调加 1
  * @property null|Carbon $finished_at
@@ -143,6 +143,20 @@ class Order extends Model
     public function abnormalForMerchant(bool $unclearReply): bool
     {
         return ! $this->resultVisibleToMerchant() && ($this->manual_only || $this->flaggedAbnormal($unclearReply));
+    }
+
+    /**
+     * 给商户看的失败原因：fail_reason 里带着供应商返回的内容和后台备注，不能给下游，只给平台自己的说法。
+     */
+    public function merchantFailReason(): string
+    {
+        $reason = (string) $this->fail_reason;
+
+        return match (true) {
+            str_starts_with($reason, '没有可用的供应商通道') => '暂无可用充值通道',
+            str_starts_with($reason, '冲正：') => '订单已冲正',
+            default => '充值失败',
+        };
     }
 
     /**

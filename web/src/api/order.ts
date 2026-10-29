@@ -36,7 +36,7 @@ export interface Order {
   notify_url: string | null
   notify_status: string
   notified_at: string | null
-  /** 人工处理单：提交时接口异常，上游结果只记录，状态和回调全部人工 */
+  /** 人工处理单：提交时接口异常，查单结果只记录；上游回调明确成功 / 失败时交回正常流程 */
   manual_only: boolean
   /** 最近一次手动回调；回调过之后上游结果不再推给商户 */
   manual_notified_at: string | null

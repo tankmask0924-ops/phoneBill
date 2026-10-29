@@ -87,6 +87,8 @@ class OrderControllerTest extends HttpTestCase
         $this->assertSame([$abnormal->id], array_column($filtered['data'], 'id'));
         $byNo = $this->body($this->jsonRequest('GET', '/admin/orders?keyword=' . $success->merchant_order_no, $token));
         $this->assertSame([$success->id], array_column($byNo['data'], 'id'));
+        $byAttemptNo = $this->body($this->jsonRequest('GET', '/admin/orders?keyword=' . $success->order_no . '01', $token));
+        $this->assertSame([$success->id], array_column($byAttemptNo['data'], 'id'), '提交单号也能搜到');
         $this->assertSame([], $this->body($this->jsonRequest('GET', '/admin/orders?keyword=no_such_order', $token))['data']);
 
         $detail = $this->body($this->jsonRequest('GET', "/admin/orders/{$success->id}", $token));

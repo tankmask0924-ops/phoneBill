@@ -33,6 +33,16 @@ class OrderAttemptDao extends AbstractDao
     }
 
     /**
+     * 按提交单号（传给供应商的订单号）找订单 id，后台搜索框用。
+     */
+    public function orderIdForAttemptNo(string $attemptNo): ?int
+    {
+        $orderId = $this->newQuery()->where('attempt_no', $attemptNo)->value('order_id');
+
+        return $orderId === null ? null : (int) $orderId;
+    }
+
+    /**
      * 这些订单里上游返回不明确的：还在处理中的提交带着说明（如「下单未确认受理」「查单未拿到明确结果」），正常受理的不带。
      *
      * @param list<int> $orderIds

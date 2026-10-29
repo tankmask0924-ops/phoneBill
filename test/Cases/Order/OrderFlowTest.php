@@ -141,7 +141,11 @@ class OrderFlowTest extends HttpTestCase
         $this->process()->submit($second->id);
         $second = Order::find($second->id);
         $this->assertSame(Order::STATUS_FAILED, $second->status);
-        $this->assertStringContainsString('所有供应商都充值失败', $second->fail_reason);
+        $this->assertStringContainsString('所有供应商都充值失败：模拟失败', $second->fail_reason);
+        // 供应商返回的内容只留在后台，开放接口 / 回调商户只给平台的说法
+        $queried = $this->api($merchant, 'GET', '/open/v1/order', ['order_no' => $second->order_no]);
+        $this->assertSame('充值失败', $queried['data']['fail_reason']);
+        $this->assertStringNotContainsString('模拟失败', json_encode($queried, JSON_UNESCAPED_UNICODE));
         $this->assertSame('100.50', Merchant::find($merchant->id)->balance, '只扣了成功那一单');
         $this->assertSame(['order_pay', 'order_pay', 'order_refund'], MerchantBalanceLog::where('merchant_id', $merchant->id)->orderBy('id')->pluck('type')->all());
 
@@ -172,10 +176,10 @@ class OrderFlowTest extends HttpTestCase
 
         $this->assertTrue(Order::find($order->id)->manual_only, '标为人工处理单');
 
-        // 人工处理单：上游说成功也只记到提交上，订单保持异常、不通知商户，商户查单还是处理中
+        // 人工处理单：查单说成功也只记到提交上，订单保持异常、不通知商户，商户查单还是处理中
         $this->dispatcher->notifies = [];
-        $reply = $this->supplierCallback($suppliers[0], ['attempt_no' => $attempt->attempt_no, 'status' => 'success']);
-        $this->assertSame([200, 'ok'], $reply);
+        $this->setMockResult($suppliers[0], 'success');
+        $this->process()->queryAttempt(OrderAttempt::find($attempt->id));
         $this->assertSame(OrderAttempt::STATUS_SUCCESS, OrderAttempt::find($attempt->id)->status);
         $this->assertSame(Order::STATUS_ABNORMAL, Order::find($order->id)->status);
         $this->assertSame([], $this->dispatcher->notifies);
@@ -203,7 +207,29 @@ class OrderFlowTest extends HttpTestCase
         $this->assertSame(404, $this->client->request('POST', '/notify/supplier/no_such_supplier')->getStatusCode());
     }
 
-    public function testCallFailureThenUpstreamFailureStaysAbnormalForManualRefund()
+    public function testCallFailureThenSuccessCallbackCompletesOrder()
+    {
+        [$merchant, $product, $mobile, $suppliers] = $this->scenario([
+            ['provinces' => ['*'], 'operators' => ['cmcc'], 'cost' => '98.00', 'result' => 'timeout', 'priority' => 1],
+            ['provinces' => ['*'], 'operators' => ['cmcc'], 'cost' => '99.00', 'result' => 'success', 'priority' => 2],
+        ]);
+        $order = $this->placeOrder($merchant, $product, $mobile);
+        $this->process()->submit($order->id);
+        $attempt = OrderAttempt::where('order_id', $order->id)->first();
+        $this->dispatcher->notifies = [];
+
+        // 上游回调成功：交回正常流程，改成功并通知商户
+        $this->assertSame([200, 'ok'], $this->supplierCallback($suppliers[0], ['attempt_no' => $attempt->attempt_no, 'status' => 'success']));
+        $order = Order::find($order->id);
+        $this->assertSame(Order::STATUS_SUCCESS, $order->status);
+        $this->assertFalse($order->manual_only);
+        $this->assertSame($suppliers[0]->id, $order->supplier_id);
+        $this->assertSame('98.00', $order->cost_price);
+        $this->assertSame([['order_id' => $order->id, 'attempt_no' => 1, 'delay' => 0]], $this->dispatcher->notifies);
+        $this->assertSame('success', make(OrderService::class)->present($order)['status']);
+    }
+
+    public function testCallFailureThenFailedCallbackMovesToNextSupplier()
     {
         [$merchant, $product, $mobile, $suppliers] = $this->scenario([
             ['provinces' => ['*'], 'operators' => ['cmcc'], 'cost' => '98.00', 'result' => 'timeout', 'priority' => 1],
@@ -213,14 +239,58 @@ class OrderFlowTest extends HttpTestCase
         $this->process()->submit($order->id);
         $balance = Merchant::find($merchant->id)->balance;
         $attempt = OrderAttempt::where('order_id', $order->id)->first();
+        $this->dispatcher->submits = [];
 
-        // 上游后来说失败：提交记为失败，但订单保持异常，不自动换供应商、不自动退款，等人工核实
+        // 上游回调失败：确认没充上，交回正常流程，推任务换下一个供应商
         $this->assertSame([200, 'ok'], $this->supplierCallback($suppliers[0], ['attempt_no' => $attempt->attempt_no, 'status' => 'failed']));
         $this->assertSame(OrderAttempt::STATUS_FAILED, OrderAttempt::find($attempt->id)->status);
-        $this->assertSame(Order::STATUS_ABNORMAL, Order::find($order->id)->status);
+        $order = Order::find($order->id);
+        $this->assertSame(Order::STATUS_PROCESSING, $order->status);
+        $this->assertFalse($order->manual_only);
+        $this->assertSame([['order_id' => $order->id, 'delay' => 0]], $this->dispatcher->submits);
+
         $this->process()->submit($order->id);
-        $this->assertSame(1, OrderAttempt::where('order_id', $order->id)->count());
-        $this->assertSame($balance, Merchant::find($merchant->id)->balance);
+        $order = Order::find($order->id);
+        $this->assertSame(Order::STATUS_SUCCESS, $order->status);
+        $this->assertSame($suppliers[1]->id, $order->supplier_id);
+        $this->assertSame(2, OrderAttempt::where('order_id', $order->id)->count());
+        $this->assertSame($balance, Merchant::find($merchant->id)->balance, '没有重复扣款，也没退款');
+    }
+
+    public function testCallbackAfterManualResultOnlyRecords()
+    {
+        [$merchant, $product, $mobile, $suppliers] = $this->scenario([
+            ['provinces' => ['*'], 'operators' => ['cmcc'], 'cost' => '98.00', 'result' => 'timeout', 'priority' => 1],
+            ['provinces' => ['*'], 'operators' => ['cmcc'], 'cost' => '99.00', 'result' => 'success', 'priority' => 2],
+        ]);
+        $order = $this->placeOrder($merchant, $product, $mobile);
+        $this->process()->submit($order->id);
+        $attempt = OrderAttempt::where('order_id', $order->id)->first();
+
+        // 人工已经置为失败退款：之后的成功回调只记录，不改订单（矛盾记 error 等人工核对）
+        $this->assertTrue($this->process()->fail(Order::find($order->id), [Order::STATUS_ABNORMAL], '人工确认失败'));
+        $this->dispatcher->submits = [];
+        $this->dispatcher->notifies = [];
+        $this->supplierCallback($suppliers[0], ['attempt_no' => $attempt->attempt_no, 'status' => 'success']);
+        $order = Order::find($order->id);
+        $this->assertSame(Order::STATUS_FAILED, $order->status);
+        $this->assertTrue($order->manual_only);
+        $this->assertSame([], $this->dispatcher->submits);
+        $this->assertSame([], $this->dispatcher->notifies);
+    }
+
+    public function testMerchantFailReasonHidesUpstreamText()
+    {
+        $reasons = [
+            '没有可用的供应商通道' => '暂无可用充值通道',
+            '冲正：运营商撤销' => '订单已冲正',
+            '所有供应商都充值失败：[1111] 号码已停机' => '充值失败',
+            '超时后上游返回失败：上游已取消' => '充值失败',
+            '人工确认失败：大猿人核实未到账' => '充值失败',
+        ];
+        foreach ($reasons as $failReason => $expected) {
+            $this->assertSame($expected, (new Order(['fail_reason' => $failReason]))->merchantFailReason(), $failReason);
+        }
     }
 
     public function testQueryDueAndTimeout()
@@ -253,6 +323,7 @@ class OrderFlowTest extends HttpTestCase
         $failed = Order::find($late->id);
         $this->assertSame([Order::STATUS_FAILED, Order::NOTIFY_PENDING], [$failed->status, $failed->notify_status]);
         $this->assertStringContainsString('超时后上游返回失败', $failed->fail_reason);
+        $this->assertSame('充值失败', make(OrderService::class)->present($failed)['fail_reason']);
         $this->assertSame(OrderAttempt::STATUS_FAILED, OrderAttempt::find($attempt->id)->status);
         $this->assertCount(1, array_filter($this->dispatcher->submits, fn ($s) => $s['order_id'] === $late->id), '只有下单时推的那一次，超时后不再换供应商');
         $this->assertContains($late->id, array_column($this->dispatcher->notifies, 'order_id'));

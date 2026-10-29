@@ -161,6 +161,19 @@ class OrderProcessService extends AbstractService
     }
 
     /**
+     * 处理供应商回调。调用异常转人工的订单（还在异常、没人工处理过）收到明确的成功 / 失败回调：
+     * 上游确实收到了这笔单并给了结果，不用再人工，交回正常流程——成功改成功并通知商户，失败换下一个供应商。
+     * 查单结果不走这里，仍只记录：下单没拿到返回时，上游查不到单可能只是还没建好。
+     */
+    public function applyCallback(int $attemptId, RechargeResult $result): void
+    {
+        if ($result->status !== RechargeStatus::Processing) {
+            $this->releaseManualOnly($attemptId, $result->status);
+        }
+        $this->applyResult($attemptId, $result);
+    }
+
+    /**
      * 处理供应商给出的结果（提交返回、回调、查单都走这里）。
      *
      * @param bool $resubmitOnFailure 明确失败时是否推任务换下一个供应商；submit() 自己在锁里循环，传 false
@@ -511,6 +524,27 @@ class OrderProcessService extends AbstractService
                 'order_id' => $order->id,
                 'attempt_no' => $attempt->attempt_no,
                 'message' => $result->message,
+            ]);
+        }
+    }
+
+    private function releaseManualOnly(int $attemptId, RechargeStatus $upstream): void
+    {
+        $attempt = $this->attemptDao->find($attemptId);
+        if ($attempt === null || $attempt->status !== OrderAttempt::STATUS_PROCESSING) {
+            return;
+        }
+        $order = $this->orderDao->find($attempt->order_id);
+        if ($order === null || $order->status !== Order::STATUS_ABNORMAL || ! $order->manual_only || $order->manual_notified_at !== null) {
+            return;
+        }
+        // 失败要先回到处理中，applyResult 才会换下一个供应商；成功从异常直接改成功
+        $to = $upstream === RechargeStatus::Failed ? Order::STATUS_PROCESSING : Order::STATUS_ABNORMAL;
+        if ($this->orderDao->transition($order->id, [Order::STATUS_ABNORMAL], $to, ['manual_only' => false])) {
+            $this->logger()->info('人工处理单收到上游明确回调，交回正常流程', [
+                'order_id' => $order->id,
+                'attempt_no' => $attempt->attempt_no,
+                'upstream' => $upstream->value,
             ]);
         }
     }

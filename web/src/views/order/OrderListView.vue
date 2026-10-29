@@ -158,7 +158,7 @@ async function query() {
   })
   let next = ''
   if (result.manual_only) {
-    next = '这是人工处理单：上游结果只记录，订单状态不会自动变。请核实后置为成功 / 失败，再手动回调；确认上游没有充上也可以手动补单。'
+    next = '这是人工处理单：查单结果只记录，订单状态不会自动变（上游回调明确成功 / 失败时会自动交回正常流程）。请核实后置为成功 / 失败，再手动回调；确认上游没有充上也可以手动补单。'
   } else if (result.status === 'success') {
     next = '订单已改为成功，会通知商户。'
   } else if (result.status === 'failed') {
@@ -328,11 +328,11 @@ onMounted(async () => {
       :closable="false"
       show-icon
       class="tip-bar"
-      title="两种情况会进这里：① 提交给供应商时接口异常（标「人工」）：上游结果只记录，状态和回调全部人工，置为成功 / 失败后要再点「手动回调」商户才会知道；② 下单超过 2 小时还没提交出去的。上游确认没有充上的，可以「手动补单」重新提交（同一笔订单，不重复扣款）。已提交、超过 2 小时没结果的是「超时」订单，不在这里：上游成功自动改成功，失败自动退款，都会通知商户。"
+      title="两种情况会进这里：① 提交给供应商时接口异常（标「人工」）：上游回调明确成功的自动改成功并通知商户，回调失败的自动换下一个供应商；查单结果只记录，人工置为成功 / 失败后要再点「手动回调」商户才会知道；② 下单超过 2 小时还没提交出去的。上游确认没有充上的，可以「手动补单」重新提交（同一笔订单，不重复扣款）。已提交、超过 2 小时没结果的是「超时」订单，不在这里：上游成功自动改成功，失败自动退款，都会通知商户。"
     />
     <el-form inline @submit.prevent="list.search">
       <el-form-item>
-        <el-input v-model="filters.keyword" placeholder="平台 / 商户订单号" clearable style="width: 190px" />
+        <el-input v-model="filters.keyword" placeholder="平台 / 商户订单号、提交单号" clearable style="width: 220px" />
       </el-form-item>
       <el-form-item>
         <el-input

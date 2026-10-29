@@ -251,7 +251,7 @@ class OrderService extends AbstractService
             'face_value' => $order->face_value,
             'amount' => $order->sale_price,
             'status' => $order->resultVisibleToMerchant() ? $order->status : 'processing',
-            'fail_reason' => $order->resultVisibleToMerchant() && $order->status === Order::STATUS_FAILED ? $order->fail_reason : null,
+            'fail_reason' => $order->resultVisibleToMerchant() && $order->status === Order::STATUS_FAILED ? $order->merchantFailReason() : null,
             'created_at' => $order->created_at?->toDateTimeString(),
             'finished_at' => $order->resultVisibleToMerchant() ? $order->finished_at?->toDateTimeString() : null,
         ];

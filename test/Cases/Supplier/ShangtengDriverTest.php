@@ -22,6 +22,7 @@ use App\Security\Encrypter;
 use App\Security\OpenApiSigner;
 use App\Service\Order\OrderDispatcher;
 use App\Service\Order\OrderProcessService;
+use App\Service\Order\OrderService;
 use App\Supplier\Driver\ShangtengDriver;
 use App\Supplier\RechargeRequest;
 use App\Supplier\RechargeStatus;
@@ -239,6 +240,8 @@ class ShangtengDriverTest extends HttpTestCase
         $order = Order::find($order->id);
         $this->assertSame(Order::STATUS_FAILED, $order->status);
         $this->assertStringContainsString('商品已下架', $order->fail_reason);
+        $this->assertStringContainsString('上游拒单', $order->fail_reason);
+        $this->assertSame('充值失败', make(OrderService::class)->present($order)['fail_reason'], '上游拒单的原话不给商户');
         $this->assertSame(OrderAttempt::STATUS_FAILED, OrderAttempt::where('order_id', $order->id)->first()->status);
         $this->assertSame('200.00', Merchant::find($merchant->id)->balance);
     }

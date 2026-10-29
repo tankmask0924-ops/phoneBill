@@ -522,7 +522,7 @@ class OrderAdminService extends AbstractService
     /**
      * 没传日期、也不是按单号 / 手机号 / 未完成状态查时，默认最近 7 天（见 FiltersByDateRange）。
      *
-     * @param array<string, mixed> $query merchant_id / supplier_id / product_id / face_value / status / operator / province / keyword（平台或商户订单号）/ mobile（可多个，见 FiltersByMobiles）/ created_from / created_to
+     * @param array<string, mixed> $query merchant_id / supplier_id / product_id / face_value / status / operator / province / keyword（平台 / 商户订单号或提交单号）/ mobile（可多个，见 FiltersByMobiles）/ created_from / created_to
      */
     private function filtered(array $query): Builder
     {
@@ -543,7 +543,10 @@ class OrderAdminService extends AbstractService
         }
         $keyword = trim((string) ($query['keyword'] ?? ''));
         if ($keyword !== '') {
-            $builder->where(fn ($q) => $q->where('order_no', $keyword)->orWhere('merchant_order_no', $keyword));
+            // 提交单号 = 平台订单号 + 两位序号，供应商那边看到的是它，也能搜
+            $attemptOrderId = $this->attemptDao->orderIdForAttemptNo($keyword);
+            $builder->where(fn ($q) => $q->where('order_no', $keyword)->orWhere('merchant_order_no', $keyword)
+                ->when($attemptOrderId !== null, fn ($q) => $q->orWhere('id', $attemptOrderId)));
         }
         $byMobile = $this->applyMobileFilter($builder, $query['mobile'] ?? null);
         // 未完成的订单（尤其是异常订单）不管多久都要能看到，数量也少，不加默认时间范围
@@ -597,7 +600,7 @@ class OrderAdminService extends AbstractService
             'notify_url' => $o->notify_url,
             'notify_status' => $o->notify_status,
             'notified_at' => $o->notified_at?->toDateTimeString(),
-            // 人工处理单：提交时接口异常，上游结果只记录，状态和回调全部人工
+            // 人工处理单：提交时接口异常，查单结果只记录；上游回调明确成功 / 失败时交回正常流程
             'manual_only' => $o->manual_only,
             // 最近一次手动回调；回调过之后上游结果不再推给商户
             'manual_notified_at' => $o->manual_notified_at?->toDateTimeString(),
@@ -627,7 +630,7 @@ class OrderAdminService extends AbstractService
         if ($order->manual_only && $order->manual_notified_at === null) {
             $warnings[] = $order->isFinal()
                 ? '人工处理单：结果还没有回调给商户（商户查单看到的是处理中），核实无误后请点「手动回调」'
-                : '人工处理单：提交时接口异常，上游结果只记录不自动处理。请到上游核实后置为成功 / 失败，或确认上游没有充上后手动补单';
+                : '人工处理单：提交时接口异常，查单结果只记录不自动处理（上游回调明确成功 / 失败时会自动处理）。请到上游核实后置为成功 / 失败，或确认上游没有充上后手动补单';
         }
 
         return $warnings;

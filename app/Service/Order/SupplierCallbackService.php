@@ -65,7 +65,7 @@ class SupplierCallbackService extends AbstractService
 
             return ['status' => 200, 'body' => $callback->reply];
         }
-        $this->processService->applyResult($attempt->id, $callback->result);
+        $this->processService->applyCallback($attempt->id, $callback->result);
 
         return ['status' => 200, 'body' => $callback->reply];
     }
