@@ -276,9 +276,16 @@ export interface ProvinceSupplierStat extends ProvinceStatTotals {
   supplier_name: string | null
 }
 
+export interface ProvinceCityStat extends ProvinceStatTotals {
+  /** 没记市的订单为「未知」 */
+  city: string
+}
+
 export interface ProvinceStat extends ProvinceStatTotals {
   province: string
   suppliers: ProvinceSupplierStat[]
+  /** 各市，按订单数从多到少 */
+  cities: ProvinceCityStat[]
 }
 
 export interface ProvinceStatsResult {

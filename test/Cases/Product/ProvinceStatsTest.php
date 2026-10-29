@@ -12,6 +12,7 @@ declare(strict_types=1);
 
 namespace HyperfTest\Cases\Product;
 
+use App\Model\CityDailyStat;
 use App\Model\Merchant;
 use App\Model\Order;
 use App\Model\OrderAttempt;
@@ -19,6 +20,7 @@ use App\Model\Product;
 use App\Model\ProvinceDailyStat;
 use App\Model\SupplierProduct;
 use App\Network\HttpClient;
+use App\Service\Order\OrderCityBackfillService;
 use App\Service\Order\OrderDispatcher;
 use App\Service\Product\ProvinceStatsService;
 use Hyperf\Context\ApplicationContext;
@@ -60,6 +62,7 @@ class ProvinceStatsTest extends HttpTestCase
     protected function tearDown(): void
     {
         ProvinceDailyStat::where('stat_date', self::DAY)->delete();
+        CityDailyStat::where('stat_date', self::DAY)->delete();
         $this->cleanUpCatalog();
         $this->cleanUpAdmins();
         parent::tearDown();
@@ -75,12 +78,12 @@ class ProvinceStatsTest extends HttpTestCase
         $product = $this->createProduct([$spA->id => 1, $spB->id => 2]);
 
         // 广东移动：A 成功一单、A 还在充值一单；A、B 都失败的算 B；没提交过供应商的记 0
-        $this->order($merchant, $product, '广东', 'cmcc', Order::STATUS_SUCCESS, [[$spA, OrderAttempt::STATUS_SUCCESS]]);
-        $this->order($merchant, $product, '广东', 'cmcc', Order::STATUS_PROCESSING, [[$spA, OrderAttempt::STATUS_PROCESSING]]);
-        $this->order($merchant, $product, '广东', 'cmcc', Order::STATUS_FAILED, [[$spA, OrderAttempt::STATUS_FAILED], [$spB, OrderAttempt::STATUS_FAILED]]);
+        $this->order($merchant, $product, '广东', 'cmcc', Order::STATUS_SUCCESS, [[$spA, OrderAttempt::STATUS_SUCCESS]], city: '广州');
+        $this->order($merchant, $product, '广东', 'cmcc', Order::STATUS_PROCESSING, [[$spA, OrderAttempt::STATUS_PROCESSING]], city: '广州');
+        $this->order($merchant, $product, '广东', 'cmcc', Order::STATUS_FAILED, [[$spA, OrderAttempt::STATUS_FAILED], [$spB, OrderAttempt::STATUS_FAILED]], city: '深圳');
         $this->order($merchant, $product, '广东', 'cmcc', Order::STATUS_FAILED, []);
         // 广西联通：A 失败换 B 成功，只算 B
-        $this->order($merchant, $product, '广西', 'cucc', Order::STATUS_SUCCESS, [[$spA, OrderAttempt::STATUS_FAILED], [$spB, OrderAttempt::STATUS_SUCCESS]]);
+        $this->order($merchant, $product, '广西', 'cucc', Order::STATUS_SUCCESS, [[$spA, OrderAttempt::STATUS_FAILED], [$spB, OrderAttempt::STATUS_SUCCESS]], city: '南宁');
         // 前一天下的单不算
         $this->order($merchant, $product, '广西', 'cucc', Order::STATUS_SUCCESS, [[$spA, OrderAttempt::STATUS_SUCCESS]], '2001-02-04 23:59:59');
 
@@ -111,14 +114,41 @@ class ProvinceStatsTest extends HttpTestCase
         $this->assertSame('0.00', $suppliers[$b->id]['success_rate']);
         $this->assertNull($suppliers[0]['supplier_name']);
 
+        // 各市：没记市的算「未知」，按订单数从多到少
+        $this->assertSame('广州', $guangdong['cities'][0]['city']);
+        $cities = array_column($guangdong['cities'], null, 'city');
+        $this->assertEqualsCanonicalizing(['广州', '深圳', '未知'], array_keys($cities));
+        $this->assertSame(['order_count' => 2, 'success_count' => 1, 'failed_count' => 0, 'unfinished_count' => 1, 'success_amount' => '99.50', 'profit' => '1.50', 'success_rate' => '100.00'], array_diff_key($cities['广州'], ['city' => 0]));
+        $this->assertSame([1, '0.00'], [$cities['深圳']['order_count'], $cities['深圳']['success_rate']]);
+        $this->assertSame(1, $cities['未知']['order_count']);
+
         $this->assertSame('广西', $guangxi['province']);
+        $this->assertSame(['南宁'], array_column($guangxi['cities'], 'city'));
         $this->assertSame([$b->id], array_column($guangxi['suppliers'], 'supplier_id'), '换过供应商的只算最终那家');
         $this->assertSame('100.00', $guangxi['suppliers'][0]['success_rate']);
 
         $cucc = $this->body($this->jsonRequest('GET', '/admin/product-stats/provinces?date=' . self::DAY . '&operator=cucc', $token));
         $this->assertSame(['广西'], array_column($cucc['provinces'], 'province'));
+        $this->assertSame(['南宁'], array_column($cucc['provinces'][0]['cities'], 'city'), '按市也按运营商筛');
 
         $this->assertSame(403, $this->jsonRequest('GET', '/admin/product-stats/provinces', $this->loginAs($this->createAdminWithPermissions(['product.view'])))->getStatusCode());
+    }
+
+    public function testBackfillsCityFromSegments()
+    {
+        $merchant = $this->createMerchant('100.00');
+        $product = $this->createProduct([$this->createSupplierProduct($this->createSupplier(), ['cmcc'])->id => 1]);
+        $known = $this->order($merchant, $product, '新疆', 'cmcc', Order::STATUS_SUCCESS, []);
+        $known->update(['mobile' => $this->createSegment('cmcc', '新疆', false, '巴音郭楞蒙古自治州')]);
+        $unknown = $this->order($merchant, $product, '广东', 'cmcc', Order::STATUS_SUCCESS, []);
+        $kept = $this->order($merchant, $product, '广东', 'cmcc', Order::STATUS_SUCCESS, [], city: '佛山');
+
+        $result = make(OrderCityBackfillService::class)->backfill(1);
+        $this->assertSame('巴音郭楞', Order::find($known->id)->city, '按手机号查号段库，统一写法');
+        $this->assertNull(Order::find($unknown->id)->city, '号段库查不到的留空');
+        $this->assertSame('佛山', Order::find($kept->id)->city, '已经记了市的不动');
+        $this->assertGreaterThanOrEqual(1, $result['filled']);
+        $this->assertGreaterThanOrEqual(1, $result['missing']);
     }
 
     public function testDayWithNoStats()
@@ -136,7 +166,7 @@ class ProvinceStatsTest extends HttpTestCase
     /**
      * @param list<array{0: SupplierProduct, 1: string}> $attempts 按提交顺序
      */
-    private function order(Merchant $merchant, Product $product, string $province, string $operator, string $status, array $attempts, string $createdAt = self::DAY . ' 10:00:00'): Order
+    private function order(Merchant $merchant, Product $product, string $province, string $operator, string $status, array $attempts, string $createdAt = self::DAY . ' 10:00:00', ?string $city = null): Order
     {
         $order = Order::create([
             'order_no' => date('YmdHis') . random_int(10000000, 99999999),
@@ -148,6 +178,7 @@ class ProvinceStatsTest extends HttpTestCase
             'mobile' => '1009' . random_int(1000000, 9999999),
             'operator' => $operator,
             'province' => $province,
+            'city' => $city,
             'face_value' => 100,
             'sale_price' => '99.50',
             'status' => $status,

@@ -42,7 +42,7 @@ onMounted(load)
       </el-form-item>
       <span class="muted">
         每小时整点重算当天，{{ result?.computed_at ? `数据更新于 ${result.computed_at}` : '这一天还没有统计数据' }}；
-        换过供应商的订单只算在最终的供应商上，成功金额是售价合计
+        换过供应商的订单只算在最终的供应商上，成功金额是售价合计；展开省份看各市和各供应商，市按号码归属地
       </span>
     </el-form>
 
@@ -59,6 +59,24 @@ onMounted(load)
     <el-table v-loading="loading" :data="result?.provinces ?? []" row-key="province" border>
       <el-table-column type="expand">
         <template #default="{ row }">
+          <div class="sub-title">各市</div>
+          <el-table :data="row.cities" size="small" class="suppliers" empty-text="还没有按市的数据">
+            <el-table-column prop="city" label="市" min-width="160" />
+            <el-table-column prop="order_count" label="订单数" width="90" align="right" />
+            <el-table-column prop="success_count" label="成功" width="80" align="right" />
+            <el-table-column prop="failed_count" label="失败" width="80" align="right" />
+            <el-table-column label="未出结果" width="90" align="right">
+              <template #default="{ row: c }">
+                <span :class="{ warn: c.unfinished_count > 0 }">{{ c.unfinished_count }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="成功率" width="90" align="right">
+              <template #default="{ row: c }">{{ rate(c.success_rate) }}</template>
+            </el-table-column>
+            <el-table-column prop="success_amount" label="成功金额（元）" width="130" align="right" />
+            <el-table-column prop="profit" label="利润（元）" width="110" align="right" />
+          </el-table>
+          <div class="sub-title">各供应商</div>
           <el-table :data="row.suppliers" size="small" class="suppliers">
             <el-table-column label="供应商" min-width="160">
               <template #default="{ row: s }">{{ supplierName(s as ProvinceSupplierStat) }}</template>
@@ -120,6 +138,12 @@ onMounted(load)
 .suppliers {
   margin: 0 16px 0 48px;
   width: auto;
+}
+
+.sub-title {
+  margin: 8px 16px 4px 48px;
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .warn {

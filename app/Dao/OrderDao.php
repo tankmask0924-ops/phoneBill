@@ -26,6 +26,59 @@ class OrderDao extends AbstractDao
     }
 
     /**
+     * 还没记市的订单（补历史数据用），按 id 往后取一批。
+     *
+     * @return array<int, string> 订单 id => 手机号
+     */
+    public function withoutCityAfter(int $afterId, int $limit): array
+    {
+        return $this->newQuery()->whereNull('city')->where('id', '>', $afterId)->orderBy('id')->limit($limit)->pluck('mobile', 'id')->all();
+    }
+
+    /**
+     * 批量记市。走查询构造器，不动 updated_at（补提交任务按它判断订单多久没动过）。
+     *
+     * @param list<int> $ids
+     */
+    public function setCity(array $ids, string $city): void
+    {
+        $this->newQuery()->toBase()->whereIn('id', $ids)->update(['city' => $city]);
+    }
+
+    /**
+     * 一段时间内下单的订单，按「省份 + 市 + 运营商」汇总，没记市的市为空字符串。
+     *
+     * @return list<array{province: string, city: string, operator: string, order_count: int, success_count: int, failed_count: int, success_amount: string, profit: string}>
+     */
+    public function provinceCityTotals(string $from, string $to): array
+    {
+        $rows = $this->newQuery()
+            ->whereBetween('created_at', [$from, $to])
+            ->selectRaw(
+                "province, coalesce(city, '') as city_name, operator,
+                count(*) as order_count,
+                coalesce(sum(status = 'success'), 0) as success_count,
+                coalesce(sum(status = 'failed'), 0) as failed_count,
+                coalesce(sum(case when status = 'success' then sale_price end), 0) as success_amount,
+                coalesce(sum(case when status = 'success' then profit end), 0) as profit"
+            )
+            ->groupBy('province', 'city_name', 'operator')
+            ->toBase()
+            ->get();
+
+        return $rows->map(static fn ($row) => [
+            'province' => (string) $row->province,
+            'city' => (string) $row->city_name,
+            'operator' => (string) $row->operator,
+            'order_count' => (int) $row->order_count,
+            'success_count' => (int) $row->success_count,
+            'failed_count' => (int) $row->failed_count,
+            'success_amount' => bcadd((string) $row->success_amount, '0', 2),
+            'profit' => bcadd((string) $row->profit, '0', 2),
+        ])->values()->all();
+    }
+
+    /**
      * 订单数、成功数、成功订单的扣款合计和利润合计；$from 为空时统计全部订单。
      *
      * @return array{order_count: int, success_count: int, sales: string, profit: string}

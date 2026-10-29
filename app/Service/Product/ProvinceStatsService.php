@@ -12,6 +12,7 @@ declare(strict_types=1);
 
 namespace App\Service\Product;
 
+use App\Dao\CityDailyStatDao;
 use App\Dao\OrderDao;
 use App\Dao\ProvinceDailyStatDao;
 use App\Service\AbstractService;
@@ -22,7 +23,8 @@ use Hyperf\Di\Annotation\Inject;
  *
  * - 订单按下单时间归到当天，口径和 ProductStatsService 一样：成功率 = 成功 / (成功 + 失败)，没出结果的单单独计数；
  * - 换过供应商的订单只算在最终供应商上：成功的算成交的那家，失败、没出结果的算最后一次提交的那家；
- * - 成功金额是成功订单的售价（扣商户的钱）合计，利润 = 售价 - 成本。
+ * - 成功金额是成功订单的售价（扣商户的钱）合计，利润 = 售价 - 成本；
+ * - 同时按「省份 + 市 + 运营商」汇总一份存进 city_daily_stats（订单上的市，见 App\Enum\City），省份统计里展开看各市。
  *
  * 每小时由 StatsCrontab 重算当天；凌晨几点再补算前一天，把晚上下的单的结果算进去。也可以用 stats:province-daily 重算。
  */
@@ -33,6 +35,9 @@ class ProvinceStatsService extends AbstractService
 
     #[Inject]
     protected ProvinceDailyStatDao $statDao;
+
+    #[Inject]
+    protected CityDailyStatDao $cityStatDao;
 
     /**
      * 重算某一天，覆盖之前的结果。
@@ -51,6 +56,16 @@ class ProvinceStatsService extends AbstractService
             ];
         }
         $this->statDao->replaceDay($date, $rows);
+
+        $cityRows = [];
+        foreach ($this->orderDao->provinceCityTotals("{$date} 00:00:00", "{$date} 23:59:59") as $group) {
+            $cityRows[] = $group + [
+                'stat_date' => $date,
+                'unfinished_count' => $group['order_count'] - $group['success_count'] - $group['failed_count'],
+                'computed_at' => $now,
+            ];
+        }
+        $this->cityStatDao->replaceDay($date, $cityRows);
 
         return count($rows);
     }

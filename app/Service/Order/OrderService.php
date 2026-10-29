@@ -13,6 +13,7 @@ declare(strict_types=1);
 namespace App\Service\Order;
 
 use App\Dao\OrderDao;
+use App\Enum\City;
 use App\Exception\InsufficientBalanceException;
 use App\Exception\OpenApiException;
 use App\Model\Merchant;
@@ -97,7 +98,7 @@ class OrderService extends AbstractService
         if ($notifyUrl !== '' && (mb_strlen($notifyUrl) > 500 || filter_var($notifyUrl, FILTER_VALIDATE_URL) === false || ! preg_match('#^https?://#i', $notifyUrl))) {
             throw new OpenApiException(OpenApiException::INVALID_PARAMS, 'notify_url 必须是 http:// 或 https:// 开头的网址');
         }
-        ['quote' => $quote, 'operator' => $operator, 'segment_operator' => $segmentOperator, 'province' => $province, 'price' => $price] = $this->check($merchant, $this->string($params, 'product_code'), $mobile);
+        ['quote' => $quote, 'operator' => $operator, 'segment_operator' => $segmentOperator, 'province' => $province, 'city' => $city, 'price' => $price] = $this->check($merchant, $this->string($params, 'product_code'), $mobile);
 
         // 商品分类的号码限制：同一号码同一分类串行处理，防止并发请求同时通过检查
         $categoryId = $quote['category_id'] ?? null;
@@ -135,7 +136,7 @@ class OrderService extends AbstractService
             $order = null;
             for ($try = 1; $order === null; ++$try) {
                 try {
-                    $order = $this->createAndCharge($merchant, $merchantOrderNo, $quote, $mobile, $operator, $province, $price, $notifyUrl);
+                    $order = $this->createAndCharge($merchant, $merchantOrderNo, $quote, $mobile, $operator, $province, $city, $price, $notifyUrl);
                 } catch (QueryException $e) {
                     // 平台订单号撞了（同一秒随机数相同）：换一个号重试
                     if ($try < 3 && str_contains($e->getMessage(), 'orders_order_no_unique')) {
@@ -181,7 +182,7 @@ class OrderService extends AbstractService
      * 开放接口下单和商户后台批量下单的预览共用，不通过时抛 OpenApiException。
      * operator 是下单用的运营商，可能和号段识别的 segment_operator 不同（见 orderOperator()）。
      *
-     * @return array{quote: array<string, mixed>, operator: string, segment_operator: string, province: string, price: string}
+     * @return array{quote: array<string, mixed>, operator: string, segment_operator: string, province: string, city: null|string, price: string}
      */
     public function check(Merchant $merchant, string $productCode, string $mobile): array
     {
@@ -213,6 +214,7 @@ class OrderService extends AbstractService
             'operator' => $operator,
             'segment_operator' => $segment->operator,
             'province' => $segment->province,
+            'city' => City::normalize($segment->city),
             'price' => (string) $quote['prices'][$operator],
         ];
     }
@@ -302,9 +304,9 @@ class OrderService extends AbstractService
      *
      * @param array<string, mixed> $quote MerchantPriceService::quote()
      */
-    private function createAndCharge(Merchant $merchant, string $merchantOrderNo, array $quote, string $mobile, string $operator, string $province, string $price, string $notifyUrl): Order
+    private function createAndCharge(Merchant $merchant, string $merchantOrderNo, array $quote, string $mobile, string $operator, string $province, ?string $city, string $price, string $notifyUrl): Order
     {
-        return Db::transaction(function () use ($merchant, $merchantOrderNo, $quote, $mobile, $operator, $province, $price, $notifyUrl) {
+        return Db::transaction(function () use ($merchant, $merchantOrderNo, $quote, $mobile, $operator, $province, $city, $price, $notifyUrl) {
             $order = $this->orderDao->create([
                 'order_no' => $this->orderNoGenerator->next(),
                 'merchant_id' => $merchant->id,
@@ -315,6 +317,7 @@ class OrderService extends AbstractService
                 'mobile' => $mobile,
                 'operator' => $operator,
                 'province' => $province,
+                'city' => $city,
                 'face_value' => $quote['face_value'],
                 'sale_price' => $price,
                 'status' => Order::STATUS_PENDING,

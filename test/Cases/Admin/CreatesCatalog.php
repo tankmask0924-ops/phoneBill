@@ -205,12 +205,12 @@ trait CreatesCatalog
      *
      * @return string 这个号段下的一个手机号
      */
-    private function createSegment(string $operator, string $province, bool $virtual = false): string
+    private function createSegment(string $operator, string $province, bool $virtual = false, ?string $city = null): string
     {
         do {
             $segment = '100' . str_pad((string) random_int(0, 9999), 4, '0', STR_PAD_LEFT);
         } while (MobileSegment::where('segment', $segment)->exists());
-        $row = MobileSegment::create(['segment' => $segment, 'operator' => $operator, 'province' => $province, 'city' => null, 'is_virtual' => $virtual]);
+        $row = MobileSegment::create(['segment' => $segment, 'operator' => $operator, 'province' => $province, 'city' => $city, 'is_virtual' => $virtual]);
         $this->segmentIds[] = $row->id;
 
         return $segment . '1234';

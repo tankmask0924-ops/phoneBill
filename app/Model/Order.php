@@ -27,6 +27,7 @@ use Carbon\Carbon;
  * @property string $mobile
  * @property string $operator
  * @property string $province
+ * @property null|string $city 号码归属的市（统一写法，见 App\Enum\City）
  * @property int $face_value
  * @property string $sale_price
  * @property null|string $cost_price
@@ -86,6 +87,7 @@ class Order extends Model
         'mobile',
         'operator',
         'province',
+        'city',
         'face_value',
         'sale_price',
         'cost_price',

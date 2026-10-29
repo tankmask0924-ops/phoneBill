@@ -240,6 +240,13 @@ stateDiagram-v2
 - 耗时 = 成功订单从下单受理到成功（`finished_at - created_at`）：平均值、中位数、90% 的单在多少秒内到账。
 - 页面按日期范围（默认最近 7 天，到昨天）、商品、运营商筛选，顶部显示筛选范围内的合计。
 
+### 4.4.2 省份统计（含按市）
+
+- 每小时整点重算当天，0～3 点顺带重算前一天（`ProvinceStatsCrontab`），也可以用 `stats:province-daily <日期> --days=N` 重算。按「省份 + 运营商 + 最终供应商」存 `province_daily_stats`，同时按「省份 + 市 + 运营商」存 `city_daily_stats`。
+- 页面选一天、可按运营商筛，每个省份一行，展开看**各市**和**各供应商**的订单数、成功率、成功金额、利润（2026-10-29 加按市）。
+- 市是**号码归属地**（号段库的城市，携号转网、异地使用的号码仍算开户地），下单时记到 `orders.city`。号段库的城市写法不统一（广州 / 广州市、巴州 / 巴音郭楞蒙古自治州），记到订单上时统一成简称（`App\Enum\City`：去掉市、地区、盟、自治州和民族名，几个简称按对照表转）；号段库本身保留原始写法。海南的号段只标到「海南」，分不出市；几个市共用的号段记成「阜阳/亳州」这样。
+- 加 `orders.city` 之前的订单用 `orders:backfill-city` 按手机号前 7 位查号段库补上（只处理还没记市的，可重复跑），补完再用 `stats:province-daily` 重算历史。查不到号段的订单算「未知」。
+
 ### 4.5 风控
 
 - **号段查询**：输入手机号，显示运营商、省份、城市、是否虚拟运营商，以及每个商品下会命中哪些候选供应商商品（排查选路用）。
@@ -407,7 +414,7 @@ erDiagram
 | `merchant_online_payments` | 支付宝转账加款 | `order_no`（唯一）、`merchant_id`、`alipay_account_id`、`amount`（商户填的）、`pay_amount`（入账金额）、收款账号快照、`status`（`pending` 未到账 / `paid` / `expired`（只有改版前的单）/ `cancelled`）、`checked_at`、`check_message`（最近一次查询的时间和结果）、`confirm_type`（`auto` / `manual`）、`account_log_id`（唯一）、`alipay_order_no`（商户填的，唯一）、`payer_account`、`trans_memo`、`trans_at`、`remark`、`confirmed_by`、`balance_log_id` |
 | `system_settings` | 系统设置 | `key`（唯一）、`value`（JSON，整段加密） |
 | **订单** | | |
-| `orders` | 订单 | `order_no`（唯一）、`merchant_id`、`merchant_order_no`、`product_id`、`product_name`、`mobile`、`operator`、`province`、`face_value`、`sale_price`、`cost_price`、`profit`（利润）、`supplier_id`、`supplier_product_id`、`status`、`fail_reason`、`notify_url`、`notify_status`、`manual_only`（人工处理单）、`manual_notified_at`（最近一次手动回调）、`notify_round`（通知轮次）、`finished_at`；唯一 `(merchant_id, merchant_order_no)` |
+| `orders` | 订单 | `order_no`（唯一）、`merchant_id`、`merchant_order_no`、`product_id`、`product_name`、`mobile`、`operator`、`province`、`city`（号码归属的市，统一写法）、`face_value`、`sale_price`、`cost_price`、`profit`（利润）、`supplier_id`、`supplier_product_id`、`status`、`fail_reason`、`notify_url`、`notify_status`、`manual_only`（人工处理单）、`manual_notified_at`（最近一次手动回调）、`notify_round`（通知轮次）、`finished_at`；唯一 `(merchant_id, merchant_order_no)` |
 | `order_attempts` | 每次提交给供应商的记录 | `order_id`、`supplier_id`、`supplier_product_id`、`supplier_order_no`、`cost_price`、`status`、`request`、`response`、`submitted_at`、`last_queried_at`、`query_status` / `query_message` / `query_request` / `query_response`（最后一次查单）、`finished_at` |
 | `order_notify_logs` | 通知商户的记录 | `order_id`、`attempt_no`、`http_status`、`response`、`next_retry_at` |
 

@@ -34,6 +34,17 @@ class MobileSegmentDao extends AbstractDao
     }
 
     /**
+     * 这些号段的城市（号段库原始写法），查不到的号段不在结果里。
+     *
+     * @param list<string> $segments
+     * @return array<string, null|string> 号段 => 城市
+     */
+    public function citiesFor(array $segments): array
+    {
+        return $segments === [] ? [] : $this->newQuery()->whereIn('segment', $segments)->pluck('city', 'segment')->all();
+    }
+
+    /**
      * 这些号段里库中已有的。
      *
      * @param list<string> $segments

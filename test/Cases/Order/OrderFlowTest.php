@@ -137,7 +137,8 @@ class OrderFlowTest extends HttpTestCase
 
         // 两个都失败：订单失败、退款
         $this->setMockResult($suppliers[1], 'failed');
-        $second = $this->placeOrder($merchant, $product, $this->createSegment('cmcc', '广东'));
+        $second = $this->placeOrder($merchant, $product, $this->createSegment('cmcc', '广东', false, '深圳市'));
+        $this->assertSame('深圳', Order::find($second->id)->city, '下单时记号码归属的市（统一写法）');
         $this->process()->submit($second->id);
         $second = Order::find($second->id);
         $this->assertSame(Order::STATUS_FAILED, $second->status);

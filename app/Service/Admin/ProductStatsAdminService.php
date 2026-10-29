@@ -12,12 +12,14 @@ declare(strict_types=1);
 
 namespace App\Service\Admin;
 
+use App\Dao\CityDailyStatDao;
 use App\Dao\ProductDailyStatDao;
 use App\Dao\ProductDao;
 use App\Dao\ProvinceDailyStatDao;
 use App\Dao\ProvinceProductDailyStatDao;
 use App\Dao\SupplierDao;
 use App\Enum\Operator;
+use App\Model\CityDailyStat;
 use App\Model\ProductDailyStat;
 use App\Model\ProvinceDailyStat;
 use App\Model\ProvinceProductDailyStat;
@@ -44,6 +46,9 @@ class ProductStatsAdminService extends AbstractService
 
     #[Inject]
     protected ProvinceDailyStatDao $provinceStatDao;
+
+    #[Inject]
+    protected CityDailyStatDao $cityStatDao;
 
     #[Inject]
     protected ProvinceProductDailyStatDao $provinceProductStatDao;
@@ -107,7 +112,7 @@ class ProductStatsAdminService extends AbstractService
     }
 
     /**
-     * 某一天的省份统计：每个省份的合计，展开是这个省份下各供应商的数字。
+     * 某一天的省份统计：每个省份的合计，展开是这个省份下各供应商、各市的数字（市按订单数从多到少，没记市的算「未知」）。
      *
      * @param array<string, mixed> $query date（默认今天）/ operator
      * @return array{stat_date: string, computed_at: null|string, summary: array<string, mixed>, provinces: list<array<string, mixed>>}
@@ -117,6 +122,7 @@ class ProductStatsAdminService extends AbstractService
         $date = $this->dateParam($query['date'] ?? null) ?? date('Y-m-d');
         $operator = in_array($query['operator'] ?? null, Operator::values(), true) ? $query['operator'] : null;
         $stats = $this->provinceStatDao->forDay($date, $operator);
+        $cities = $this->cityRows($date, $operator);
         $suppliers = $this->supplierDao->namesWithTrashed($stats->pluck('supplier_id')->filter()->unique()->values()->all());
 
         $summary = null;
@@ -138,7 +144,7 @@ class ProductStatsAdminService extends AbstractService
                 ] + self::withRate($supplierTotals);
             }
             usort($supplierRows, static fn (array $a, array $b) => $b['order_count'] <=> $a['order_count']);
-            $rows[] = ['province' => $province] + self::withRate($totals) + ['suppliers' => $supplierRows];
+            $rows[] = ['province' => $province] + self::withRate($totals) + ['suppliers' => $supplierRows, 'cities' => $cities[$province] ?? []];
         }
         usort($rows, static fn (array $a, array $b) => $b['order_count'] <=> $a['order_count']);
 
@@ -226,7 +232,7 @@ class ProductStatsAdminService extends AbstractService
      * @param null|array{order_count: int, success_count: int, failed_count: int, unfinished_count: int, success_amount: string, profit: string} $totals
      * @return array{order_count: int, success_count: int, failed_count: int, unfinished_count: int, success_amount: string, profit: string}
      */
-    private static function addUp(?array $totals, ProvinceDailyStat|ProvinceProductDailyStat|null $row): array
+    private static function addUp(?array $totals, CityDailyStat|ProvinceDailyStat|ProvinceProductDailyStat|null $row): array
     {
         $totals ??= ['order_count' => 0, 'success_count' => 0, 'failed_count' => 0, 'unfinished_count' => 0, 'success_amount' => '0.00', 'profit' => '0.00'];
         if ($row === null) {
@@ -241,6 +247,30 @@ class ProductStatsAdminService extends AbstractService
             'success_amount' => bcadd($totals['success_amount'], (string) $row->success_amount, 2),
             'profit' => bcadd($totals['profit'], (string) $row->profit, 2),
         ];
+    }
+
+    /**
+     * 某一天各省份下各市的数字（多个运营商合在一起），按订单数从多到少。
+     *
+     * @return array<string, list<array<string, mixed>>> 省份 => 市的行
+     */
+    private function cityRows(string $date, ?string $operator): array
+    {
+        $byCity = [];
+        foreach ($this->cityStatDao->forDay($date, $operator) as $s) {
+            $province = $s->province === '' ? '未知' : $s->province;
+            $city = $s->city === '' ? '未知' : $s->city;
+            $byCity[$province][$city] = self::addUp($byCity[$province][$city] ?? null, $s);
+        }
+        $rows = [];
+        foreach ($byCity as $province => $cities) {
+            foreach ($cities as $city => $totals) {
+                $rows[$province][] = ['city' => (string) $city] + self::withRate($totals);
+            }
+            usort($rows[$province], static fn (array $a, array $b) => $b['order_count'] <=> $a['order_count']);
+        }
+
+        return $rows;
     }
 
     /**
