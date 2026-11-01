@@ -443,6 +443,7 @@ app/Supplier/
     ├── XuanjieDriver.php         # 炫捷话费 API（docs/炫捷.md）
     ├── ZhixinDriver.php          # 智信科技话费 API（docs/智信科技平台API接口文档.md）
     ├── LinxianDriver.php         # 邻显科技话费 API（docs/邻显科技.md）
+    ├── TurboDriver.php           # Turbo TOPUP 话费 API（docs/Turbo-TOPUP-API.md）
     └── XxxDriver.php             # 每家供应商一个
 ```
 
@@ -587,6 +588,17 @@ app/Supplier/
 - 签名：去掉 `sign` 按名 ASCII 升序 `http_build_query`（值 URL 编码，空值也参与），末尾拼 `&secret=APPSECRET`，md5 转大写。回调按收到的全部字段（除 `sign`）验签，通过回 `success`。
 - 结果判定：下单只有 `code=0` 算受理；其他 code 判失败换下一家；没拿到返回（网络异常、HTTP 出错、返回无法解析或没有 code）立即转异常并标为人工处理单（见 2.5）。查单 `order_status` `FINISH` 成功、`FAILED` 失败、`PASS` / `RUNNING` 和其他处理中；`40001` 无订单只记录、订单状态不动。回调同样 `FINISH` / `FAILED` 才处理订单。
 - 上游商品列表：`operator` 是中文（移动 / 联通 / 电信 / 广电）；`unit` 为「元」时 `capacity` 当面值；`region` 作为补充说明；没有上下架字段，全部按在售。
+
+### 7.12 Turbo TOPUP（驱动 `turbo`）
+
+上游文档 `docs/Turbo-TOPUP-API.md`（最后是对接方式、结果判定表和待确认事项）：下单、查单、余额、商品列表、回调，全部 POST JSON。只接话费。
+
+- 接口参数：接口域名（路径 `/integration/v1/...` 写在驱动里）、`accessKey`、`secretKey`；回调地址自动生成，每单随下单传 `notificationUrl`（见 4.2）。
+- 字段对应：`externalOrderNo` = 提交单号 `attempt_no`，`phone` = 手机号，`productId` = 供应商商品编码（上游套餐 ID）。上游 `orderNo` 存为供应商订单号；查单的 `orderNo` 传提交单号。
+- 签名：去掉 `sign`，按名升序拼 `k=v&...`（值不做 URL 编码），末尾拼 `&secretKey=`，md5 转大写；空值不发（文档常见问题说空值会导致签名无效）。
+- **回调没有签名**：只取 `externalOrderNo`，再主动查单，以查单结果为准，回 `success`；查单出错或没拿到明确结果回 `fail`（HTTP 400），定时查单照常继续。
+- 结果判定：下单 `status=success` 算受理；`status` 是别的（如 `error`，不论 HTTP 状态码）判失败换下一家；没拿到返回（网络异常、返回无法解析或没有 `status`）立即转异常并标为人工处理单（见 2.5）。下单 / 查单 `orderStatus` `Succeeded` 成功、`Failed` / `Cancel` 失败、其他处理中；`rechargeStatus=3` 部分成功不判结果，留给人工核实。查单报错、订单号对不上只记录、订单状态不动。
+- 上游商品列表：取 `data.result`；`status=false` 算下架；`brandName` 里带运营商名（移动 / 联通 / 电信 / 广电）才认运营商，否则留空；分类名和 `pType` 作为补充说明。
 
 ## 8. 权限
 
