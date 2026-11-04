@@ -163,7 +163,7 @@ async function query() {
   if (!result.query_results.some((r) => r.applied)) {
     next = '订单已经有结果，这次查单只用来核对上游，不改订单。'
   } else if (result.manual_only) {
-    next = '这是人工处理单，上游还没有明确结果，可以稍后再查；也可以到上游核实后置为成功 / 失败，再手动回调，确认上游没有充上也可以手动补单。'
+    next = '这是人工处理单，上游还没有明确结果，可以稍后再查；也可以到上游核实后置为成功 / 失败（会自动回调商户），确认上游没有充上也可以手动补单。'
   } else if (result.status === 'success') {
     next = '订单已改为成功，会通知商户。'
   } else if (result.status === 'failed') {
@@ -181,22 +181,53 @@ async function query() {
   }).catch(() => undefined)
 }
 
-/** 人工处理单置成功 / 失败后不自动通知商户 */
-function notifyHint(): string {
-  return detail.value!.manual_only ? '这是人工处理单，不会自动通知商户，处理完请点「手动回调」。' : '并通知商户。'
+/** 人工处理单置成功 / 失败后服务端不通知商户，页面接着自动手动回调；冲正不会自动回调 */
+function notifyHint(autoNotify = false): string {
+  if (!detail.value!.manual_only) {
+    return '并通知商户。'
+  }
+  return autoNotify ? '这是人工处理单，会接着按同样的结果和备注自动「手动回调」商户。' : '这是人工处理单，不会自动通知商户，处理完请点「手动回调」。'
+}
+
+/**
+ * 置为成功 / 失败。人工处理单成功后接着按同样的结果和备注手动回调，省得再点一次「手动回调」；
+ * 普通订单服务端已经会通知商户，不再回调，否则商户会收到两次推送。
+ */
+async function confirmAndNotify(result: NotifyResult, remark: string) {
+  const id = detail.value!.id
+  const manualOnly = detail.value!.manual_only
+  const label = result === 'success' ? '已置为成功' : '已置为失败并退款'
+  acting.value = true
+  try {
+    detail.value = await (result === 'success' ? orderApi.confirmSuccess(id, remark) : orderApi.confirmFailed(id, remark))
+    if (!manualOnly) {
+      ElMessage.success(label)
+      return
+    }
+    try {
+      detail.value = await orderApi.manualNotify(id, result, remark)
+      ElMessage.success(`${label}，已回调商户`)
+    } catch {
+      ElMessage.warning(`${label}，但自动回调商户没成功，请点「手动回调」重试`)
+      detail.value = await orderApi.detail(id)
+    }
+  } finally {
+    acting.value = false
+    await reload()
+  }
 }
 
 async function confirmSuccess() {
-  const remark = await askRemark('置为成功', `确认供应商已经充值到账？订单将改为成功，不退款，${notifyHint()}`)
+  const remark = await askRemark('置为成功', `确认供应商已经充值到账？订单将改为成功，不退款，${notifyHint(true)}`)
   if (remark) {
-    await act(() => orderApi.confirmSuccess(detail.value!.id, remark), '已置为成功')
+    await confirmAndNotify('success', remark)
   }
 }
 
 async function confirmFailed() {
-  const remark = await askRemark('置为失败', `确认没有充值到账？订单将改为失败，退给商户 ${detail.value!.sale_price} 元，${notifyHint()}`)
+  const remark = await askRemark('置为失败', `确认没有充值到账？订单将改为失败，退给商户 ${detail.value!.sale_price} 元，${notifyHint(true)}`)
   if (remark) {
-    await act(() => orderApi.confirmFailed(detail.value!.id, remark), '已置为失败并退款')
+    await confirmAndNotify('failed', remark)
   }
 }
 
@@ -369,7 +400,7 @@ onMounted(async () => {
       :closable="false"
       show-icon
       class="tip-bar"
-      title="两种情况会进这里：① 提交给供应商时接口异常（标「人工」）：上游回调或在详情里点「向供应商查单」拿到明确成功的，自动改成功并通知商户，明确失败的自动换下一个供应商（定时查单只记录）；人工置为成功 / 失败后要再点「手动回调」商户才会知道；② 下单超过 2 小时还没提交出去的。上游确认没有充上的，可以「手动补单」重新提交（同一笔订单，不重复扣款）。已提交、超过 2 小时没结果的是「超时」订单，不在这里：上游成功自动改成功，失败自动退款，都会通知商户。"
+      title="两种情况会进这里：① 提交给供应商时接口异常（标「人工」）：上游回调或在详情里点「向供应商查单」拿到明确成功的，自动改成功并通知商户，明确失败的自动换下一个供应商（定时查单只记录）；人工置为成功 / 失败后会按同样的结果自动「手动回调」商户；② 下单超过 2 小时还没提交出去的。上游确认没有充上的，可以「手动补单」重新提交（同一笔订单，不重复扣款）。已提交、超过 2 小时没结果的是「超时」订单，不在这里：上游成功自动改成功，失败自动退款，都会通知商户。"
     />
     <el-form inline @submit.prevent="list.search">
       <el-form-item>
