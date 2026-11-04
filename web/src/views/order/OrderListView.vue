@@ -3,7 +3,7 @@ import StatusTag from '@/components/StatusTag.vue'
 import { formatDuration, recentDays } from '@/utils/date'
 import { usePagedList } from '@/utils/paged'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Download } from '@element-plus/icons-vue'
+import { ArrowDown, DocumentCopy, Download } from '@element-plus/icons-vue'
 import { computed, onMounted, ref } from 'vue'
 import {
   downloadOrders,
@@ -276,6 +276,42 @@ async function submitNotify() {
 // ---- 列表勾选 ----
 const selected = ref<Order[]>([])
 
+type CopyField = 'order_no' | 'merchant_order_no' | 'mobile'
+const copyLabels: Record<CopyField, string> = { order_no: '平台订单号', merchant_order_no: '商户订单号', mobile: '手机号' }
+
+/** 勾选的订单按列表顺序取某一项，每行一个复制出去 */
+async function copySelected(field: CopyField) {
+  const text = rows.value
+    .filter((row) => selected.value.includes(row))
+    .map((row) => row[field])
+    .join('\n')
+  try {
+    await writeClipboard(text)
+    ElMessage.success(`已复制 ${selected.value.length} 个${copyLabels[field]}`)
+  } catch {
+    ElMessage.warning('复制失败，请手动选中复制')
+  }
+}
+
+/** 管理端可能用 http 内网地址访问，那里没有 navigator.clipboard，退回 execCommand */
+async function writeClipboard(text: string) {
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(text)
+    return
+  }
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.style.position = 'fixed'
+  textarea.style.opacity = '0'
+  document.body.appendChild(textarea)
+  textarea.select()
+  const ok = document.execCommand('copy')
+  document.body.removeChild(textarea)
+  if (!ok) {
+    throw new Error('copy failed')
+  }
+}
+
 /** 异常的行整行标红底 */
 function rowClass({ row }: { row: Order }): string {
   return row.abnormal ? 'abnormal-row' : ''
@@ -393,6 +429,16 @@ onMounted(async () => {
         <el-button type="primary" native-type="submit">查询</el-button>
         <el-button @click="list.reset">重置</el-button>
         <el-button :icon="Download" :loading="exporting" @click="exportCsv">导出</el-button>
+        <el-dropdown trigger="click" :disabled="selected.length === 0" class="copy-dropdown" @command="copySelected">
+          <el-button :icon="DocumentCopy" :disabled="selected.length === 0">
+            复制{{ selected.length ? `（${selected.length}）` : '' }}<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+          </el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item v-for="(label, field) in copyLabels" :key="field" :command="field">{{ label }}</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
         <el-button v-if="canManage" type="primary" plain :disabled="selected.length === 0" @click="openNotify(selected, false)">
           批量手动回调{{ selected.length ? `（${selected.length}）` : '' }}
         </el-button>
@@ -438,7 +484,7 @@ onMounted(async () => {
       :row-class-name="rowClass"
       @selection-change="(rows: Order[]) => (selected = rows)"
     >
-      <el-table-column v-if="canManage" type="selection" width="44" fixed="left" />
+      <el-table-column type="selection" width="44" fixed="left" />
       <el-table-column prop="order_no" label="平台订单号" width="210" />
       <el-table-column prop="merchant_name" label="商户" min-width="110" />
       <el-table-column prop="merchant_order_no" label="商户订单号" min-width="150" />
@@ -740,6 +786,10 @@ onMounted(async () => {
 
 .warn {
   color: #e6a23c;
+}
+
+.copy-dropdown {
+  margin: 0 12px;
 }
 
 .actions .el-button + .el-button {
