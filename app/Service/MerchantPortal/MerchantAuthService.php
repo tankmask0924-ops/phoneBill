@@ -30,9 +30,10 @@ use Hyperf\Redis\Redis;
  * 商户后台账户：登录、当前账号信息、修改自己的密码、绑定 / 修改手机。
  *
  * - 商户后台放在外网，登录加了失败次数限制：同一账号 15 分钟内失败 10 次就暂时锁住；
- * - 绑定了手机并且平台启用了短信时，登录分两步：账号密码对了先发验证码、返回一个 10 分钟有效的 ticket，
- *   再用 ticket + 验证码换 token（verifyLogin）。平台没启用短信时只校验密码，避免短信出问题时所有人都登不上；
- * - 绑定 / 修改手机要输登录密码，并且收到新手机号的验证码。
+ * - 账号自己开启了登录短信验证（要先绑定手机）并且平台启用了短信时，登录分两步：账号密码对了先发验证码、
+ *   返回一个 10 分钟有效的 ticket，再用 ticket + 验证码换 token（verifyLogin）。平台没启用短信时只校验密码，
+ *   避免短信出问题时所有人都登不上；
+ * - 绑定 / 修改手机要输登录密码，并且收到新手机号的验证码；开关登录短信验证要输登录密码。
  */
 class MerchantAuthService extends AbstractService
 {
@@ -133,6 +134,7 @@ class MerchantAuthService extends AbstractService
             'username' => $user->username,
             'real_name' => $user->real_name,
             'mobile' => $user->mobile,
+            'sms_login_enabled' => (bool) $user->sms_login_enabled,
             'sms_available' => $this->smsService->available(),
             'merchant_id' => $merchant->id,
             'merchant_name' => $merchant->name,
@@ -197,9 +199,40 @@ class MerchantAuthService extends AbstractService
         return ['mobile' => $mobile];
     }
 
+    /**
+     * 开启 / 关闭登录短信验证。开启要先绑定手机、平台启用了短信；关闭随时可以。
+     *
+     * @return array{sms_login_enabled: bool}
+     */
+    public function setSmsLogin(MerchantUser $user, mixed $enabled, string $password, ?string $ip): array
+    {
+        if ($password === '' || ! password_verify($password, $user->password)) {
+            throw new HttpException(422, '登录密码不正确');
+        }
+        $enabled = filter_var($enabled, FILTER_VALIDATE_BOOLEAN);
+        if ($enabled) {
+            if (($user->mobile ?? '') === '') {
+                throw new HttpException(422, '请先绑定手机');
+            }
+            if (! $this->smsService->available()) {
+                throw new HttpException(422, '平台还没有开通短信服务，暂时不能开启');
+            }
+        }
+        if ($enabled !== (bool) $user->sms_login_enabled) {
+            $this->merchantUserDao->update($user->id, ['sms_login_enabled' => $enabled]);
+            $this->loggerFactory->get('merchant')->info($enabled ? '商户账号开启登录短信验证' : '商户账号关闭登录短信验证', [
+                'merchant_id' => $user->merchant_id,
+                'user' => $user->username,
+                'ip' => $ip,
+            ]);
+        }
+
+        return ['sms_login_enabled' => $enabled];
+    }
+
     private function needsSms(MerchantUser $user): bool
     {
-        return ($user->mobile ?? '') !== '' && $this->smsService->available();
+        return $user->sms_login_enabled && ($user->mobile ?? '') !== '' && $this->smsService->available();
     }
 
     /**

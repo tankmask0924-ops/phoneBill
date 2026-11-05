@@ -22,7 +22,8 @@ use Carbon\Carbon;
  * @property string $username
  * @property string $password
  * @property null|string $real_name
- * @property null|string $mobile 绑定的手机号，绑定后登录要短信验证码
+ * @property null|string $mobile 绑定的手机号（余额提醒发到这里）
+ * @property bool $sms_login_enabled 登录时是否要短信验证码，账号自己在商户后台开关，要先绑定手机
  * @property string $status
  * @property null|Carbon $last_login_at
  * @property Carbon $created_at
@@ -38,12 +39,17 @@ class MerchantUser extends Model
         'password',
         'real_name',
         'mobile',
+        'sms_login_enabled',
         'status',
         'last_login_at',
     ];
 
     protected array $hidden = [
         'password',
+    ];
+
+    protected array $casts = [
+        'sms_login_enabled' => 'boolean',
     ];
 
     protected array $dates = [

@@ -85,8 +85,10 @@ export interface MerchantUser {
   merchant_id: number
   username: string
   real_name: string | null
-  /** 绑定的手机号，绑定后登录要短信验证码 */
+  /** 绑定的手机号 */
   mobile: string | null
+  /** 商户自己开启了登录短信验证 */
+  sms_login_enabled: boolean
   status: string
   last_login_at: string | null
   created_at: string | null
@@ -114,7 +116,7 @@ export const merchantApi = {
     http.post<MerchantUser>(`/admin/merchants/${id}/users/${userId}/status`, { status }),
   resetUserPassword: (id: number, userId: number, password: string) =>
     http.post<{ success: boolean }>(`/admin/merchants/${id}/users/${userId}/password`, { password }),
-  /** 解绑手机：商户换了手机收不到登录验证码时用 */
+  /** 解绑手机：商户换了手机收不到登录验证码时用，同时关掉登录短信验证 */
   unbindUserMobile: (id: number, userId: number) => http.post<MerchantUser>(`/admin/merchants/${id}/users/${userId}/unbind-mobile`),
 }
 

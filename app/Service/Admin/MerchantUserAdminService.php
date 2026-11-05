@@ -126,7 +126,7 @@ class MerchantUserAdminService extends AbstractService
     {
         $user = $this->findOrFail($merchantId, $userId);
         if ($user->mobile !== null) {
-            $this->merchantUserDao->update($user->id, ['mobile' => null]);
+            $this->merchantUserDao->update($user->id, ['mobile' => null, 'sms_login_enabled' => false]);
             $this->operationLogDao->record($operator->id, self::MODULE, 'unbind_merchant_user_mobile', 'merchant', $merchantId, ['username' => $user->username, 'mobile' => $user->mobile], ['username' => $user->username, 'mobile' => null], $ip);
         }
 
@@ -154,6 +154,7 @@ class MerchantUserAdminService extends AbstractService
             'username' => $user->username,
             'real_name' => $user->real_name,
             'mobile' => $user->mobile,
+            'sms_login_enabled' => (bool) $user->sms_login_enabled,
             'status' => $user->status,
             'last_login_at' => $user->last_login_at?->toDateTimeString(),
             'created_at' => $user->created_at?->toDateTimeString(),

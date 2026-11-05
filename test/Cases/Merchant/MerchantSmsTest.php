@@ -154,6 +154,7 @@ class MerchantSmsTest extends HttpTestCase
         $this->assertSame(422, $this->jsonRequest('POST', '/merchant/auth/mobile/code', $token, ['mobile' => $mobile])->getStatusCode());
         make(SettingService::class)->set(SmsService::SETTING_KEY, self::CONFIG);
         $this->assertTrue($this->body($this->jsonRequest('GET', '/merchant/auth/me', $token))['sms_available']);
+        $this->assertSame(422, $this->jsonRequest('PUT', '/merchant/auth/sms-login', $token, ['enabled' => true, 'password' => self::PASSWORD])->getStatusCode(), '没绑定手机不能开启');
 
         $this->assertSame(422, $this->jsonRequest('POST', '/merchant/auth/mobile/code', $token, ['mobile' => '12345'])->getStatusCode());
         $this->assertSame(200, $this->jsonRequest('POST', '/merchant/auth/mobile/code', $token, ['mobile' => $mobile])->getStatusCode());
@@ -167,7 +168,16 @@ class MerchantSmsTest extends HttpTestCase
         $this->assertSame($mobile, MerchantUser::find($user->id)->mobile);
         $this->assertSame(422, $this->jsonRequest('PUT', '/merchant/auth/mobile', $token, $bind)->getStatusCode(), '验证码用过就作废');
 
-        // 绑定后登录：先拿 ticket，验证码已自动发出（刚发过绑定码，在冷却里就不再发）
+        // 只绑定、没开启登录短信验证：照常只校验密码
+        $this->assertArrayHasKey('token', $this->merchantLogin($user->username));
+        $this->assertFalse($this->body($this->jsonRequest('GET', '/merchant/auth/me', $token))['sms_login_enabled']);
+
+        // 开启要输对登录密码
+        $this->assertSame(422, $this->jsonRequest('PUT', '/merchant/auth/sms-login', $token, ['enabled' => true, 'password' => 'wrong'])->getStatusCode());
+        $this->assertTrue($this->body($this->jsonRequest('PUT', '/merchant/auth/sms-login', $token, ['enabled' => true, 'password' => self::PASSWORD]))['sms_login_enabled']);
+        $this->assertTrue($this->body($this->jsonRequest('GET', '/merchant/auth/me', $token))['sms_login_enabled']);
+
+        // 开启后登录：先拿 ticket，验证码已自动发出（刚发过绑定码，在冷却里就不再发）
         make(Redis::class)->del("sms_cooldown:{$mobile}");
         $step1 = $this->merchantLogin($user->username);
         $this->assertArrayNotHasKey('token', $step1);
@@ -183,6 +193,11 @@ class MerchantSmsTest extends HttpTestCase
         $this->assertSame(200, $this->jsonRequest('GET', '/merchant/auth/me', $verified['token'])->getStatusCode());
         $this->assertSame(401, $this->jsonRequest('POST', '/merchant/auth/login/verify', null, ['ticket' => $step1['ticket'], 'code' => $code])->getStatusCode(), 'ticket 只能用一次');
 
+        // 自己关掉：只校验密码；再打开
+        $this->jsonRequest('PUT', '/merchant/auth/sms-login', $verified['token'], ['enabled' => false, 'password' => self::PASSWORD]);
+        $this->assertArrayHasKey('token', $this->merchantLogin($user->username));
+        $this->jsonRequest('PUT', '/merchant/auth/sms-login', $verified['token'], ['enabled' => true, 'password' => self::PASSWORD]);
+
         // 平台关掉短信：只校验密码
         make(SettingService::class)->set(SmsService::SETTING_KEY, ['enabled' => false] + self::CONFIG);
         $this->assertArrayHasKey('token', $this->merchantLogin($user->username));
@@ -191,7 +206,9 @@ class MerchantSmsTest extends HttpTestCase
         $admin = $this->loginAs($this->createAdminWithPermissions(['merchant.view', 'merchant.manage']));
         $users = $this->body($this->jsonRequest('GET', "/admin/merchants/{$user->merchant_id}/users", $admin));
         $this->assertSame($mobile, $users[0]['mobile']);
-        $this->assertNull($this->body($this->jsonRequest('POST', "/admin/merchants/{$user->merchant_id}/users/{$user->id}/unbind-mobile", $admin))['mobile']);
+        $this->assertTrue($users[0]['sms_login_enabled']);
+        $unbound = $this->body($this->jsonRequest('POST', "/admin/merchants/{$user->merchant_id}/users/{$user->id}/unbind-mobile", $admin));
+        $this->assertSame([null, false], [$unbound['mobile'], $unbound['sms_login_enabled']], '解绑同时关掉登录短信验证');
     }
 
     public function testWrongCodesInvalidateTheCode()
@@ -337,6 +354,9 @@ class MerchantSmsTest extends HttpTestCase
         return $this->body($this->jsonRequest('POST', '/merchant/auth/login/verify', null, ['ticket' => $step1['ticket'], 'code' => $this->lastCode()]))['token'];
     }
 
+    /**
+     * 传了手机号就同时开启登录短信验证。
+     */
     private function createMerchantUser(Merchant $merchant, ?string $mobile = null): MerchantUser
     {
         return MerchantUser::create([
@@ -344,6 +364,7 @@ class MerchantSmsTest extends HttpTestCase
             'username' => $this->uniq('mu_'),
             'password' => password_hash(self::PASSWORD, PASSWORD_BCRYPT, ['cost' => 4]),
             'mobile' => $mobile,
+            'sms_login_enabled' => $mobile !== null,
             'status' => 'active',
         ]);
     }

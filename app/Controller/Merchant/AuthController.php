@@ -25,7 +25,7 @@ use Hyperf\HttpServer\Annotation\PostMapping;
 use Hyperf\HttpServer\Annotation\PutMapping;
 
 /**
- * 商户后台账户：登录（绑定了手机要再验证短信，见 MerchantAuthService）、当前账号、修改自己的密码、绑定 / 修改手机。
+ * 商户后台账户：登录（开启了登录短信验证要再验证短信，见 MerchantAuthService）、当前账号、修改自己的密码、绑定 / 修改手机、开关登录短信验证。
  * 账号由平台在「商户」页面开，不能自助注册。
  */
 #[Controller(prefix: '/merchant/auth')]
@@ -91,6 +91,18 @@ class AuthController extends AbstractController
             (string) $this->request->input('password', ''),
             $this->request->input('mobile'),
             (string) $this->request->input('code', ''),
+            $this->clientIpResolver->resolve($this->request),
+        );
+    }
+
+    #[Middleware(MerchantAuthMiddleware::class)]
+    #[PutMapping(path: 'sms-login')]
+    public function setSmsLogin(): array
+    {
+        return $this->authService->setSmsLogin(
+            $this->user(),
+            $this->request->input('enabled'),
+            (string) $this->request->input('password', ''),
             $this->clientIpResolver->resolve($this->request),
         );
     }

@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { bindMobile, fetchMe, type Me, sendBindCode } from '@/api/auth'
+import { bindMobile, fetchMe, type Me, sendBindCode, setSmsLogin } from '@/api/auth'
 import { type Account, portalApi } from '@/api/portal'
 import { useCountdown } from '@/utils/countdown'
 
@@ -51,9 +51,36 @@ async function saveMobile() {
     }
     account.value = await portalApi.account()
     mobileVisible.value = false
-    ElMessage.success('已绑定，下次登录需要输入短信验证码')
+    ElMessage.success(me.value?.sms_login_enabled ? '已修改，登录验证码会发到新手机' : '已绑定，可以开启登录短信验证')
   } finally {
     mobileSaving.value = false
+  }
+}
+
+// ---- 登录短信验证 ----
+const smsLoginSaving = ref(false)
+
+async function toggleSmsLogin(enabled: boolean) {
+  if (!me.value) {
+    return
+  }
+  let password: string
+  try {
+    const result = await ElMessageBox.prompt(
+      enabled ? `开启后，登录时除了密码还要输入发到 ${me.value.mobile} 的短信验证码。请输入登录密码确认。` : '关闭后登录只需要账号密码。请输入登录密码确认。',
+      enabled ? '开启登录短信验证' : '关闭登录短信验证',
+      { inputType: 'password', inputPlaceholder: '登录密码', inputValidator: (v) => !!v || '请输入登录密码' },
+    )
+    password = result.value
+  } catch {
+    return
+  }
+  smsLoginSaving.value = true
+  try {
+    me.value.sms_login_enabled = (await setSmsLogin(enabled, password)).sms_login_enabled
+    ElMessage.success(enabled ? '已开启，下次登录需要输入短信验证码' : '已关闭')
+  } finally {
+    smsLoginSaving.value = false
   }
 }
 
@@ -186,7 +213,18 @@ onMounted(async () => {
           {{ me.mobile ?? '未绑定' }}
           <el-button v-if="me.sms_available" link type="primary" class="copy" @click="openMobile">{{ me.mobile ? '修改' : '绑定' }}</el-button>
           <span v-else class="muted">（平台暂未开通短信服务）</span>
-          <div class="cell-tip">绑定后登录需要再输入短信验证码，余额提醒短信也发到这里。</div>
+          <div class="cell-tip">余额提醒短信发到这里；开启登录短信验证后，登录验证码也发到这里。</div>
+        </el-descriptions-item>
+        <el-descriptions-item label="登录短信验证">
+          <el-switch
+            :model-value="me.sms_login_enabled"
+            :loading="smsLoginSaving"
+            :disabled="!me.sms_login_enabled && (!me.mobile || !me.sms_available)"
+            @change="(v: string | number | boolean) => toggleSmsLogin(!!v)"
+          />
+          <span v-if="!me.sms_login_enabled && !me.mobile" class="muted">（请先绑定手机）</span>
+          <span v-else-if="!me.sms_available" class="muted">（平台暂未开通短信服务，暂不需要验证码）</span>
+          <div class="cell-tip">开启后，登录时除了账号密码还要输入短信验证码，更安全。只对当前账号生效。</div>
         </el-descriptions-item>
         <el-descriptions-item label="余额提醒">
           <template v-if="account.balance_alert_threshold !== null">

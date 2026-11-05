@@ -6,7 +6,7 @@ export interface LoginResult {
   username: string
 }
 
-/** 绑定了手机时登录要再验证短信：先拿 ticket（10 分钟有效），再用 ticket + 验证码换 token */
+/** 开启了登录短信验证时登录要再验证短信：先拿 ticket（10 分钟有效），再用 ticket + 验证码换 token */
 export interface SmsChallenge {
   need_sms: true
   ticket: string
@@ -29,6 +29,8 @@ export interface Me {
   real_name: string | null
   /** 绑定的手机号 */
   mobile: string | null
+  /** 登录时是否要短信验证码（要先绑定手机） */
+  sms_login_enabled: boolean
   /** 平台是否启用了短信（没启用不能绑定手机） */
   sms_available: boolean
   merchant_id: number
@@ -47,3 +49,7 @@ export const sendBindCode = (mobile: string) => http.post<{ success: boolean }>(
 /** 绑定 / 修改手机：登录密码 + 新手机号的验证码 */
 export const bindMobile = (data: { mobile: string; code: string; password: string }) =>
   http.put<{ mobile: string }>('/merchant/auth/mobile', data)
+
+/** 开启 / 关闭登录短信验证，要输登录密码；开启要先绑定手机 */
+export const setSmsLogin = (enabled: boolean, password: string) =>
+  http.put<{ sms_login_enabled: boolean }>('/merchant/auth/sms-login', { enabled, password })

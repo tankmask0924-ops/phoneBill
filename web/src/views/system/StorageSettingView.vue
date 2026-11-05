@@ -122,7 +122,7 @@ onMounted(async () => {
     <el-form label-width="110px" style="max-width: 560px" @submit.prevent="saveSite">
       <el-form-item label="系统名称">
         <el-input v-model="siteName" maxlength="30" show-word-limit :placeholder="`留空使用默认名称：${defaultName}`" />
-        <div class="tip">显示在管理后台和商户后台的左上角、登录页和浏览器标题</div>
+        <div class="tip">显示在管理后台左上角、登录页和浏览器标题；商户后台显示为「系统名称 商户后台」</div>
       </el-form-item>
       <el-form-item>
         <el-button type="primary" :loading="siteSaving" native-type="submit">保存</el-button>

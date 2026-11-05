@@ -426,7 +426,7 @@ async function resetUserPassword(user: MerchantUser) {
 
 async function unbindUserMobile(user: MerchantUser) {
   try {
-    await ElMessageBox.confirm(`解绑「${user.username}」的手机 ${user.mobile}？解绑后登录只需账号密码，对方可以在商户后台重新绑定。`, '解绑手机', { type: 'warning' })
+    await ElMessageBox.confirm(`解绑「${user.username}」的手机 ${user.mobile}？解绑后登录短信验证也会关闭，登录只需账号密码；对方可以在商户后台重新绑定、开启。`, '解绑手机', { type: 'warning' })
   } catch {
     return
   }
@@ -750,6 +750,12 @@ onMounted(async () => {
       </el-table-column>
       <el-table-column label="绑定手机" width="120">
         <template #default="{ row }">{{ row.mobile ?? '-' }}</template>
+      </el-table-column>
+      <el-table-column label="登录验证" width="90">
+        <template #default="{ row }">
+          <el-tag v-if="row.sms_login_enabled" size="small" type="success">短信</el-tag>
+          <span v-else class="muted">仅密码</span>
+        </template>
       </el-table-column>
       <el-table-column label="状态" width="80">
         <template #default="{ row }"><StatusTag :map="supplierStatusLabels" :value="row.status" /></template>
