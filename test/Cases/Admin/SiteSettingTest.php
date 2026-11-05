@@ -67,10 +67,13 @@ class SiteSettingTest extends HttpTestCase
         $public = $this->client->request('GET', '/admin/settings/public');
         $this->assertSame(200, $public->getStatusCode());
         $this->assertSame(['site_name' => '话费充值平台'], $this->body($public));
+        // 商户后台跟着用同一个名称
+        $this->assertSame(['site_name' => '话费充值平台'], $this->body($this->client->request('GET', '/merchant/site')));
 
         // 留空：前端用默认名称
         $this->assertSame(['name' => ''], $this->body($this->jsonRequest('PUT', '/admin/settings/site', $admin, ['name' => ''])));
         $this->assertSame(['site_name' => ''], $this->body($this->client->request('GET', '/admin/settings/public')));
+        $this->assertSame(['site_name' => ''], $this->body($this->client->request('GET', '/merchant/site')));
 
         $viewer = $this->loginAs($this->createAdminWithPermissions(['order.view']));
         $this->assertSame(403, $this->jsonRequest('PUT', '/admin/settings/site', $viewer, ['name' => 'x'])->getStatusCode());

@@ -4,12 +4,13 @@ import { useRouter } from 'vue-router'
 import { changePassword, fetchMe, type Me } from '@/api/auth'
 import ChangePasswordDialog from '@/components/ChangePasswordDialog.vue'
 import { useAuthStore } from '@/stores/auth'
+import { useSiteStore } from '@/stores/site'
 import AppLayout from './AppLayout.vue'
 import { menus } from './menus'
 
 const auth = useAuthStore()
 const router = useRouter()
-const title = import.meta.env.VITE_APP_TITLE
+const site = useSiteStore()
 const passwordDialog = ref(false)
 const me = ref<Me | null>(null)
 
@@ -35,7 +36,7 @@ onMounted(async () => {
     title="你的商户已被停用，暂时不能下单，历史数据仍可查看。如有疑问请联系平台。"
   />
   <AppLayout
-    :title="title"
+    :title="site.name"
     :menus="menus"
     :username="displayName"
     @logout="logout"

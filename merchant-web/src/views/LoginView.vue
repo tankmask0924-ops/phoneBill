@@ -8,13 +8,14 @@ import { useRoute, useRouter } from 'vue-router'
 import { login, type LoginResult, resendLoginCode, type SmsChallenge, verifyLogin } from '@/api/auth'
 import type { LoginForm } from '@/types'
 import { useAuthStore } from '@/stores/auth'
+import { useSiteStore } from '@/stores/site'
 import { useCountdown } from '@/utils/countdown'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const loading = ref(false)
-const title = import.meta.env.VITE_APP_TITLE
+const site = useSiteStore()
 
 /** 绑定了手机：第二步输验证码 */
 const challenge = ref<SmsChallenge | null>(null)
@@ -87,7 +88,7 @@ function back() {
 </script>
 
 <template>
-  <LoginPanel :title="title" :loading="loading" @submit="onSubmit">
+  <LoginPanel :title="site.name" :loading="loading" @submit="onSubmit">
     <template v-if="challenge" #body>
       <el-form size="large" @submit.prevent="verify">
         <div class="sms-tip">账号已绑定手机 {{ challenge.mobile }}，请输入收到的短信验证码</div>

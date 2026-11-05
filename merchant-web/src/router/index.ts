@@ -45,18 +45,12 @@ const router = createRouter({
   ],
 })
 
-const appTitle = import.meta.env.VITE_APP_TITLE
-
 router.beforeEach((to) => {
   const loggedIn = useAuthStore().isLoggedIn
   if (to.meta.public) {
     return to.name === 'login' && loggedIn ? { path: '/' } : true
   }
   return loggedIn ? true : { name: 'login', query: { redirect: to.fullPath } }
-})
-
-router.afterEach((to) => {
-  document.title = to.meta.title ? `${to.meta.title} - ${appTitle}` : appTitle
 })
 
 export default router
