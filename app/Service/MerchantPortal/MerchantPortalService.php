@@ -13,6 +13,7 @@ declare(strict_types=1);
 namespace App\Service\MerchantPortal;
 
 use App\Dao\MerchantBalanceLogDao;
+use App\Dao\MerchantUserDao;
 use App\Dao\OrderAttemptDao;
 use App\Dao\OrderDao;
 use App\Dao\ProductCategoryDao;
@@ -28,6 +29,7 @@ use App\Service\FiltersByMobiles;
 use App\Service\Merchant\MerchantCatalogService;
 use App\Service\Order\OrderService;
 use App\Service\Product\ProductStatsService;
+use App\Support\Mobile;
 use Hyperf\Database\Model\Builder;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpMessage\Exception\HttpException;
@@ -63,6 +65,9 @@ class MerchantPortalService extends AbstractService
 
     #[Inject]
     protected OrderDao $orderDao;
+
+    #[Inject]
+    protected MerchantUserDao $merchantUserDao;
 
     #[Inject]
     protected OrderAttemptDao $attemptDao;
@@ -261,7 +266,7 @@ class MerchantPortalService extends AbstractService
     }
 
     /**
-     * 接入信息：AppKey、通知地址、IP 白名单（能买的商品见 products()）。AppSecret 不在这里出现。
+     * 接入信息：AppKey、通知地址、IP 白名单（能买的商品见 products()）；余额提醒阈值和会收到提醒的手机（打码）。AppSecret 不在这里出现。
      *
      * @return array<string, mixed>
      */
@@ -273,6 +278,8 @@ class MerchantPortalService extends AbstractService
             'app_key' => $merchant->app_key,
             'notify_url' => $merchant->notify_url,
             'ip_whitelist' => $merchant->ipWhitelist(),
+            'balance_alert_threshold' => $merchant->balance_alert_threshold,
+            'alert_mobiles' => array_map([Mobile::class, 'mask'], $this->merchantUserDao->activeMobilesOfMerchant($merchant->id)),
         ];
     }
 

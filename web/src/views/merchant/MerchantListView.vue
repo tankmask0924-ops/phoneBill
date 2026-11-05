@@ -3,7 +3,7 @@ import StatusTag from '@/components/StatusTag.vue'
 import { recentDays } from '@/utils/date'
 import { usePagedList } from '@/utils/paged'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
-import { Plus, WarningFilled } from '@element-plus/icons-vue'
+import { Plus, QuestionFilled, WarningFilled } from '@element-plus/icons-vue'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { type AvailableProduct, balanceLogApi, type BalanceLog, type Merchant, merchantApi, type MerchantProduct, type MerchantUser } from '@/api/merchant'
 import type { OperatorCode } from '@/api/product'
@@ -424,6 +424,17 @@ async function resetUserPassword(user: MerchantUser) {
   ElMessage.success('密码已重置，请把新密码告诉对方')
 }
 
+async function unbindUserMobile(user: MerchantUser) {
+  try {
+    await ElMessageBox.confirm(`解绑「${user.username}」的手机 ${user.mobile}？解绑后登录只需账号密码，对方可以在商户后台重新绑定。`, '解绑手机', { type: 'warning' })
+  } catch {
+    return
+  }
+  await merchantApi.unbindUserMobile(user.merchant_id, user.id)
+  ElMessage.success('已解绑')
+  await loadUsers()
+}
+
 onMounted(async () => {
   await permission.load()
   list.load()
@@ -472,6 +483,16 @@ onMounted(async () => {
         <template #default="{ row }">
           <span :class="{ 'negative': Number(row.available_balance) < 0 }">{{ row.available_balance }}</span>
         </template>
+      </el-table-column>
+      <el-table-column prop="today_consumed" label="今日消费（元）" width="130" align="right" />
+      <el-table-column label="累计消费（元）" width="140" align="right">
+        <template #header>
+          累计消费（元）
+          <el-tooltip content="成功订单的售价合计，按下单时间算；历史部分每天 3 点结转" placement="top">
+            <el-icon class="header-icon"><QuestionFilled /></el-icon>
+          </el-tooltip>
+        </template>
+        <template #default="{ row }">{{ row.total_consumed }}</template>
       </el-table-column>
       <el-table-column prop="product_count" label="已开通商品" width="100" align="center" />
       <el-table-column label="IP 白名单" min-width="140">
@@ -727,15 +748,19 @@ onMounted(async () => {
       <el-table-column label="使用人" width="110">
         <template #default="{ row }">{{ row.real_name ?? '-' }}</template>
       </el-table-column>
+      <el-table-column label="绑定手机" width="120">
+        <template #default="{ row }">{{ row.mobile ?? '-' }}</template>
+      </el-table-column>
       <el-table-column label="状态" width="80">
         <template #default="{ row }"><StatusTag :map="supplierStatusLabels" :value="row.status" /></template>
       </el-table-column>
       <el-table-column label="最近登录" width="170">
         <template #default="{ row }">{{ row.last_login_at ?? '-' }}</template>
       </el-table-column>
-      <el-table-column v-if="canManage" label="操作" width="140">
+      <el-table-column v-if="canManage" label="操作" width="190">
         <template #default="{ row }">
           <el-button link type="primary" @click="resetUserPassword(row as MerchantUser)">重置密码</el-button>
+          <el-button v-if="row.mobile" link type="warning" @click="unbindUserMobile(row as MerchantUser)">解绑手机</el-button>
           <el-button link :type="row.status === 'active' ? 'danger' : 'success'" @click="toggleUser(row as MerchantUser)">
             {{ row.status === 'active' ? '禁用' : '启用' }}
           </el-button>
@@ -869,5 +894,11 @@ onMounted(async () => {
 
 .receiving-tag {
   margin-left: 6px;
+}
+
+.header-icon {
+  vertical-align: -2px;
+  color: #909399;
+  cursor: help;
 }
 </style>

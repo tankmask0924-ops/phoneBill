@@ -194,8 +194,10 @@ export const operationActionLabels: LabelMap = {
   reject_funding_request: { label: '加款申请驳回' },
   update_storage_setting: { label: '修改存储配置' },
   update_notify_setting: { label: '修改回调域名' },
+  update_sms_setting: { label: '修改短信配置' },
   create_merchant_user: { label: '开通商户后台账号' },
   enable_merchant_user: { label: '启用商户后台账号' },
   disable_merchant_user: { label: '禁用商户后台账号' },
   reset_merchant_user_password: { label: '重置商户后台账号密码' },
+  unbind_merchant_user_mobile: { label: '解绑商户后台账号手机' },
 }

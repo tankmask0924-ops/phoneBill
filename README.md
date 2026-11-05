@@ -147,7 +147,7 @@ npm run build        # 产物在 merchant-web/dist，部署在 /merchant/ 路径
 | POST | `/admin/funding/requests/{id}/approve`、`/requests/{id}/reject`、`/payer-accounts/{id}/approve`、`/payer-accounts/{id}/reject`、`/online-payments/{id}/candidates`（查找到账记录）、`/online-payments/{id}/confirm`（确认入账） | `funding.review` |
 | POST/PUT | `/admin/receiving-accounts`、`/{id}`、`/{id}/status`、`/{id}/merchants`；`PUT /admin/merchants/{id}/receiving-accounts`（按商户配置）、`PUT /admin/merchants/{id}/alipay-account`（指定支付宝转账加款账户） | `funding.config` |
 | GET | `/admin/settings/public`（系统名称，登录页用） | 不用登录 |
-| GET/PUT/POST | `/admin/settings/site`（系统名称）、`/admin/settings/notify`（回调域名）、`/admin/settings/order`（重复充值拦截分钟数，0 表示不拦截）、`/admin/settings/storage`、`/admin/settings/storage/test`；`/admin/alipay-accounts`、`/{id}`、`/{id}/status`、`/{id}/test`、`POST /admin/alipay-accounts/qr-code`（上传收款码）（支付宝转账加款账户） | `setting.manage` |
+| GET/PUT/POST | `/admin/settings/site`（系统名称）、`/admin/settings/notify`（回调域名）、`/admin/settings/order`（重复充值拦截分钟数，0 表示不拦截）、`/admin/settings/storage`、`/admin/settings/storage/test`、`/admin/settings/sms`、`/admin/settings/sms/test`（阿里云短信）；`/admin/alipay-accounts`、`/{id}`、`/{id}/status`、`/{id}/test`、`POST /admin/alipay-accounts/qr-code`（上传收款码）（支付宝转账加款账户） | `setting.manage` |
 | GET | `/admin/segments/lookup` | `risk.view` |
 | GET | `/admin/risk/blacklist`、`/admin/risk/maintenances`、`/admin/risk/maintenances/options` | `risk.view` |
 | POST/DELETE | `/admin/risk/blacklist`、`/admin/risk/blacklist/{id}`、`/admin/risk/maintenances`、`/{id}/finish` | `risk.manage` |
@@ -162,9 +162,9 @@ npm run build        # 产物在 merchant-web/dist，部署在 /merchant/ 路径
 | GET/POST | `/open/v1/recharge`、`/order`、`/balance`、`/products` | 商户签名，见 [docs/api.md](docs/api.md) |
 | GET/POST | `/notify/supplier/{供应商编码}` | 供应商回调，由驱动验签 |
 | GET | `/admin/merchants/{id}/users` | `merchant.view` |
-| POST | `/admin/merchants/{id}/users`、`/{id}/users/{userId}/status`、`/{id}/users/{userId}/password` | `merchant.manage` |
-| POST | `/merchant/auth/login` | 公开（商户后台） |
-| GET/PUT | `/merchant/auth/me`、`/merchant/auth/password` | 商户登录 |
+| POST | `/admin/merchants/{id}/users`、`/{id}/users/{userId}/status`、`/{id}/users/{userId}/password`、`/{id}/users/{userId}/unbind-mobile` | `merchant.manage` |
+| POST | `/merchant/auth/login`、`/merchant/auth/login/sms-code`、`/merchant/auth/login/verify`（绑定了手机时第二步验证短信） | 公开（商户后台） |
+| GET/PUT/POST | `/merchant/auth/me`、`/merchant/auth/password`、`/merchant/auth/mobile/code`、`PUT /merchant/auth/mobile`（绑定 / 修改手机，要登录密码 + 验证码）、`PUT /merchant/account/balance-alert`（余额提醒阈值） | 商户登录 |
 | GET | `/merchant/dashboard`、`/orders`、`/order-filter-options`、`/orders/{id}`、`/balance-logs`、`/products`（可下单商品和近 7 天统计）、`/account` | 商户登录，只能看自己的数据 |
 | PUT/POST | `/merchant/account/ip-whitelist`、`/merchant/account/reset-secret` | 商户登录，要再输一次登录密码 |
 | GET/POST | `/merchant/exports`（导出订单记录 / 资金流水，异步生成 CSV，保留 7 天）、`/merchant/exports/{id}/download` | 商户登录，只能看、下载自己的 |

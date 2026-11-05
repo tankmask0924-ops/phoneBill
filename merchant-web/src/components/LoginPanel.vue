@@ -32,7 +32,9 @@ async function onSubmit() {
   <div class="login">
     <el-card class="card" shadow="always">
       <h1 class="title">{{ title }}</h1>
-      <el-form ref="formRef" :model="form" :rules="rules" size="large" @submit.prevent="onSubmit">
+      <!-- body 插槽：替换账号密码表单（比如第二步输短信验证码） -->
+      <slot v-if="$slots.body" name="body" />
+      <el-form v-else ref="formRef" :model="form" :rules="rules" size="large" @submit.prevent="onSubmit">
         <el-form-item prop="username">
           <el-input v-model="form.username" placeholder="账号" :prefix-icon="User" />
         </el-form-item>

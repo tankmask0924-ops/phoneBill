@@ -21,7 +21,7 @@ use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpMessage\Exception\HttpException;
 
 /**
- * 商户中心 - 商户后台账号：平台给商户开账号、重置密码、启用禁用。
+ * 商户中心 - 商户后台账号：平台给商户开账号、重置密码、启用禁用、解绑手机（商户换了手机收不到登录验证码时用）。
  *
  * 重置密码、禁用后该账号之前的登录立即失效（见 MerchantAuthMiddleware）。
  */
@@ -119,6 +119,20 @@ class MerchantUserAdminService extends AbstractService
         $this->operationLogDao->record($operator->id, self::MODULE, 'reset_merchant_user_password', 'merchant', $merchantId, null, ['username' => $user->username], $ip);
     }
 
+    /**
+     * @return array<string, mixed>
+     */
+    public function unbindMobile(AdminUser $operator, int $merchantId, int $userId, ?string $ip): array
+    {
+        $user = $this->findOrFail($merchantId, $userId);
+        if ($user->mobile !== null) {
+            $this->merchantUserDao->update($user->id, ['mobile' => null]);
+            $this->operationLogDao->record($operator->id, self::MODULE, 'unbind_merchant_user_mobile', 'merchant', $merchantId, ['username' => $user->username, 'mobile' => $user->mobile], ['username' => $user->username, 'mobile' => null], $ip);
+        }
+
+        return $this->format($this->findOrFail($merchantId, $userId));
+    }
+
     private function findOrFail(int $merchantId, int $userId): MerchantUser
     {
         $user = $this->merchantUserDao->find($userId);
@@ -139,6 +153,7 @@ class MerchantUserAdminService extends AbstractService
             'merchant_id' => $user->merchant_id,
             'username' => $user->username,
             'real_name' => $user->real_name,
+            'mobile' => $user->mobile,
             'status' => $user->status,
             'last_login_at' => $user->last_login_at?->toDateTimeString(),
             'created_at' => $user->created_at?->toDateTimeString(),

@@ -212,6 +212,20 @@ export interface StorageSetting {
   path_prefix: string
 }
 
+/** 短信配置（阿里云短信）：App\Controller\Admin\SettingController */
+export interface SmsSetting {
+  /** 关掉后：登录不要求验证码、不能绑定手机、不发余额提醒 */
+  enabled: boolean
+  access_key_id: string
+  /** AccessKey Secret 不回显，只告诉有没有设置过 */
+  access_key_secret_set: boolean
+  sign_name: string
+  /** 验证码模板（登录、绑定手机共用），变量 ${code} */
+  code_template: string
+  /** 余额提醒模板，变量 ${name} ${balance} ${threshold} */
+  alert_template: string
+}
+
 export interface OrderSetting {
   /** 同一号码同一面值在这么多分钟内有进行中的订单就拒绝下单，0 表示不拦截 */
   duplicate_window_minutes: number
@@ -232,6 +246,11 @@ export const settingApi = {
   /** 回调域名：供应商回调地址 = 回调域名 + /notify/supplier/{供应商编码} */
   notify: () => http.get<{ base_url: string }>('/admin/settings/notify'),
   saveNotify: (baseUrl: string) => http.put<{ base_url: string }>('/admin/settings/notify', { base_url: baseUrl }),
+  sms: () => http.get<SmsSetting>('/admin/settings/sms'),
+  saveSms: (data: Omit<SmsSetting, 'access_key_secret_set'> & { access_key_secret: string }) =>
+    http.put<SmsSetting>('/admin/settings/sms', data),
+  /** 用已保存的配置给这个手机号发一条验证码短信 */
+  testSms: (mobile: string) => http.post<{ success: boolean; message: string }>('/admin/settings/sms/test', { mobile }),
   /** 下单设置 */
   order: () => http.get<OrderSetting>('/admin/settings/order'),
   saveOrder: (data: OrderSetting) => http.put<OrderSetting>('/admin/settings/order', data),

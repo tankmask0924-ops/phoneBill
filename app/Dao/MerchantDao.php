@@ -13,6 +13,9 @@ declare(strict_types=1);
 namespace App\Dao;
 
 use App\Model\Merchant;
+use Hyperf\Database\Model\Builder;
+use Hyperf\Database\Model\Collection;
+use Hyperf\DbConnection\Db;
 
 class MerchantDao extends AbstractDao
 {
@@ -49,5 +52,90 @@ class MerchantDao extends AbstractDao
     public function setAlipayAccountId(int $id, ?int $accountId): void
     {
         $this->newQuery()->where('id', $id)->update(['alipay_account_id' => $accountId]);
+    }
+
+    /**
+     * 余额回到阈值以上（或关了提醒）的，重新开启下一次跌破时的提醒。
+     *
+     * @return int 重新开启了几个
+     */
+    public function rearmBalanceAlerts(): int
+    {
+        return $this->newQuery()
+            ->where('balance_alert_armed', false)
+            ->where(static fn ($q) => $q->whereNull('balance_alert_threshold')->orWhereColumn('balance', '>=', 'balance_alert_threshold'))
+            ->update(['balance_alert_armed' => true]);
+    }
+
+    /**
+     * 该发余额提醒的商户：启用中、设了阈值、余额低于阈值、开启着提醒、今天还没发满 $dailyLimit 次。
+     *
+     * @return Collection<int, Merchant>
+     */
+    public function dueForBalanceAlert(string $today, int $dailyLimit): Collection
+    {
+        return $this->whereAlertQuota($this->newQuery(), $today, $dailyLimit)
+            ->where('status', 'active')
+            ->whereNotNull('balance_alert_threshold')
+            ->whereColumn('balance', '<', 'balance_alert_threshold')
+            ->where('balance_alert_armed', true)
+            ->get(['id', 'name', 'balance', 'balance_alert_threshold', 'balance_alert_date', 'balance_alert_count']);
+    }
+
+    /**
+     * 占住这一次提醒：暂停提醒、当天次数加 1。多台 / 并发时只有一个能占到。
+     */
+    public function claimBalanceAlert(int $id, string $today, int $dailyLimit): bool
+    {
+        // MySQL 按顺序赋值，后面的能看到前面改过的值：先算次数，再改日期
+        return $this->whereAlertQuota($this->newQuery()->where('id', $id)->where('balance_alert_armed', true), $today, $dailyLimit)
+            ->update([
+                'balance_alert_armed' => false,
+                'balance_alert_count' => Db::raw("case when balance_alert_date = '{$today}' then balance_alert_count + 1 else 1 end"),
+                'balance_alert_date' => $today,
+            ]) === 1;
+    }
+
+    /**
+     * 一条都没发出去时还原，下一轮再试。
+     */
+    public function releaseBalanceAlert(int $id, string $today, ?string $previousDate, int $previousCount): void
+    {
+        $this->newQuery()
+            ->where('id', $id)
+            ->where('balance_alert_armed', false)
+            ->where('balance_alert_date', $today)
+            ->update(['balance_alert_armed' => true, 'balance_alert_date' => $previousDate, 'balance_alert_count' => $previousCount]);
+    }
+
+    /**
+     * @return list<array{id: int, consumed_until: null|string}>
+     */
+    public function consumptionCursors(): array
+    {
+        return $this->newQuery()->orderBy('id')->get(['id', 'consumed_until'])
+            ->map(static fn (Merchant $m) => ['id' => $m->id, 'consumed_until' => $m->consumed_until?->toDateString()])
+            ->all();
+    }
+
+    /**
+     * 累计消费结转：consumed_until 还是 $from 时才加，防止重复结转。
+     */
+    public function settleConsumption(int $id, ?string $from, string $until, string $amount): bool
+    {
+        $builder = $this->newQuery()->where('id', $id);
+        $from === null ? $builder->whereNull('consumed_until') : $builder->where('consumed_until', $from);
+
+        return $builder->update([
+            'consumed_total' => Db::raw('consumed_total + ' . bcadd($amount, '0', 2)),
+            'consumed_until' => $until,
+        ]) === 1;
+    }
+
+    private function whereAlertQuota(Builder $builder, string $today, int $dailyLimit): Builder
+    {
+        return $builder->where(static fn ($q) => $q->whereNull('balance_alert_date')
+            ->orWhere('balance_alert_date', '<', $today)
+            ->orWhere('balance_alert_count', '<', $dailyLimit));
     }
 }

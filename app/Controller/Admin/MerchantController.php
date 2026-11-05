@@ -182,6 +182,15 @@ class MerchantController extends AbstractController
         return ['success' => true];
     }
 
+    #[Middleware(AdminAuthMiddleware::class)]
+    #[Middleware(AdminPermissionMiddleware::class)]
+    #[RequiresPermission('merchant.manage')]
+    #[PostMapping(path: '{id:\d+}/users/{userId:\d+}/unbind-mobile')]
+    public function unbindUserMobile(int $id, int $userId): array
+    {
+        return $this->merchantUserAdminService->unbindMobile($this->admin(), $id, $userId, $this->clientIp());
+    }
+
     /**
      * 设置授信额度（余额最低可以扣到它的负数）。
      */

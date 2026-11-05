@@ -3,6 +3,7 @@ import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { onMounted, reactive, ref } from 'vue'
 import { settingApi, type OrderSetting } from '@/api/funding'
 import AlipayAccountCard from './AlipayAccountCard.vue'
+import SmsSettingCard from './SmsSettingCard.vue'
 import { useSiteStore } from '@/stores/site'
 
 // ---- 基本设置 ----
@@ -183,6 +184,8 @@ onMounted(async () => {
   </el-card>
 
   <AlipayAccountCard class="block" />
+
+  <SmsSettingCard class="block" />
 
   <el-card v-loading="loading" shadow="never" header="图片存储（腾讯云 COS）">
     <el-alert type="info" :closable="false" show-icon class="tip-bar">

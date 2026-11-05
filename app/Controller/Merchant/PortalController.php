@@ -28,7 +28,7 @@ use Hyperf\HttpServer\Annotation\PutMapping;
 
 /**
  * 商户后台：首页、订单记录、资金流水、账户（只读，规则见 MerchantPortalService）；
- * 自己改 IP 白名单、重置签名密钥（见 MerchantAccountService）。
+ * 自己改 IP 白名单、重置签名密钥、设余额提醒阈值（见 MerchantAccountService）。
  */
 #[Controller(prefix: '/merchant')]
 #[Middleware(MerchantAuthMiddleware::class)]
@@ -104,6 +104,17 @@ class PortalController extends AbstractController
             $this->user(),
             $this->merchant(),
             (string) $this->request->input('password', ''),
+            $this->clientIpResolver->resolve($this->request),
+        );
+    }
+
+    #[PutMapping(path: 'account/balance-alert')]
+    public function updateBalanceAlert(): array
+    {
+        return $this->accountService->updateBalanceAlert(
+            $this->user(),
+            $this->merchant(),
+            $this->request->input('threshold'),
             $this->clientIpResolver->resolve($this->request),
         );
     }

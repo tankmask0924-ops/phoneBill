@@ -103,6 +103,44 @@ class OrderDao extends AbstractDao
     }
 
     /**
+     * 这些商户从 $from 起（按下单时间）每天的成功订单售价合计。
+     *
+     * @param list<int> $merchantIds
+     * @return list<array{merchant_id: int, day: string, amount: string}>
+     */
+    public function merchantDailySuccessAmounts(array $merchantIds, string $from): array
+    {
+        if ($merchantIds === []) {
+            return [];
+        }
+
+        return $this->newQuery()
+            ->whereIn('merchant_id', $merchantIds)
+            ->where('created_at', '>=', $from)
+            ->where('status', Order::STATUS_SUCCESS)
+            ->selectRaw('merchant_id, date(created_at) as day, sum(sale_price) as amount')
+            ->groupBy('merchant_id', Db::raw('date(created_at)'))
+            ->toBase()->get()
+            ->map(static fn ($r) => ['merchant_id' => (int) $r->merchant_id, 'day' => (string) $r->day, 'amount' => bcadd((string) $r->amount, '0', 2)])
+            ->all();
+    }
+
+    /**
+     * 一个商户在 [$from, $to) 下单的成功订单售价合计，$from 为空表示从头算。
+     */
+    public function merchantSuccessAmount(int $merchantId, ?string $from, string $to): string
+    {
+        $sum = $this->newQuery()
+            ->where('merchant_id', $merchantId)
+            ->when($from !== null, static fn ($q) => $q->where('created_at', '>=', $from))
+            ->where('created_at', '<', $to)
+            ->where('status', Order::STATUS_SUCCESS)
+            ->sum('sale_price');
+
+        return bcadd((string) ($sum ?? '0'), '0', 2);
+    }
+
+    /**
      * 一段时间内下单的订单，按「省份 + 运营商 + 最终供应商」汇总：成功的取成交供应商，其余取最后一次提交的，没提交过记 0。
      *
      * @return list<array{province: string, operator: string, supplier_id: int, order_count: int, success_count: int, failed_count: int, success_amount: string, profit: string}>

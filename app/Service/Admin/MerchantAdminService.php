@@ -23,6 +23,7 @@ use App\Security\Encrypter;
 use App\Service\AbstractService;
 use App\Service\Merchant\MerchantAccessService;
 use App\Service\Merchant\MerchantBalanceService;
+use App\Service\Merchant\MerchantConsumptionService;
 use Hyperf\DbConnection\Db;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpMessage\Exception\HttpException;
@@ -63,7 +64,12 @@ class MerchantAdminService extends AbstractService
     #[Inject]
     protected MerchantAccessService $accessService;
 
+    #[Inject]
+    protected MerchantConsumptionService $consumptionService;
+
     /**
+     * 每行带今日消费、累计消费（成功订单售价合计，见 MerchantConsumptionService）。
+     *
      * @param array<string, mixed> $query keyword / status
      * @return array{data: list<array<string, mixed>>, total: int, page: int, per_page: int}
      */
@@ -89,11 +95,12 @@ class MerchantAdminService extends AbstractService
             ->selectRaw('merchant_id, count(*) as n')
             ->groupBy('merchant_id')
             ->pluck('n', 'merchant_id');
+        $consumption = $this->consumptionService->totals($merchants);
 
         return [
             'data' => $merchants->map(fn (Merchant $m) => $this->format($m) + [
                 'product_count' => (int) ($productCounts[$m->id] ?? 0),
-            ])->values()->all(),
+            ] + $consumption[$m->id])->values()->all(),
             'total' => $total,
             'page' => $page,
             'per_page' => $perPage,

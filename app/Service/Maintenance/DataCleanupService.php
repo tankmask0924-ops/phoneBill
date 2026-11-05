@@ -24,7 +24,7 @@ use Hyperf\Logger\LoggerFactory;
  *
  * - 订单：订单、供应商提交记录、通知商户记录、商品每日统计；
  * - 商品：平台商品、绑定、默认售价、商品分类、商户开通的商品和价格、供应商商品及其运营商 / 省份；
- * - 资金：所有商户余额归零，所有资金流水（含人工加款、加款申请入账）全删，已入账的加款申请去掉流水关联；
+ * - 资金：所有商户余额、累计消费归零，所有资金流水（含人工加款、加款申请入账）全删，已入账的加款申请去掉流水关联；
  * - 保留：供应商、商户及其后台账号、管理员和权限、号段、黑名单、通道维护、收款配置、付款账号、加款申请、系统配置、操作日志。
  *
  * 全部在一个事务里用 DELETE 删，出错整体回滚；删完清掉选路、商户价格缓存。
@@ -89,6 +89,8 @@ class DataCleanupService extends AbstractService
             // 资金流水删光了，已入账的加款申请不再指向流水；申请记录本身保留
             Db::table('merchant_funding_requests')->whereNotNull('balance_log_id')->update(['balance_log_id' => null]);
             $deleted['merchants_with_balance'] = Db::table('merchants')->where('balance', '<>', 0)->update(['balance' => 0]);
+            // 订单删光了，累计消费从今天重新算
+            Db::table('merchants')->update(['consumed_total' => 0, 'consumed_until' => date('Y-m-d')]);
 
             return $deleted;
         });

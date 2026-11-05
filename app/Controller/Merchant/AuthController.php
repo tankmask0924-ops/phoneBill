@@ -15,6 +15,7 @@ namespace App\Controller\Merchant;
 use App\Controller\AbstractController;
 use App\Middleware\MerchantAuthMiddleware;
 use App\Model\MerchantUser;
+use App\Network\ClientIpResolver;
 use App\Service\MerchantPortal\MerchantAuthService;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpServer\Annotation\Controller;
@@ -24,7 +25,8 @@ use Hyperf\HttpServer\Annotation\PostMapping;
 use Hyperf\HttpServer\Annotation\PutMapping;
 
 /**
- * 商户后台账户：登录、当前账号、修改自己的密码。账号由平台在「商户」页面开，不能自助注册。
+ * 商户后台账户：登录（绑定了手机要再验证短信，见 MerchantAuthService）、当前账号、修改自己的密码、绑定 / 修改手机。
+ * 账号由平台在「商户」页面开，不能自助注册。
  */
 #[Controller(prefix: '/merchant/auth')]
 class AuthController extends AbstractController
@@ -32,10 +34,25 @@ class AuthController extends AbstractController
     #[Inject]
     protected MerchantAuthService $authService;
 
+    #[Inject]
+    protected ClientIpResolver $clientIpResolver;
+
     #[PostMapping(path: 'login')]
     public function login(): array
     {
         return $this->authService->login((string) $this->request->input('username', ''), (string) $this->request->input('password', ''));
+    }
+
+    #[PostMapping(path: 'login/sms-code')]
+    public function resendLoginCode(): array
+    {
+        return $this->authService->resendLoginCode((string) $this->request->input('ticket', ''));
+    }
+
+    #[PostMapping(path: 'login/verify')]
+    public function verifyLogin(): array
+    {
+        return $this->authService->verifyLogin((string) $this->request->input('ticket', ''), (string) $this->request->input('code', ''));
     }
 
     #[Middleware(MerchantAuthMiddleware::class)]
@@ -53,6 +70,28 @@ class AuthController extends AbstractController
             $this->user(),
             (string) $this->request->input('old_password', ''),
             (string) $this->request->input('new_password', ''),
+        );
+    }
+
+    #[Middleware(MerchantAuthMiddleware::class)]
+    #[PostMapping(path: 'mobile/code')]
+    public function sendBindCode(): array
+    {
+        $this->authService->sendBindCode($this->user(), $this->request->input('mobile'));
+
+        return ['success' => true];
+    }
+
+    #[Middleware(MerchantAuthMiddleware::class)]
+    #[PutMapping(path: 'mobile')]
+    public function bindMobile(): array
+    {
+        return $this->authService->bindMobile(
+            $this->user(),
+            (string) $this->request->input('password', ''),
+            $this->request->input('mobile'),
+            (string) $this->request->input('code', ''),
+            $this->clientIpResolver->resolve($this->request),
         );
     }
 

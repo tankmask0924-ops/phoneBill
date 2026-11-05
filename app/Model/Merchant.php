@@ -28,6 +28,12 @@ use Hyperf\Database\Model\Events\Saved;
  * @property string $app_secret
  * @property string $balance
  * @property string $credit_limit 授信额度，余额最低可以扣到它的负数
+ * @property null|string $balance_alert_threshold 余额低于它发短信提醒充值，空表示不提醒
+ * @property bool $balance_alert_armed 跌破阈值时是否要提醒：提醒后为 false，余额回到阈值以上再为 true
+ * @property null|Carbon $balance_alert_date 最近一次发余额提醒的日期
+ * @property int $balance_alert_count balance_alert_date 当天发了几次提醒
+ * @property string $consumed_total consumed_until 之前下单的成功订单售价合计（MerchantConsumptionService 结转）
+ * @property null|Carbon $consumed_until 累计消费结转到这天（不含）
  * @property int $rate_limit_seconds 下单限流：每这么多秒（0 不限）
  * @property int $rate_limit_orders 下单限流：最多这么多单（0 不限）
  * @property null|string $notify_url
@@ -50,6 +56,7 @@ class Merchant extends Model
         'app_secret',
         'balance',
         'credit_limit',
+        'balance_alert_threshold',
         'rate_limit_seconds',
         'rate_limit_orders',
         'notify_url',
@@ -61,6 +68,10 @@ class Merchant extends Model
     protected array $casts = [
         'rate_limit_seconds' => 'integer',
         'rate_limit_orders' => 'integer',
+        'balance_alert_armed' => 'boolean',
+        'balance_alert_date' => 'date',
+        'balance_alert_count' => 'integer',
+        'consumed_until' => 'date',
     ];
 
     /**

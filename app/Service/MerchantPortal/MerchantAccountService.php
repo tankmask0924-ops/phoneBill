@@ -24,11 +24,12 @@ use Hyperf\Logger\LoggerFactory;
 use Psr\Log\LoggerInterface;
 
 /**
- * 商户后台 - 商户自己改 IP 白名单、重置签名密钥（规则和平台后台一样，见 MerchantAccessService）。
+ * 商户后台 - 商户自己改 IP 白名单、重置签名密钥（规则和平台后台一样，见 MerchantAccessService）、设余额提醒阈值。
  *
  * - 都会影响开放接口能不能调通，所以要再输一次登录密码确认；
  * - 改完立即生效（Merchant 保存时清掉按 AppKey 的缓存）；新密钥只返回这一次，旧密钥立即失效；
- * - 操作记到 merchant 日志渠道，不记密钥本身。
+ * - 操作记到 merchant 日志渠道，不记密钥本身；
+ * - 余额提醒阈值不影响接口，不用输密码（发送规则见 MerchantBalanceAlertService）。
  */
 class MerchantAccountService extends AbstractService
 {
@@ -70,6 +71,28 @@ class MerchantAccountService extends AbstractService
         $this->logger()->info('商户重置签名密钥', ['merchant_id' => $merchant->id, 'user' => $user->username, 'ip' => $ip]);
 
         return ['app_key' => $merchant->app_key, 'app_secret' => $secret];
+    }
+
+    /**
+     * 设余额提醒阈值，空值表示关闭提醒。改阈值不影响当天已发的条数，每天上限照旧。
+     *
+     * @return array{balance_alert_threshold: null|string}
+     */
+    public function updateBalanceAlert(MerchantUser $user, Merchant $merchant, mixed $threshold, ?string $ip): array
+    {
+        $value = null;
+        if ($threshold !== null && $threshold !== '') {
+            $text = is_string($threshold) || is_int($threshold) || is_float($threshold) ? trim((string) $threshold) : '';
+            if (preg_match('/^\d{1,8}(\.\d{1,2})?$/', $text) !== 1 || bccomp($text, '0', 2) <= 0) {
+                throw new HttpException(422, '提醒阈值要大于 0，最多两位小数');
+            }
+            $value = bcadd($text, '0', 2);
+        }
+        $before = $merchant->balance_alert_threshold;
+        $this->merchantDao->update($merchant->id, ['balance_alert_threshold' => $value]);
+        $this->logger()->info('商户修改余额提醒阈值', ['merchant_id' => $merchant->id, 'user' => $user->username, 'ip' => $ip, 'before' => $before, 'after' => $value]);
+
+        return ['balance_alert_threshold' => $value];
     }
 
     private function assertPassword(MerchantUser $user, string $password): void

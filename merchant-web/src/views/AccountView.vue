@@ -2,10 +2,90 @@
 import { ElMessage } from 'element-plus'
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { bindMobile, fetchMe, type Me, sendBindCode } from '@/api/auth'
 import { type Account, portalApi } from '@/api/portal'
+import { useCountdown } from '@/utils/countdown'
 
 const router = useRouter()
 const account = ref<Account | null>(null)
+const me = ref<Me | null>(null)
+
+// ---- 绑定 / 修改手机 ----
+const mobileVisible = ref(false)
+const mobileSaving = ref(false)
+const codeSending = ref(false)
+const mobileForm = reactive({ mobile: '', code: '', password: '' })
+const { seconds: codeSeconds, start: startCountdown, stop: stopCountdown } = useCountdown()
+
+function openMobile() {
+  Object.assign(mobileForm, { mobile: '', code: '', password: '' })
+  stopCountdown()
+  mobileVisible.value = true
+}
+
+async function sendCode() {
+  if (!/^1[3-9]\d{9}$/.test(mobileForm.mobile.trim())) {
+    ElMessage.warning('请输入正确的手机号')
+    return
+  }
+  codeSending.value = true
+  try {
+    await sendBindCode(mobileForm.mobile.trim())
+    startCountdown()
+    ElMessage.success('验证码已发送')
+  } finally {
+    codeSending.value = false
+  }
+}
+
+async function saveMobile() {
+  if (!mobileForm.code.trim() || !mobileForm.password) {
+    ElMessage.warning('请填写验证码和登录密码')
+    return
+  }
+  mobileSaving.value = true
+  try {
+    const { mobile } = await bindMobile({ mobile: mobileForm.mobile.trim(), code: mobileForm.code.trim(), password: mobileForm.password })
+    if (me.value) {
+      me.value.mobile = mobile
+    }
+    account.value = await portalApi.account()
+    mobileVisible.value = false
+    ElMessage.success('已绑定，下次登录需要输入短信验证码')
+  } finally {
+    mobileSaving.value = false
+  }
+}
+
+// ---- 余额提醒 ----
+const alertVisible = ref(false)
+const alertSaving = ref(false)
+const alertForm = reactive({ enabled: false, threshold: '' })
+
+function openAlert() {
+  const current = account.value?.balance_alert_threshold ?? null
+  Object.assign(alertForm, { enabled: current !== null, threshold: current ?? '' })
+  alertVisible.value = true
+}
+
+async function saveAlert() {
+  const threshold = alertForm.threshold.trim()
+  if (alertForm.enabled && (!/^\d{1,8}(\.\d{1,2})?$/.test(threshold) || Number(threshold) <= 0)) {
+    ElMessage.warning('提醒阈值要大于 0，最多两位小数')
+    return
+  }
+  alertSaving.value = true
+  try {
+    const result = await portalApi.updateBalanceAlert(alertForm.enabled ? threshold : null)
+    if (account.value) {
+      account.value.balance_alert_threshold = result.balance_alert_threshold
+    }
+    alertVisible.value = false
+    ElMessage.success('已保存')
+  } finally {
+    alertSaving.value = false
+  }
+}
 
 // ---- 修改 IP 白名单 ----
 const ipVisible = ref(false)
@@ -73,7 +153,7 @@ async function copy(text: string) {
 }
 
 onMounted(async () => {
-  account.value = await portalApi.account()
+  ;[account.value, me.value] = await Promise.all([portalApi.account(), fetchMe()])
 })
 </script>
 
@@ -99,10 +179,74 @@ onMounted(async () => {
       <div class="tip">修改通知地址请联系平台。接口说明请向平台索取《商户接入文档》。</div>
     </el-card>
 
+    <el-card v-if="account && me" shadow="never" header="登录与提醒" class="products">
+      <el-descriptions :column="1" border>
+        <el-descriptions-item label="登录账号">{{ me.username }}</el-descriptions-item>
+        <el-descriptions-item label="绑定手机">
+          {{ me.mobile ?? '未绑定' }}
+          <el-button v-if="me.sms_available" link type="primary" class="copy" @click="openMobile">{{ me.mobile ? '修改' : '绑定' }}</el-button>
+          <span v-else class="muted">（平台暂未开通短信服务）</span>
+          <div class="cell-tip">绑定后登录需要再输入短信验证码，余额提醒短信也发到这里。</div>
+        </el-descriptions-item>
+        <el-descriptions-item label="余额提醒">
+          <template v-if="account.balance_alert_threshold !== null">
+            余额低于 {{ account.balance_alert_threshold }} 元时短信提醒
+          </template>
+          <template v-else>未开启</template>
+          <el-button link type="primary" class="copy" @click="openAlert">设置</el-button>
+          <div class="cell-tip">
+            跌破阈值时提醒一次，充值到阈值以上后再跌破会再提醒，每天最多 3 条；发给本商户所有已绑定手机的账号<template v-if="account.alert_mobiles.length > 0">（{{ account.alert_mobiles.join('、') }}）</template><template v-else>（目前还没有账号绑定手机，收不到提醒）</template>。
+          </div>
+        </el-descriptions-item>
+      </el-descriptions>
+    </el-card>
+
     <el-card v-if="account" shadow="never" class="products">
       开通的商品、价格和近 7 天成功率见
       <el-button link type="primary" @click="router.push('/products')">可下单商品</el-button>
     </el-card>
+
+    <el-dialog v-model="mobileVisible" :title="me?.mobile ? '修改绑定手机' : '绑定手机'" width="480px">
+      <el-form label-width="80px" @submit.prevent="saveMobile">
+        <el-form-item v-if="me?.mobile" label="当前手机">{{ me.mobile }}</el-form-item>
+        <el-form-item :label="me?.mobile ? '新手机号' : '手机号'">
+          <el-input v-model="mobileForm.mobile" maxlength="11" placeholder="11 位手机号" />
+        </el-form-item>
+        <el-form-item label="验证码">
+          <div class="code-row">
+            <el-input v-model="mobileForm.code" maxlength="6" placeholder="6 位验证码" autocomplete="one-time-code" />
+            <el-button :disabled="codeSeconds > 0" :loading="codeSending" @click="sendCode">
+              {{ codeSeconds > 0 ? `${codeSeconds} 秒后重发` : '获取验证码' }}
+            </el-button>
+          </div>
+        </el-form-item>
+        <el-form-item label="登录密码">
+          <el-input v-model="mobileForm.password" type="password" show-password autocomplete="current-password" placeholder="确认是你本人操作" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="mobileVisible = false">取消</el-button>
+        <el-button type="primary" :loading="mobileSaving" @click="saveMobile">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="alertVisible" title="余额提醒" width="480px">
+      <el-form label-width="80px" @submit.prevent="saveAlert">
+        <el-form-item label="开启提醒">
+          <el-switch v-model="alertForm.enabled" />
+        </el-form-item>
+        <el-form-item v-if="alertForm.enabled" label="提醒阈值">
+          <el-input v-model="alertForm.threshold" placeholder="如 1000">
+            <template #append>元</template>
+          </el-input>
+          <div class="tip">余额跌破这个数时发短信提醒充值；一直没充值不会重复发，充值到阈值以上后再跌破会再提醒，每天最多 3 条。</div>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="alertVisible = false">取消</el-button>
+        <el-button type="primary" :loading="alertSaving" @click="saveAlert">保存</el-button>
+      </template>
+    </el-dialog>
 
     <el-dialog v-model="ipVisible" title="修改 IP 白名单" width="480px">
       <el-form label-width="80px" @submit.prevent="saveIp">
@@ -169,6 +313,24 @@ onMounted(async () => {
   margin-top: 16px;
 }
 
+
+.cell-tip {
+  margin-top: 4px;
+  color: #909399;
+  font-size: 12px;
+}
+
+.muted {
+  margin-left: 8px;
+  color: #909399;
+  font-size: 12px;
+}
+
+.code-row {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
 
 .secret-form {
   margin-top: 16px;

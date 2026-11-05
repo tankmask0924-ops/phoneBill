@@ -26,6 +26,10 @@ export interface Merchant {
   status: string
   remark: string | null
   product_count: number
+  /** 今天下单的成功订单售价合计 */
+  today_consumed: string
+  /** 全部成功订单售价合计（每天 3 点结转历史部分，今天的实时加上） */
+  total_consumed: string
   created_at: string | null
   updated_at: string | null
 }
@@ -81,6 +85,8 @@ export interface MerchantUser {
   merchant_id: number
   username: string
   real_name: string | null
+  /** 绑定的手机号，绑定后登录要短信验证码 */
+  mobile: string | null
   status: string
   last_login_at: string | null
   created_at: string | null
@@ -108,6 +114,8 @@ export const merchantApi = {
     http.post<MerchantUser>(`/admin/merchants/${id}/users/${userId}/status`, { status }),
   resetUserPassword: (id: number, userId: number, password: string) =>
     http.post<{ success: boolean }>(`/admin/merchants/${id}/users/${userId}/password`, { password }),
+  /** 解绑手机：商户换了手机收不到登录验证码时用 */
+  unbindUserMobile: (id: number, userId: number) => http.post<MerchantUser>(`/admin/merchants/${id}/users/${userId}/unbind-mobile`),
 }
 
 /** 资金流水：App\Controller\Admin\BalanceLogController */

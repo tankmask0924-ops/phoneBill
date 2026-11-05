@@ -21,6 +21,7 @@ use App\Network\ClientIpResolver;
 use App\Service\Admin\NotifySettingAdminService;
 use App\Service\Admin\OrderSettingAdminService;
 use App\Service\Admin\SiteSettingAdminService;
+use App\Service\Admin\SmsSettingAdminService;
 use App\Service\Admin\StorageSettingAdminService;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpServer\Annotation\Controller;
@@ -31,7 +32,7 @@ use Hyperf\HttpServer\Annotation\PutMapping;
 
 /**
  * 系统配置：回调域名（NotifySettingAdminService）、下单设置（OrderSettingAdminService）、图片存储（腾讯云 COS，StorageSettingAdminService）、
- * 基本设置（系统名称，SiteSettingAdminService）。支付宝转账加款账户见 AlipayAccountController。
+ * 基本设置（系统名称，SiteSettingAdminService）、短信（阿里云短信，SmsSettingAdminService）。支付宝转账加款账户见 AlipayAccountController。
  *
  * public 不用登录：登录页、后台框架要显示系统名称。
  */
@@ -49,6 +50,9 @@ class SettingController extends AbstractController
 
     #[Inject]
     protected SiteSettingAdminService $siteSettingService;
+
+    #[Inject]
+    protected SmsSettingAdminService $smsSettingService;
 
     #[Inject]
     protected ClientIpResolver $clientIpResolver;
@@ -138,6 +142,33 @@ class SettingController extends AbstractController
     public function saveOrder(): array
     {
         return $this->orderSettingService->save($this->admin(), $this->request->all(), $this->clientIp());
+    }
+
+    #[Middleware(AdminAuthMiddleware::class)]
+    #[Middleware(AdminPermissionMiddleware::class)]
+    #[RequiresPermission('setting.manage')]
+    #[GetMapping(path: 'sms')]
+    public function sms(): array
+    {
+        return $this->smsSettingService->get();
+    }
+
+    #[Middleware(AdminAuthMiddleware::class)]
+    #[Middleware(AdminPermissionMiddleware::class)]
+    #[RequiresPermission('setting.manage')]
+    #[PutMapping(path: 'sms')]
+    public function saveSms(): array
+    {
+        return $this->smsSettingService->save($this->admin(), $this->request->all(), $this->clientIp());
+    }
+
+    #[Middleware(AdminAuthMiddleware::class)]
+    #[Middleware(AdminPermissionMiddleware::class)]
+    #[RequiresPermission('setting.manage')]
+    #[PostMapping(path: 'sms/test')]
+    public function testSms(): array
+    {
+        return $this->smsSettingService->test($this->request->input('mobile'));
     }
 
     private function admin(): AdminUser

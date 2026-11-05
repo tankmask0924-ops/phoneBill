@@ -27,4 +27,21 @@ class MerchantUserDao extends AbstractDao
     {
         return $this->newQuery()->where('username', $username)->first();
     }
+
+    /**
+     * 商户下启用中的账号绑定的手机号（去重）。
+     *
+     * @return list<string>
+     */
+    public function activeMobilesOfMerchant(int $merchantId): array
+    {
+        return $this->newQuery()
+            ->where('merchant_id', $merchantId)
+            ->where('status', 'active')
+            ->whereNotNull('mobile')
+            ->where('mobile', '<>', '')
+            ->distinct()
+            ->pluck('mobile')
+            ->all();
+    }
 }

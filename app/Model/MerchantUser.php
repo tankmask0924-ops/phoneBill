@@ -22,6 +22,7 @@ use Carbon\Carbon;
  * @property string $username
  * @property string $password
  * @property null|string $real_name
+ * @property null|string $mobile 绑定的手机号，绑定后登录要短信验证码
  * @property string $status
  * @property null|Carbon $last_login_at
  * @property Carbon $created_at
@@ -36,6 +37,7 @@ class MerchantUser extends Model
         'username',
         'password',
         'real_name',
+        'mobile',
         'status',
         'last_login_at',
     ];

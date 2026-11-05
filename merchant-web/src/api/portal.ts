@@ -87,6 +87,10 @@ export interface Account {
   app_key: string
   notify_url: string | null
   ip_whitelist: string[]
+  /** 余额低于这个数发短信提醒充值，null 表示不提醒 */
+  balance_alert_threshold: string | null
+  /** 会收到余额提醒的手机号（本商户启用中的账号绑定的，已打码） */
+  alert_mobiles: string[]
 }
 
 /** 可下单商品：按运营商的价格和平台整体近 7 天的统计 */
@@ -299,6 +303,9 @@ export const portalApi = {
     http.put<{ ip_whitelist: string[] }>('/merchant/account/ip-whitelist', { password, ip_whitelist: ipWhitelist }),
   resetSecret: (password: string) =>
     http.post<{ app_key: string; app_secret: string }>('/merchant/account/reset-secret', { password }),
+  /** 余额提醒阈值，传 null 关闭；跌破一次提醒一次，充值回到阈值以上后再跌破会再提醒，每天最多 3 条 */
+  updateBalanceAlert: (threshold: string | null) =>
+    http.put<{ balance_alert_threshold: string | null }>('/merchant/account/balance-alert', { threshold }),
 }
 
 export type ExportType = 'orders' | 'balance_logs'
