@@ -33,6 +33,7 @@ use Throwable;
  * - 下单 status=success 算受理；上游有返回、status 是别的一律判失败换下一家；
  *   网络异常、返回无法解析或没有 status（没有拿到返回值）按接口异常处理，订单立即转异常人工处理；
  * - 下单 / 查单的 orderStatus Succeeded 成功、Failed / Cancel 失败、其他处理中；rechargeStatus=3 部分成功不判结果，等人工核实；
+ * - 查单返回 Order not found（上游无此单）判失败；查单其他报错仍按没拿到明确结果处理；
  * - 回调不带签名，不能信：只取订单号，结果以主动查单为准；查单没拿到明确结果时回 fail。
  */
 class TurboDriver implements SupplierDriverInterface, ProvidesUpstreamProducts
@@ -51,6 +52,9 @@ class TurboDriver implements SupplierDriverInterface, ProvidesUpstreamProducts
 
     /** Failed 失败、Cancel 取消，都是终态失败 */
     private const ORDER_FAILED = ['Failed', 'Cancel'];
+
+    /** 查单查无此单时上游的错误信息（error.details 或 message 里含这段，不分大小写） */
+    private const ORDER_NOT_FOUND = 'order not found';
 
     /** rechargeStatus 3 部分成功：既不能判成功也不能退款，留给人工核实 */
     private const RECHARGE_PARTIAL = 3;
@@ -181,6 +185,14 @@ class TurboDriver implements SupplierDriverInterface, ProvidesUpstreamProducts
     {
         [$sent, $response] = $this->call($config, self::PATH_ORDERS, ['orderNo' => $attemptNo]);
         $body = $this->decode($response['body']);
+        if ($this->isOrderNotFound($body)) {
+            // 定时 / 人工查单查无此单判失败；回调不带签名，不凭回调触发的查单判失败
+            if ($throwIfUnclear) {
+                throw new RuntimeException('查单：上游无此订单');
+            }
+
+            return RechargeResult::failed('上游无此订单：' . $this->describe($body, $response), $supplierOrderNo, $sent, $response['body']);
+        }
         $data = $body !== null && $body['status'] === self::STATUS_OK && is_array($body['data'] ?? null) ? $body['data'] : null;
         $externalOrderNo = is_scalar($data['externalOrderNo'] ?? null) ? (string) $data['externalOrderNo'] : '';
         $unclear = match (true) {
@@ -251,6 +263,25 @@ class TurboDriver implements SupplierDriverInterface, ProvidesUpstreamProducts
         }
 
         return $body;
+    }
+
+    /**
+     * 查单 status=error 且错误信息是 Order not found（实测 code 为 INVALID_PARAMETER，所以按信息文字认，不按 code）。
+     *
+     * @param null|array<string, mixed> $body
+     */
+    private function isOrderNotFound(?array $body): bool
+    {
+        if ($body === null || $body['status'] === self::STATUS_OK) {
+            return false;
+        }
+        foreach ([$body['error']['details'] ?? null, $body['message'] ?? null] as $text) {
+            if (is_string($text) && stripos($text, self::ORDER_NOT_FOUND) !== false) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

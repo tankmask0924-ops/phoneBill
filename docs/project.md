@@ -597,7 +597,7 @@ app/Supplier/
 - 字段对应：`externalOrderNo` = 提交单号 `attempt_no`，`phone` = 手机号，`productId` = 供应商商品编码（上游套餐 ID）。上游 `orderNo` 存为供应商订单号；查单的 `orderNo` 传提交单号。
 - 签名：去掉 `sign`，按名升序拼 `k=v&...`（值不做 URL 编码），末尾拼 `&secretKey=`，md5 转大写；空值不发（文档常见问题说空值会导致签名无效）。
 - **回调没有签名**：只取 `externalOrderNo`，再主动查单，以查单结果为准，回 `success`；查单出错或没拿到明确结果回 `fail`（HTTP 400），定时查单照常继续。
-- 结果判定：下单 `status=success` 算受理；`status` 是别的（如 `error`，不论 HTTP 状态码）判失败换下一家；没拿到返回（网络异常、返回无法解析或没有 `status`）立即转异常并标为人工处理单（见 2.5）。下单 / 查单 `orderStatus` `Succeeded` 成功、`Failed` / `Cancel` 失败、其他处理中；`rechargeStatus=3` 部分成功不判结果，留给人工核实。查单报错、订单号对不上只记录、订单状态不动。
+- 结果判定：下单 `status=success` 算受理；`status` 是别的（如 `error`，不论 HTTP 状态码）判失败换下一家；没拿到返回（网络异常、返回无法解析或没有 `status`）立即转异常并标为人工处理单（见 2.5）。下单 / 查单 `orderStatus` `Succeeded` 成功、`Failed` / `Cancel` 失败、其他处理中；`rechargeStatus=3` 部分成功不判结果，留给人工核实。查单返回 `Order not found`（实测 `error.code=INVALID_PARAMETER`，按信息文字认）判失败：处理中的换下一家，超时的直接失败退款，人工处理单照 2.5 定时查单只记录、人工点查单交回正常流程（2026-11-13 定）；回调触发的查单查无此单仍回 `fail`、不判失败（回调不带签名）。查单其他报错、订单号对不上只记录、订单状态不动。
 - 上游商品列表：取 `data.result`；`status=false` 算下架；`brandName` 里带运营商名（移动 / 联通 / 电信 / 广电）才认运营商，否则留空；分类名和 `pType` 作为补充说明。
 
 ## 8. 权限

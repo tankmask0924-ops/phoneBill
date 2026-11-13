@@ -176,9 +176,21 @@ class TurboDriverTest extends HttpTestCase
             $this->assertStringContainsString('部分成功', $result->message);
         }
 
-        // 上游报错、没有状态、订单号对不上、没拿到返回：不处理订单
+        // 查无此单（实测报文）：判失败
         foreach ([
-            ['status' => 'error', 'message' => 'ORDER_NOT_FOUND', 'data' => null, 'error' => ['code' => 'ORDER_NOT_FOUND', 'details' => '订单不存在']],
+            ['status' => 'error', 'message' => 'INVALID_PARAMETER', 'data' => null, 'error' => ['code' => 'INVALID_PARAMETER', 'details' => 'Order not found.']],
+            ['status' => 'error', 'message' => 'Order not found', 'data' => null, 'error' => null],
+        ] as $body) {
+            $this->respond($body);
+            $result = $this->driver()->query($this->request());
+            $this->assertSame(RechargeStatus::Failed, $result->status, json_encode($body));
+            $this->assertStringContainsString('上游无此订单', $result->message);
+        }
+
+        // 上游其他报错、没有状态、订单号对不上、没拿到返回：不处理订单
+        foreach ([
+            ['status' => 'error', 'message' => 'INVALID_PARAMETER', 'data' => null, 'error' => ['code' => 'INVALID_PARAMETER', 'details' => 'Invalid sign']],
+            ['status' => 'error', 'message' => 'REQUEST_EXPIRED', 'data' => null, 'error' => ['code' => 'REQUEST_EXPIRED', 'details' => '请求过期']],
             $this->ok(['externalOrderNo' => 'A0001']),
             $this->ok(['externalOrderNo' => 'OTHER'] + $this->orderData('Succeeded', 1)),
             ['message' => '没有 status'],
@@ -265,8 +277,10 @@ class TurboDriverTest extends HttpTestCase
         // 没有订单号：拒绝
         $this->assertSame([400, 'fail'], $this->supplierCallback($supplier, ['orderStatus' => 'Succeeded']));
 
-        // 查单没拿到明确结果（查不到、单号对不上、HTTP 5xx）：回 fail，订单不变
-        $this->respond(['status' => 'error', 'data' => null, 'error' => ['code' => 'ORDER_NOT_FOUND']]);
+        // 查单没拿到明确结果（查不到、单号对不上、HTTP 5xx）：回 fail，订单不变；查无此单也不凭回调判失败
+        $this->respond(['status' => 'error', 'data' => null, 'error' => ['code' => 'INVALID_PARAMETER', 'details' => 'Order not found.']]);
+        $this->assertSame([400, 'fail'], $this->supplierCallback($supplier, $this->callbackParams($attempt->attempt_no, 'Failed', 2)));
+        $this->respond(['status' => 'error', 'data' => null, 'error' => ['code' => 'REQUEST_EXPIRED']]);
         $this->assertSame([400, 'fail'], $this->supplierCallback($supplier, $this->callbackParams($attempt->attempt_no, 'Succeeded', 1)));
         $this->respond($this->ok(['externalOrderNo' => 'OTHER'] + $this->orderData('Succeeded', 1)));
         $this->assertSame([400, 'fail'], $this->supplierCallback($supplier, $this->callbackParams($attempt->attempt_no, 'Succeeded', 1)));
@@ -302,6 +316,26 @@ class TurboDriverTest extends HttpTestCase
         $this->respond($this->ok(['externalOrderNo' => $attempt->attempt_no] + $this->orderData('Failed', 2)));
         $this->assertSame([200, 'success'], $this->supplierCallback($supplier, $this->callbackParams($attempt->attempt_no, 'Failed', 2)));
         $this->assertSame(OrderAttempt::STATUS_FAILED, OrderAttempt::find($attempt->id)->status);
+
+        $this->process()->submit($order->id);
+        $this->assertSame(Order::STATUS_FAILED, Order::find($order->id)->status);
+        $this->assertSame('200.00', Merchant::find($merchant->id)->balance);
+    }
+
+    public function testQueryNotFoundFailsAttempt()
+    {
+        [$merchant, $product, $mobile] = $this->scenario();
+
+        $this->respond($this->ok(['orderNo' => 'TD2025042310200558', 'orderStatus' => 'Processing', 'rechargeStatus' => 0]));
+        $order = $this->placeOrder($merchant, $product, $mobile);
+        $this->process()->submit($order->id);
+        $attempt = OrderAttempt::where('order_id', $order->id)->first();
+
+        // 定时查单查无此单：提交判失败，换下一家（只有一家时失败退款）
+        $this->respond(['status' => 'error', 'message' => 'INVALID_PARAMETER', 'data' => null, 'error' => ['code' => 'INVALID_PARAMETER', 'details' => 'Order not found.']]);
+        $this->process()->queryAttempt($attempt);
+        $this->assertSame(OrderAttempt::STATUS_FAILED, OrderAttempt::find($attempt->id)->status);
+        $this->assertSame(RechargeStatus::Failed->value, OrderAttempt::find($attempt->id)->query_status);
 
         $this->process()->submit($order->id);
         $this->assertSame(Order::STATUS_FAILED, Order::find($order->id)->status);

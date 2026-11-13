@@ -678,7 +678,8 @@ Cancel: 取消订单 订单处理时遇到错误，未能成功完成。
 | 查单 `orderStatus=Failed` / `Cancel` | 失败 |
 | 查单 `orderStatus=Created` / `Processing` 或其他 | 处理中 |
 | 查单 `rechargeStatus=3` 部分成功（不论 `orderStatus`） | 处理中，不判结果，留给人工核实 |
-| 查单 `status=error`、没有 `orderStatus`、返回的 `externalOrderNo` 对不上、没拿到返回 | 处理中，只记录，订单状态不动；一直没结果的到时转异常人工处理 |
+| 查单返回 `Order not found`（实测 `error.code=INVALID_PARAMETER`、`error.details=Order not found.`） | 失败（2026-11-13 定）；回调触发的查单查无此单仍回 `fail`、不判失败 |
+| 查单 `status=error`（查无此单以外）、没有 `orderStatus`、返回的 `externalOrderNo` 对不上、没拿到返回 | 处理中，只记录，订单状态不动；一直没结果的到时转异常人工处理 |
 | 回调 | 不看回调内容，按查单结果处理 |
 
 ## 待和上游确认
