@@ -31,15 +31,13 @@ npm --prefix web run type-check
 npm --prefix web run build          # vue-tsc + vite build，产物在 dist/
 ```
 
-`.claude/launch.json` 里有 `web-admin` 和 `merchant-web` 两个预览配置。
-
 ## 架构
 
 ### 后端分层
 
-`Controller → Service → Dao → Model`，只调相邻下一层；所有数据库查询在 Dao。路由、依赖注入、定时任务、进程、命令全部用注解（`config/routes.php` 不再加路由）。
+`Controller → Service → Dao → Model`，只调相邻下一层；所有数据库查询在 Dao。
 
-三套入口、三套鉴权，互相独立：
+四个入口，鉴权互相独立：
 
 | 入口 | 路由前缀 | 鉴权 |
 |---|---|---|
@@ -64,7 +62,6 @@ npm --prefix web run build          # vue-tsc + vite build，产物在 dist/
 - **防重复充值**：一个订单同一时间最多一次「处理中」的提交；结果没出来绝不换供应商。驱动拿不准、网络超时一律当 `Processing`，绝不当失败。
 - 状态变更全是带条件的更新（`where status = 预期`，影响 1 行才算成功），回调 / 查单 / 人工操作并发到达只生效一次。
 - 退款和订单改失败在同一个事务里；异步任务一律在事务提交后再推。
-- 订单状态：`pending / processing / timeout / abnormal / success / failed`（`App\Model\Order`）。
 
 ### 供应商驱动
 
@@ -79,17 +76,10 @@ npm --prefix web run build          # vue-tsc + vite build，产物在 dist/
 - 号段、商户、商户价格、选路配置、通道维护、黑名单（Redis 集合 `blacklist:mobiles`）都走 Redis 缓存（`c:` 前缀），后台改动后由对应 Service 主动清；改这些配置相关代码时确认清缓存的调用还在（尤其要在事务提交后清）。
 - 必须存在的进程：`crontab-dispatcher`、`async-queue`、`async-queue-notify`（`app/Process/`），缺了定时任务和队列静默不执行，排查先看 `docker exec pb ps aux`。
 - 定时任务在 `app/Crontab/`：订单兜底、商品 / 省份统计、余额告警、商户消耗、导出清理等；对应的手动重算命令在 `app/Command/`（`stats:product-daily`、`stats:province-daily`、`segment:import`、`data:clean-orders-products` 等，用法见 README）。
-- 日志渠道：`supplier`、`order` 等，写到 `runtime/logs/`。
-
-### 金额
-
-金额一律字符串 + bcmath（保留 2 位），数据库 `decimal`。资金变动必须写 `merchant_balance_logs` 流水。
 
 ## 前端
 
-`web/` 和 `merchant-web/` 结构相同（`src/api`、`src/views`、`src/router`、`src/layout`、`src/stores`），分开构建、分开部署（`/admin/`、`/merchant/`）。新增管理端页面：`src/api/xxx.ts` → `src/views/xxx/XxxView.vue` → `src/router/index.ts`（`meta.title`）→ `src/layout/menus.ts`。
-
-`merchant-web/.env` 不在仓库里，本机构建时用内联环境变量（`VITE_APP_TITLE`、`VITE_API_BASE_URL=/api`）。
+`web/` 和 `merchant-web/` 结构相同，分开构建、分开部署（`/admin/`、`/merchant/`）。`merchant-web/.env` 不在仓库里，本机构建时用内联环境变量（`VITE_APP_TITLE`、`VITE_API_BASE_URL=/api`）。
 
 ## 打包与部署
 
