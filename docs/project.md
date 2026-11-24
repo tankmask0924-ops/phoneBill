@@ -444,6 +444,7 @@ app/Supplier/
     ├── ZhixinDriver.php          # 智信科技话费 API（docs/智信科技平台API接口文档.md）
     ├── LinxianDriver.php         # 邻显科技话费 API（docs/邻显科技.md）
     ├── TurboDriver.php           # Turbo TOPUP 话费 API（docs/Turbo-TOPUP-API.md）
+    ├── QylmDriver.php            # QYLM 卡站话费 API（docs/QYLM开放接口对接文档-代理端下单-V1.0.md）
     └── XxxDriver.php             # 每家供应商一个
 ```
 
@@ -458,7 +459,7 @@ app/Supplier/
 - 供应商回调地址：`/notify/supplier/{supplier_code}`。
 - 请求和响应完整记到 `order_attempts`，同时写日志渠道 `supplier`。
 - 接入新供应商：写驱动类 → 注册驱动编码 → 后台新增供应商时选驱动、填参数。
-- 供应商提供了商品查询接口时，驱动再实现 `ProvidesUpstreamProducts`：后台建 / 编辑供应商商品时可以从上游商品列表里选，自动填写编码、名称、成本价，上游给了的话还有面值和运营商；下架的不能选，本供应商下已建过的标「已添加」。实时查上游，不缓存，出错时仍可手动填编码。已实现：`open_platform`、`shangteng`（逐页取完）、`zhongkong`、`dayuanren`、`chongyida`、`mock`。
+- 供应商提供了商品查询接口时，驱动再实现 `ProvidesUpstreamProducts`：后台建 / 编辑供应商商品时可以从上游商品列表里选，自动填写编码、名称、成本价，上游给了的话还有面值和运营商；下架的不能选，本供应商下已建过的标「已添加」。实时查上游，不缓存，出错时仍可手动填编码。已实现：`open_platform`、`shangteng`（逐页取完）、`zhongkong`、`dayuanren`、`chongyida`、`qylm`（逐页取完）、`mock`。
 
 ### 7.1 开放平台（驱动 `open_platform`）
 
@@ -599,6 +600,16 @@ app/Supplier/
 - **回调没有签名**：只取 `externalOrderNo`，再主动查单，以查单结果为准，回 `success`；查单出错或没拿到明确结果回 `fail`（HTTP 400），定时查单照常继续。
 - 结果判定：下单 `status=success` 算受理；`status` 是别的（如 `error`，不论 HTTP 状态码）判失败换下一家；没拿到返回（网络异常、返回无法解析或没有 `status`）立即转异常并标为人工处理单（见 2.5）。下单 / 查单 `orderStatus` `Succeeded` 成功、`Failed` / `Cancel` 失败、其他处理中；`rechargeStatus=3` 部分成功不判结果，留给人工核实。查单返回 `Order not found`（实测 `error.code=INVALID_PARAMETER`，按信息文字认）判失败：处理中的换下一家，超时的直接失败退款，人工处理单照 2.5 定时查单只记录、人工点查单交回正常流程（2026-11-13 定）；回调触发的查单查无此单仍回 `fail`、不判失败（回调不带签名）。查单其他报错、订单号对不上只记录、订单状态不动。
 - 上游商品列表：取 `data.result`；`status=false` 算下架；`brandName` 里带运营商名（移动 / 联通 / 电信 / 广电）才认运营商，否则留空；分类名和 `pType` 作为补充说明。
+
+### 7.13 QYLM 卡站（驱动 `qylm`）
+
+上游文档 `docs/QYLM开放接口对接文档-代理端下单-V1.0.md`（最后是对接方式、结果判定表和待确认事项）：商品列表、下单、按上游订单号查单、余额，JSON，鉴权在请求头。只接话费，**上游没有回调**，结果靠查单。
+
+- 接口参数：接口根地址（`http://IP/api/open/v1`，路径 `/products`、`/orders`、`/account` 写在驱动里）、接口 ID（`X-Agent-Id`）、接口 KEY；选填交易密码（上游开启时填，随单发送、不记进原始报文）。回调一律回 `fail`。
+- 字段对应：`product_id` = 供应商商品编码（上游商品 ID），`params` = 手机号。**上游没有接入方单号**，下单不带提交单号；上游 `order_no` 存为供应商订单号，查单只能按它查。下单没拿到返回、或说成功却没给 `order_no` 的提交查不了单，立即转人工处理单。
+- 签名：请求头 `X-Agent-Id`、秒级 `X-Timestamp`、`X-Nonce`、`X-Sign`；签名串 `agent_id\nMETHOD\nURI\ntimestamp\nnonce\nraw_body`（URI 含查询字符串，GET 请求体为空串），接口 KEY 做 HMAC-SHA256，十六进制小写。
+- 结果判定：下单 `code=0` 且有 `order_no` 算受理；其他 code（401 / 404 / 422 和表外的码，不论 HTTP 状态码）判失败换下一家；没拿到返回（网络异常、返回无法解析或没有 `code`）立即转异常并标为人工处理单（见 2.5）。查单 `success` 成功；`failed` / `cancelled` / `refunded` / `unpaid` 失败；`partial_refund` 不判结果，留给人工核实；`pending` / `processing` / `awaiting` 和其他处理中；`404` 订单不存在只记录、订单状态不动。
+- 上游商品列表：每页 100 条逐页取完；不给面值；商品名里带运营商名才认运营商；`stock=0` 算下架（`null` 不限库存）；分类名和下单参数提示作为补充说明。
 
 ## 8. 权限
 
