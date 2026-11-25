@@ -192,6 +192,7 @@ onMounted(async () => {
       v-model:current-page="page"
       v-model:page-size="perPage"
       class="pagination"
+      :page-sizes="[10, 20, 30, 40, 50, 100, 200]"
       layout="total, sizes, prev, pager, next"
       :total="total"
       @current-change="list.load"

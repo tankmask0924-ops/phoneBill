@@ -60,7 +60,7 @@ class OrderAdminService extends AbstractService
 
     private const MODULE = 'order';
 
-    private const MAX_PER_PAGE = 100;
+    private const MAX_PER_PAGE = 200;
 
     private const MAX_EXPORT = 10000;
 

@@ -48,6 +48,8 @@ class MerchantPortalService extends AbstractService
 
     private const MAX_PER_PAGE = 100;
 
+    private const MAX_ORDER_PER_PAGE = 200;
+
     /** 商户看到的状态 → 实际的订单状态 */
     private const STATUS_FILTER = [
         'processing' => [Order::STATUS_PENDING, Order::STATUS_PROCESSING, Order::STATUS_ABNORMAL, Order::STATUS_TIMEOUT],
@@ -119,7 +121,7 @@ class MerchantPortalService extends AbstractService
     public function orders(Merchant $merchant, array $query): array
     {
         $page = max(1, (int) ($query['page'] ?? 1));
-        $perPage = min(self::MAX_PER_PAGE, max(1, (int) ($query['per_page'] ?? 20)));
+        $perPage = min(self::MAX_ORDER_PER_PAGE, max(1, (int) ($query['per_page'] ?? 20)));
 
         $builder = $this->filteredOrders($merchant, $query);
         $summary = $this->orderSummary($builder);
