@@ -18,12 +18,14 @@ use App\Dao\AdminRolePermissionDao;
 use App\Dao\AdminUserDao;
 use App\Model\AdminUser;
 use App\Service\AbstractService;
+use App\Service\Auth\LoginLockoutService;
 use Carbon\Carbon;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpMessage\Exception\HttpException;
 
 /**
  * 管理后台账户登录、当前管理员信息、修改自己的密码。
+ * 登录密码连续输错 5 次自动封禁账号（LoginLockoutService），在「管理员账号」里重新启用或用 admin:unlock 解封。
  */
 class AuthService extends AbstractService
 {
@@ -41,6 +43,9 @@ class AuthService extends AbstractService
     #[Inject]
     protected AdminRolePermissionDao $adminRolePermissionDao;
 
+    #[Inject]
+    protected LoginLockoutService $loginLockoutService;
+
     /**
      * @return array{token: string, username: string}
      */
@@ -50,9 +55,12 @@ class AuthService extends AbstractService
 
         $adminUser = $this->adminUserDao->findByUsername($username);
 
-        if (! $adminUser || ! password_verify($password, $adminUser->password)) {
+        if (! $adminUser) {
             // 账号不存在 / 密码错误共用同一条消息，防止枚举出哪些用户名存在
             throw new HttpException(401, self::GENERIC_LOGIN_FAIL_MESSAGE);
+        }
+        if (! password_verify($password, $adminUser->password)) {
+            $this->loginLockoutService->recordFailure($this->adminUserDao, $adminUser->id, $adminUser->username, 'admin', '超级管理员');
         }
 
         if ($adminUser->status === 'disabled') {
@@ -63,6 +71,7 @@ class AuthService extends AbstractService
         $token = $this->tokenGuard->issue($adminUser->id, $adminUser->password);
 
         $adminUser->last_login_at = Carbon::now();
+        $adminUser->login_failures = 0;
         $adminUser->save();
 
         return [

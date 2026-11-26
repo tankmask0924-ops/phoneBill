@@ -25,6 +25,7 @@ use Carbon\Carbon;
  * @property null|string $mobile 绑定的手机号（余额提醒发到这里）
  * @property bool $sms_login_enabled 登录时是否要短信验证码，账号自己在商户后台开关，要先绑定手机
  * @property string $status
+ * @property int $login_failures
  * @property null|Carbon $last_login_at
  * @property Carbon $created_at
  * @property Carbon $updated_at
@@ -41,6 +42,7 @@ class MerchantUser extends Model
         'mobile',
         'sms_login_enabled',
         'status',
+        'login_failures',
         'last_login_at',
     ];
 
@@ -49,6 +51,7 @@ class MerchantUser extends Model
     ];
 
     protected array $casts = [
+        'login_failures' => 'integer',
         'sms_login_enabled' => 'boolean',
     ];
 

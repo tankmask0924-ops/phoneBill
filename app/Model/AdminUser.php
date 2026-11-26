@@ -21,6 +21,7 @@ use Carbon\Carbon;
  * @property string $real_name
  * @property int $role_id
  * @property string $status
+ * @property int $login_failures
  * @property null|Carbon $last_login_at
  * @property Carbon $created_at
  * @property Carbon $updated_at
@@ -35,10 +36,12 @@ class AdminUser extends Model
         'real_name',
         'role_id',
         'status',
+        'login_failures',
         'last_login_at',
     ];
 
     protected array $casts = [
+        'login_failures' => 'integer',
         'role_id' => 'integer',
         'last_login_at' => 'datetime',
     ];

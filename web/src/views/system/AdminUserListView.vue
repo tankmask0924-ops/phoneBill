@@ -4,7 +4,7 @@ import { usePagedList } from '@/utils/paged'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { computed, onMounted, reactive, ref } from 'vue'
-import { type AdminUser, adminUserApi, type RoleOption } from '@/api/system'
+import { type AdminUser, adminUserApi, LOGIN_LOCK_FAILURES, type RoleOption } from '@/api/system'
 import { adminUserStatusLabels, roleLabel, toOptions } from '@/utils/labels'
 import { usePermissionStore } from '@/stores/permission'
 
@@ -86,7 +86,7 @@ async function toggleStatus(row: AdminUser) {
   const next = row.status === 'active' ? 'disabled' : 'active'
   try {
     await ElMessageBox.confirm(
-      next === 'disabled' ? `禁用后「${row.real_name}」会立即退出登录，确定禁用吗？` : `确定启用「${row.real_name}」吗？`,
+      next === 'disabled' ? `禁用后「${row.real_name}」会立即退出登录，确定禁用吗？` : `确定启用「${row.real_name}」吗？启用后连续输错密码次数清零`,
       next === 'disabled' ? '禁用管理员' : '启用管理员',
       { type: 'warning' },
     )
@@ -151,8 +151,11 @@ onMounted(async () => {
       <el-table-column label="角色" min-width="110">
         <template #default="{ row }">{{ roleLabel(row.role_name) }}</template>
       </el-table-column>
-      <el-table-column label="状态" width="80">
-        <template #default="{ row }"><StatusTag :map="adminUserStatusLabels" :value="row.status" /></template>
+      <el-table-column label="状态" width="160">
+        <template #default="{ row }">
+          <StatusTag :map="adminUserStatusLabels" :value="row.status" />
+          <el-tag v-if="row.status === 'disabled' && row.login_failures >= LOGIN_LOCK_FAILURES" class="lock-tag" size="small" type="danger">密码错误封禁</el-tag>
+        </template>
       </el-table-column>
       <el-table-column label="最近登录" width="170">
         <template #default="{ row }">{{ row.last_login_at ?? '-' }}</template>
@@ -210,6 +213,9 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.lock-tag {
+  margin-left: 6px;
+}
 .toolbar {
   display: flex;
   justify-content: space-between;

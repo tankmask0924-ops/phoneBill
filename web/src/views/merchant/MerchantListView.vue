@@ -6,6 +6,7 @@ import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'elem
 import { Plus, QuestionFilled, WarningFilled } from '@element-plus/icons-vue'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { type AvailableProduct, balanceLogApi, type BalanceLog, type Merchant, merchantApi, type MerchantProduct, type MerchantUser } from '@/api/merchant'
+import { LOGIN_LOCK_FAILURES } from '@/api/system'
 import type { OperatorCode } from '@/api/product'
 import { alipayAccountApi, type MerchantAlipayAccount, type ReceivingAccount, receivingAccountApi } from '@/api/funding'
 import { labelOf, operatorLabels, supplierStatusLabels, toOptions } from '@/utils/labels'
@@ -757,8 +758,11 @@ onMounted(async () => {
           <span v-else class="muted">仅密码</span>
         </template>
       </el-table-column>
-      <el-table-column label="状态" width="80">
-        <template #default="{ row }"><StatusTag :map="supplierStatusLabels" :value="row.status" /></template>
+      <el-table-column label="状态" width="160">
+        <template #default="{ row }">
+          <StatusTag :map="supplierStatusLabels" :value="row.status" />
+          <el-tag v-if="row.status === 'disabled' && row.login_failures >= LOGIN_LOCK_FAILURES" class="lock-tag" size="small" type="danger">密码错误封禁</el-tag>
+        </template>
       </el-table-column>
       <el-table-column label="最近登录" width="170">
         <template #default="{ row }">{{ row.last_login_at ?? '-' }}</template>
@@ -799,6 +803,9 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.lock-tag {
+  margin-left: 6px;
+}
 .receiving-title {
   margin: 0 0 8px;
 }

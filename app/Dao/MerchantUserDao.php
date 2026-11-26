@@ -12,10 +12,13 @@ declare(strict_types=1);
 
 namespace App\Dao;
 
+use App\Dao\Concerns\CountsLoginFailures;
 use App\Model\MerchantUser;
 
 class MerchantUserDao extends AbstractDao
 {
+    use CountsLoginFailures;
+
     protected string $model = MerchantUser::class;
 
     public function find(int $id): ?MerchantUser

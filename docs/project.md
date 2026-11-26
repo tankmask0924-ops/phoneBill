@@ -403,7 +403,7 @@ erDiagram
 | `channel_maintenances` | 通道维护 | `supplier_id`、`operator`（可空）、`province`（可空）、`start_at`、`end_at`、`reason` |
 | **商户** | | |
 | `merchants` | 商户 | `name`、`contact`、`phone`、`app_key`（唯一）、`app_secret`（加密）、`balance`（有授信时可以是负数）、`credit_limit`（授信额度）、`rate_limit_seconds` / `rate_limit_orders`（下单限流，0 不限）、`alipay_account_id`（支付宝转账加款账户）、`notify_url`、`ip_whitelist`、`status` |
-| `merchant_users` | 商户后台账号 | `merchant_id`、`username`（唯一）、`password`、`status`、`last_login_at` |
+| `merchant_users` | 商户后台账号 | `merchant_id`、`username`（唯一）、`password`、`status`、`login_failures`（连续输错密码次数，见 8.1）、`last_login_at` |
 | `merchant_products` | 商户开通的商品 | `merchant_id`、`product_id`、`status`；唯一 `(merchant_id, product_id)` |
 | `merchant_product_prices` | 商户各运营商价格 | `merchant_product_id`、`operator`、`price`；唯一 `(merchant_product_id, operator)` |
 | `merchant_balance_logs` | 资金流水 | `merchant_id`、`type`、`amount`（有正负）、`balance_after`、`order_id`、`remark`、`admin_id` |
@@ -641,6 +641,16 @@ app/Supplier/
 | 系统配置（系统名称、回调域名、下单设置、支付宝转账加款账户、图片存储） | — | `setting.manage` |
 | 订单 | `order.view` | `order.manage`（查单、处理异常、手动回调、手动补单） |
 | 冲正 | — | `order.reverse` |
+
+### 8.1 登录密码错误封禁
+
+管理后台、商户后台的登录账号共用一套规则（`LoginLockoutService`，次数存在 `admin_users` / `merchant_users` 的 `login_failures`，2026-11-26 加）：
+
+- 同一账号**连续输错密码 5 次**，第 5 次就把账号改成禁用（封禁），之后密码对了也登不上，提示「密码连续输错 5 次，账号已被封禁，请联系超级管理员 / 平台」，并在 `admin` / `merchant` 日志渠道记一条。
+- 前 4 次和用户名不存在一样只提示「账号或密码错误」（防止枚举账号）；不存在的用户名不计数。
+- 密码输对（账号启用中）就清零重新算；商户开了登录短信验证的，密码对了就清零，验证码错不算。
+- 解封：在「管理员账号」或商户的账号列表里重新**启用**即可，次数同时清零；列表里被封的账号标「密码错误封禁」。唯一的超级管理员被封、后台没人能解时，用命令行 `docker exec pb php bin/hyperf.php admin:unlock --username=xxx` 兜底（改回启用、清零，不改密码）。
+- 取代了商户后台原来的「15 分钟内失败 10 次临时锁 15 分钟」。
 
 ## 9. 开发计划
 

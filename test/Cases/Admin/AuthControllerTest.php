@@ -13,7 +13,11 @@ declare(strict_types=1);
 namespace HyperfTest\Cases\Admin;
 
 use App\Model\AdminUser;
+use App\Service\Admin\AdminBootstrapService;
 use HyperfTest\HttpTestCase;
+use InvalidArgumentException;
+
+use function Hyperf\Support\make;
 
 /**
  * 登录、/admin/auth/me 的端到端测试，走真实路由 + 中间件栈。
@@ -76,6 +80,94 @@ class AuthControllerTest extends HttpTestCase
         $this->assertSame(403, $response->getStatusCode());
     }
 
+    public function testFifthConsecutiveWrongPasswordLocksTheAccount()
+    {
+        $admin = $this->createAdminWithPermissions([]);
+
+        // 前 4 次和用户名不存在一样，只提示账号或密码错误
+        for ($i = 1; $i <= 4; ++$i) {
+            $response = $this->login($admin->username, 'wrong');
+            $this->assertSame(401, $response->getStatusCode(), "第 {$i} 次");
+            $this->assertSame('账号或密码错误', (string) $response->getBody());
+        }
+        $this->assertSame('active', AdminUser::find($admin->id)->status);
+
+        // 第 5 次封禁
+        $response = $this->login($admin->username, 'wrong');
+        $this->assertSame(403, $response->getStatusCode());
+        $this->assertSame('密码连续输错 5 次，账号已被封禁，请联系超级管理员', (string) $response->getBody());
+        $locked = AdminUser::find($admin->id);
+        $this->assertSame('disabled', $locked->status);
+        $this->assertSame(5, $locked->login_failures);
+
+        // 封禁后密码对了也登不上，再输错也一样提示封禁
+        $this->assertSame(403, $this->login($admin->username, self::PASSWORD)->getStatusCode());
+        $this->assertSame(403, $this->login($admin->username, 'wrong')->getStatusCode());
+        $this->assertSame('disabled', AdminUser::find($admin->id)->status);
+    }
+
+    public function testSuccessfulLoginResetsTheFailureCount()
+    {
+        $admin = $this->createAdminWithPermissions([]);
+
+        for ($i = 0; $i < 4; ++$i) {
+            $this->assertSame(401, $this->login($admin->username, 'wrong')->getStatusCode());
+        }
+        $this->assertNotNull($this->loginAs($admin));
+        $this->assertSame(0, AdminUser::find($admin->id)->login_failures);
+
+        // 清零后重新算：再错 4 次也不封
+        for ($i = 0; $i < 4; ++$i) {
+            $this->assertSame(401, $this->login($admin->username, 'wrong')->getStatusCode());
+        }
+        $this->assertSame('active', AdminUser::find($admin->id)->status);
+        $this->assertNotNull($this->loginAs($admin));
+    }
+
+    public function testReEnablingInAdminUsersUnlocksAndResetsTheCount()
+    {
+        $admin = $this->createAdminWithPermissions([]);
+        for ($i = 0; $i < 5; ++$i) {
+            $this->login($admin->username, 'wrong');
+        }
+        $operatorToken = $this->loginAs($this->createSuperAdmin());
+
+        $list = $this->body($this->jsonRequest('GET', '/admin/admin-users?keyword=' . $admin->username, $operatorToken));
+        $row = array_values(array_filter($list['data'] ?? [], static fn ($r) => $r['id'] === $admin->id))[0] ?? null;
+        $this->assertNotNull($row, json_encode($list));
+        $this->assertSame(['disabled', 5], [$row['status'], $row['login_failures']], '列表里能看出是密码错误封禁');
+
+        $response = $this->jsonRequest('POST', "/admin/admin-users/{$admin->id}/status", $operatorToken, ['status' => 'active']);
+        $this->assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $this->assertSame(0, AdminUser::find($admin->id)->login_failures);
+        $this->assertNotNull($this->loginAs($admin));
+    }
+
+    public function testUnlockCommandServiceReactivatesTheAdmin()
+    {
+        $admin = $this->createAdminWithPermissions([]);
+        for ($i = 0; $i < 5; ++$i) {
+            $this->login($admin->username, 'wrong');
+        }
+        $this->assertSame('disabled', AdminUser::find($admin->id)->status);
+
+        make(AdminBootstrapService::class)->unlockAdmin(' ' . $admin->username . ' ');
+        $unlocked = AdminUser::find($admin->id);
+        $this->assertSame(['active', 0], [$unlocked->status, $unlocked->login_failures]);
+        $this->assertNotNull($this->loginAs($admin));
+
+        $this->expectException(InvalidArgumentException::class);
+        make(AdminBootstrapService::class)->unlockAdmin('no-such-admin-' . uniqid('', true));
+    }
+
+    public function testUnknownUsernameIsNeverLocked()
+    {
+        $username = 'no-such-admin-' . uniqid('', true);
+        for ($i = 0; $i < 6; ++$i) {
+            $this->assertSame(401, $this->login($username, 'wrong')->getStatusCode());
+        }
+    }
+
     public function testMeReturnsSafeFieldsAndPermissionCodes()
     {
         $admin = $this->createAdminWithPermissions(['role.view', 'admin_user.view']);
@@ -115,5 +207,12 @@ class AuthControllerTest extends HttpTestCase
         $this->assertSame(401, $this->jsonRequest('GET', '/admin/auth/me', $oldToken)->getStatusCode());
         $this->assertSame(200, $this->jsonRequest('GET', '/admin/auth/me', $newToken)->getStatusCode());
         $this->assertNotNull($this->loginAs($admin, 'another-password'));
+    }
+
+    private function login(string $username, string $password)
+    {
+        return $this->client->request('POST', '/admin/auth/login', [
+            'form_params' => ['username' => $username, 'password' => $password],
+        ]);
     }
 }

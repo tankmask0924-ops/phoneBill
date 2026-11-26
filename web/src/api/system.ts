@@ -12,9 +12,14 @@ export interface AdminUser {
   role_id: number
   role_name: string | null
   status: string
+  /** 连续输错密码次数，满 LOGIN_LOCK_FAILURES 次自动封禁 */
+  login_failures: number
   last_login_at: string | null
   created_at: string | null
 }
+
+/** 管理后台、商户后台登录密码连续输错这么多次自动封禁（和后端 LoginLockoutService::MAX_FAILURES 一致） */
+export const LOGIN_LOCK_FAILURES = 5
 
 export interface RoleOption {
   id: number

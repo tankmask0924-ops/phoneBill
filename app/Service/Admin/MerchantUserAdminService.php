@@ -92,7 +92,8 @@ class MerchantUserAdminService extends AbstractService
         $status = $this->status($status);
         $user = $this->findOrFail($merchantId, $userId);
         if ($status !== $user->status) {
-            $this->merchantUserDao->update($user->id, ['status' => $status]);
+            // 重新启用即解封，连续输错次数清零
+            $this->merchantUserDao->update($user->id, $status === 'active' ? ['status' => $status, 'login_failures' => 0] : ['status' => $status]);
             $this->operationLogDao->record(
                 $operator->id,
                 self::MODULE,
@@ -156,6 +157,8 @@ class MerchantUserAdminService extends AbstractService
             'mobile' => $user->mobile,
             'sms_login_enabled' => (bool) $user->sms_login_enabled,
             'status' => $user->status,
+            // 连续输错密码次数，满 5 次是被自动封禁的
+            'login_failures' => (int) $user->login_failures,
             'last_login_at' => $user->last_login_at?->toDateTimeString(),
             'created_at' => $user->created_at?->toDateTimeString(),
         ];

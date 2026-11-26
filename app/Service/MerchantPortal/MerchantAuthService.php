@@ -17,6 +17,7 @@ use App\Dao\MerchantUserDao;
 use App\Model\Merchant;
 use App\Model\MerchantUser;
 use App\Service\AbstractService;
+use App\Service\Auth\LoginLockoutService;
 use App\Service\Sms\SmsCodeService;
 use App\Service\Sms\SmsService;
 use App\Support\Mobile;
@@ -29,7 +30,7 @@ use Hyperf\Redis\Redis;
 /**
  * 商户后台账户：登录、当前账号信息、修改自己的密码、绑定 / 修改手机。
  *
- * - 商户后台放在外网，登录加了失败次数限制：同一账号 15 分钟内失败 10 次就暂时锁住；
+ * - 登录密码连续输错 5 次自动封禁账号（LoginLockoutService），平台在商户账号里重新启用解封；
  * - 账号自己开启了登录短信验证（要先绑定手机）并且平台启用了短信时，登录分两步：账号密码对了先发验证码、
  *   返回一个 10 分钟有效的 ticket，再用 ticket + 验证码换 token（verifyLogin）。平台没启用短信时只校验密码，
  *   避免短信出问题时所有人都登不上；
@@ -38,10 +39,6 @@ use Hyperf\Redis\Redis;
 class MerchantAuthService extends AbstractService
 {
     private const GENERIC_LOGIN_FAIL_MESSAGE = '账号或密码错误';
-
-    private const MAX_FAILURES = 10;
-
-    private const FAILURE_WINDOW_SECONDS = 900;
 
     private const TICKET_TTL_SECONDS = 600;
 
@@ -63,6 +60,9 @@ class MerchantAuthService extends AbstractService
     #[Inject]
     protected LoggerFactory $loggerFactory;
 
+    #[Inject]
+    protected LoginLockoutService $loginLockoutService;
+
     /**
      * 不用短信验证时直接返回 token；要验证时返回 ticket（验证码已发出，code_sent 为 false 表示 60 秒内刚发过，没再发）。
      *
@@ -71,22 +71,19 @@ class MerchantAuthService extends AbstractService
     public function login(string $username, string $password): array
     {
         $username = trim($username);
-        $failKey = 'merchant_login_fail:' . md5(strtolower($username));
-        if ((int) $this->redis->get($failKey) >= self::MAX_FAILURES) {
-            throw new HttpException(429, '登录失败次数太多，请 15 分钟后再试');
-        }
-
         $user = $username === '' ? null : $this->merchantUserDao->findByUsername($username);
-        if (! $user || ! password_verify($password, $user->password)) {
-            $this->redis->incr($failKey);
-            $this->redis->expire($failKey, self::FAILURE_WINDOW_SECONDS);
+        if (! $user) {
             // 账号不存在 / 密码错误共用同一条消息，防止枚举出哪些账号存在
             throw new HttpException(401, self::GENERIC_LOGIN_FAIL_MESSAGE);
+        }
+        if (! password_verify($password, $user->password)) {
+            $this->loginLockoutService->recordFailure($this->merchantUserDao, $user->id, $user->username, 'merchant', '平台');
         }
         if ($user->status !== 'active') {
             throw new HttpException(403, '账号已被禁用，请联系平台');
         }
-        $this->redis->del($failKey);
+        // 密码对了就清零（要短信验证的，验证码错不算密码错）
+        $this->merchantUserDao->resetLoginFailures($user->id);
 
         if (! $this->needsSms($user)) {
             return $this->finishLogin($user);

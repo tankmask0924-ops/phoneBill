@@ -263,13 +263,37 @@ class MerchantPortalTest extends HttpTestCase
         $this->assertSame($reset['app_secret'], make(Encrypter::class)->decrypt(Merchant::find($merchant->id)->app_secret));
     }
 
-    public function testLoginIsThrottledAfterRepeatedFailures()
+    public function testFifthConsecutiveWrongPasswordLocksTheAccount()
     {
-        $user = $this->createMerchantUser($this->createMerchant());
-        for ($i = 0; $i < 10; ++$i) {
+        $merchant = $this->createMerchant();
+        $user = $this->createMerchantUser($merchant);
+
+        // 登录成功清零：错 4 次再登录成功，不封
+        for ($i = 0; $i < 4; ++$i) {
             $this->assertSame(401, $this->loginResponse($user->username, 'wrong')->getStatusCode());
         }
-        $this->assertSame(429, $this->loginResponse($user->username, self::PASSWORD)->getStatusCode(), '密码对了也先锁着');
+        $this->assertNotNull($this->merchantLogin($user->username, self::PASSWORD));
+        $this->assertSame(0, MerchantUser::find($user->id)->login_failures);
+
+        // 连续错 5 次：第 5 次封禁，之后密码对了也登不上
+        for ($i = 1; $i <= 4; ++$i) {
+            $response = $this->loginResponse($user->username, 'wrong');
+            $this->assertSame(401, $response->getStatusCode(), "第 {$i} 次");
+            $this->assertSame('账号或密码错误', (string) $response->getBody());
+        }
+        $response = $this->loginResponse($user->username, 'wrong');
+        $this->assertSame(403, $response->getStatusCode());
+        $this->assertSame('密码连续输错 5 次，账号已被封禁，请联系平台', (string) $response->getBody());
+        $this->assertSame('disabled', MerchantUser::find($user->id)->status);
+        $this->assertSame(403, $this->loginResponse($user->username, self::PASSWORD)->getStatusCode());
+
+        // 平台在商户账号里重新启用即解封，次数清零
+        $adminToken = $this->loginAs($this->createAdminWithPermissions(['merchant.view', 'merchant.manage']));
+        $response = $this->jsonRequest('POST', "/admin/merchants/{$merchant->id}/users/{$user->id}/status", $adminToken, ['status' => 'active']);
+        $this->assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $this->assertSame(0, json_decode((string) $response->getBody(), true)['login_failures']);
+        $this->assertSame(['active', 0], [MerchantUser::find($user->id)->status, MerchantUser::find($user->id)->login_failures]);
+        $this->assertNotNull($this->merchantLogin($user->username, self::PASSWORD));
     }
 
     private function createMerchantUser(Merchant $merchant): MerchantUser

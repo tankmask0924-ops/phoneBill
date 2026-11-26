@@ -132,6 +132,23 @@ class AdminBootstrapService extends AbstractService
     }
 
     /**
+     * 命令行解封管理员账号（admin:unlock）：改回启用、连续输错次数清零。
+     * 唯一的超级管理员被密码错误封禁时，后台没人能解封，靠这个兜底。
+     *
+     * @throws InvalidArgumentException 用户名不存在
+     */
+    public function unlockAdmin(string $username): AdminUser
+    {
+        $adminUser = $this->adminUserDao->findByUsername(trim($username));
+        if ($adminUser === null) {
+            throw new InvalidArgumentException("管理员账号不存在：{$username}");
+        }
+        $this->adminUserDao->update($adminUser->id, ['status' => 'active', 'login_failures' => 0]);
+
+        return $adminUser;
+    }
+
+    /**
      * 把 KNOWN_PERMISSIONS 里的权限补齐到超级管理员角色上（缺的权限行一并建出来）。
      * 新增权限编码后，已有的超级管理员账号不会自动拿到——createSuperAdmin() 只在
      * 新建账号时顺带补一次——部署后执行 `admin:sync-permissions` 调这里。幂等。

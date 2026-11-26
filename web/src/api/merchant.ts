@@ -90,6 +90,8 @@ export interface MerchantUser {
   /** 商户自己开启了登录短信验证 */
   sms_login_enabled: boolean
   status: string
+  /** 连续输错密码次数，满 LOGIN_LOCK_FAILURES 次自动封禁 */
+  login_failures: number
   last_login_at: string | null
   created_at: string | null
 }
