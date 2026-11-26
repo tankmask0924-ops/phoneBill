@@ -10,6 +10,7 @@ Hyperf 3.1 + PHP 8.4 + Swoole 后端，附带 Web 管理后台（Vue 3 + TypeScr
 - 管理员账号：新建、编辑、启用/禁用、重置密码
 - 角色权限（RBAC）：自定义角色、勾选权限，防提权（不能授予自己没有的权限、不能改自己所在角色）
 - 操作日志：所有带权限的写操作自动记录，敏感字段打码
+- 登录日志（`security_logs`，「系统设置 - 登录日志」）：管理后台、商户后台的登录成功 / 失败（原因、连续第几次、是否因此封禁）、改自己的密码，商户自助重置签名密钥、改 IP 白名单、绑定手机、开关登录短信验证、批量下单，都带 IP 和 User-Agent
 - 定时任务（`hyperf/crontab`）、异步队列（`hyperf/async-queue`）进程已注册
 
 已完成的业务模块。第一阶段：
@@ -17,7 +18,7 @@ Hyperf 3.1 + PHP 8.4 + Swoole 后端，附带 Web 管理后台（Vue 3 + TypeScr
 - 商品中心：供应商（接口参数加密存储）、供应商商品、平台商品（绑定供应商商品、按运营商的默认售价）
 - 风控：号段查询（识别运营商和省份，并列出每个商品的选路结果）
 - 新接一家供应商：在 `app/Supplier/Driver/` 写驱动类，登记到 `App\Supplier\SupplierDriverRegistry::DRIVERS`
-- 已有驱动：`mock` 模拟供应商；`open_platform` 开放平台话费（上游文档 [docs/open-api-integration.md](docs/open-api-integration.md)，对接规则见 [docs/project.md](docs/project.md) 7.1）；`shangteng` 商腾科技话费（上游文档 [docs/API接口.md](docs/API接口.md)，对接规则见 [docs/project.md](docs/project.md) 7.2）；`zhongkong` 中控话费（上游文档 [docs/中控API接口.md](docs/中控API接口.md)，对接规则见 [docs/project.md](docs/project.md) 7.3）；`dayuanren` 大猿人话费（上游文档 [docs/大猿人API接口.md](docs/大猿人API接口.md)，对接规则见 [docs/project.md](docs/project.md) 7.4）；`pikoudai` 皮口袋话费（上游文档 [docs/话费接口.md](docs/话费接口.md)，对接规则见 [docs/project.md](docs/project.md) 7.5）；`liuhao` 刘浩话费（上游文档 [docs/充值API.md](docs/充值API.md)，对接规则见 [docs/project.md](docs/project.md) 7.6）；`yingyeting` 营业厅话费（上游文档 [docs/营业厅.md](docs/营业厅.md)，对接规则见 [docs/project.md](docs/project.md) 7.7）；`chongyida` 充易达话费（上游文档 [docs/充易达.md](docs/充易达.md)，对接规则见 [docs/project.md](docs/project.md) 7.8）；`xuanjie` 炫捷话费（上游文档 [docs/炫捷.md](docs/炫捷.md)，对接规则见 [docs/project.md](docs/project.md) 7.9）；`zhixin` 智信科技话费（上游文档 [docs/智信科技平台API接口文档.md](docs/智信科技平台API接口文档.md)，对接规则见 [docs/project.md](docs/project.md) 7.10）；`linxian` 邻显科技话费（上游文档 [docs/邻显科技.md](docs/邻显科技.md)，对接规则见 [docs/project.md](docs/project.md) 7.11）；`turbo` Turbo TOPUP 话费（上游文档 [docs/Turbo-TOPUP-API.md](docs/Turbo-TOPUP-API.md)，对接规则见 [docs/project.md](docs/project.md) 7.12）；`qylm` QYLM 卡站话费（上游文档 [docs/QYLM开放接口对接文档-代理端下单-V1.0.md](docs/QYLM开放接口对接文档-代理端下单-V1.0.md)，对接规则见 [docs/project.md](docs/project.md) 7.13）；`yb` YB 话费（上游文档 [docs/YB接口文档-2026.md](docs/YB接口文档-2026.md)，对接规则见 [docs/project.md](docs/project.md) 7.14）
+- 已有驱动：`mock` 模拟供应商（只在 `SUPPLIER_MOCK_ENABLED=true` 时可用，线上不开）；`open_platform` 开放平台话费（上游文档 [docs/open-api-integration.md](docs/open-api-integration.md)，对接规则见 [docs/project.md](docs/project.md) 7.1）；`shangteng` 商腾科技话费（上游文档 [docs/API接口.md](docs/API接口.md)，对接规则见 [docs/project.md](docs/project.md) 7.2）；`zhongkong` 中控话费（上游文档 [docs/中控API接口.md](docs/中控API接口.md)，对接规则见 [docs/project.md](docs/project.md) 7.3）；`dayuanren` 大猿人话费（上游文档 [docs/大猿人API接口.md](docs/大猿人API接口.md)，对接规则见 [docs/project.md](docs/project.md) 7.4）；`pikoudai` 皮口袋话费（上游文档 [docs/话费接口.md](docs/话费接口.md)，对接规则见 [docs/project.md](docs/project.md) 7.5）；`liuhao` 刘浩话费（上游文档 [docs/充值API.md](docs/充值API.md)，对接规则见 [docs/project.md](docs/project.md) 7.6）；`yingyeting` 营业厅话费（上游文档 [docs/营业厅.md](docs/营业厅.md)，对接规则见 [docs/project.md](docs/project.md) 7.7）；`chongyida` 充易达话费（上游文档 [docs/充易达.md](docs/充易达.md)，对接规则见 [docs/project.md](docs/project.md) 7.8）；`xuanjie` 炫捷话费（上游文档 [docs/炫捷.md](docs/炫捷.md)，对接规则见 [docs/project.md](docs/project.md) 7.9）；`zhixin` 智信科技话费（上游文档 [docs/智信科技平台API接口文档.md](docs/智信科技平台API接口文档.md)，对接规则见 [docs/project.md](docs/project.md) 7.10）；`linxian` 邻显科技话费（上游文档 [docs/邻显科技.md](docs/邻显科技.md)，对接规则见 [docs/project.md](docs/project.md) 7.11）；`turbo` Turbo TOPUP 话费（上游文档 [docs/Turbo-TOPUP-API.md](docs/Turbo-TOPUP-API.md)，对接规则见 [docs/project.md](docs/project.md) 7.12）；`qylm` QYLM 卡站话费（上游文档 [docs/QYLM开放接口对接文档-代理端下单-V1.0.md](docs/QYLM开放接口对接文档-代理端下单-V1.0.md)，对接规则见 [docs/project.md](docs/project.md) 7.13）；`yb` YB 话费（上游文档 [docs/YB接口文档-2026.md](docs/YB接口文档-2026.md)，对接规则见 [docs/project.md](docs/project.md) 7.14）
 
 第二阶段：
 
@@ -136,6 +137,7 @@ npm run build        # 产物在 merchant-web/dist，部署在 /merchant/ 路径
 | GET | `/admin/roles`、`/admin/roles/permissions` | `role.view` |
 | POST/PUT/DELETE | `/admin/roles`、`/admin/roles/{id}` | `role.manage` |
 | GET | `/admin/operation-logs` | `operation_log.view` |
+| GET | `/admin/security-logs`（登录日志） | `operation_log.view` |
 | GET | `/admin/suppliers`、`/admin/suppliers/meta`、`/admin/suppliers/{id}/balance`（实时余额） | `supplier.view` |
 | POST/PUT/DELETE | `/admin/suppliers`、`/{id}`、`/{id}/status`；`DELETE /{id}` 是软删除，名下没有供应商商品、没有充值中的单才能删 | `supplier.manage` |
 | GET | `/admin/supplier-products`、`/admin/supplier-products/meta`（省份）、`/admin/supplier-products/supplier-options`、`/admin/supplier-products/upstream-products`、`/admin/supplier-products/{id}/bindings`（绑定了它的平台商品） | `supplier_product.view` |
@@ -175,7 +177,8 @@ npm run build        # 产物在 merchant-web/dist，部署在 /merchant/ 路径
 ## 部署要点
 
 - `.env` 必须配置 `ADMIN_JWT_SECRET`、`MERCHANT_JWT_SECRET`（两个不要相同）、`APP_ENCRYPTION_KEY`（上线后不能更换），`DB_CHARSET=utf8mb4`
-- 部署在反向代理后面时配置 `TRUSTED_PROXIES`，操作日志才能记到真实 IP
+- 部署在反向代理后面时配置 `TRUSTED_PROXIES`，操作日志、登录日志才能记到真实 IP
+- 线上不要配 `SUPPLIER_MOCK_ENABLED`（默认关）：开着时后台能建「固定返回成功」的模拟供应商
 - 确认容器里有 `crontab-dispatcher`、`async-queue`（默认 2 个）、`async-queue-notify` 这几个进程，否则定时任务和异步队列不执行
 - 部署后执行 `admin:sync-permissions`；这次加了登录态的 aud 校验，已登录的管理员需要重新登录一次
 

@@ -17,6 +17,8 @@ use App\Model\SystemSetting;
 use App\Security\Encrypter;
 use App\Service\Admin\SupplierAdminService;
 use App\Service\Supplier\SupplierGateway;
+use Hyperf\Context\ApplicationContext;
+use Hyperf\Contract\ConfigInterface;
 use HyperfTest\HttpTestCase;
 
 use function Hyperf\Support\make;
@@ -176,6 +178,27 @@ class SupplierControllerTest extends HttpTestCase
         $this->assertSame(422, $this->jsonRequest('POST', "/admin/suppliers/{$supplier->id}/status", $token, ['status' => 'paused'])->getStatusCode());
         $this->assertSame('disabled', $this->body($this->jsonRequest('POST', "/admin/suppliers/{$supplier->id}/status", $token, ['status' => 'disabled']))['status']);
         $this->assertSame('disabled', Supplier::find($supplier->id)->status);
+    }
+
+    public function testMockDriverIsUnavailableWhenDisabled()
+    {
+        $config = ApplicationContext::getContainer()->get(ConfigInterface::class);
+        $config->set('supplier.mock_enabled', false);
+        try {
+            $token = $this->loginAs($this->createAdminWithPermissions(['supplier.view', 'supplier.manage']));
+            $meta = $this->body($this->jsonRequest('GET', '/admin/suppliers/meta', $token));
+            $this->assertNotContains('mock', array_column($meta['drivers'], 'code'), '线上关着时后台选不到模拟驱动');
+
+            $created = $this->jsonRequest('POST', '/admin/suppliers', $token, [
+                'name' => $this->uniq('供应商'),
+                'code' => $this->uniq('s_'),
+                'driver' => 'mock',
+                'config' => ['result' => 'success'],
+            ]);
+            $this->assertSame(422, $created->getStatusCode(), '也不能直接调接口建');
+        } finally {
+            $config->set('supplier.mock_enabled', true);
+        }
     }
 
     public function testListWithNoMatches()

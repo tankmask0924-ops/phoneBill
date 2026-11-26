@@ -81,3 +81,22 @@ export interface OperationLog {
 export const operationLogApi = {
   list: (params: Query) => http.get<Paged<OperationLog>>('/admin/operation-logs', params),
 }
+
+/** 登录日志：App\Controller\Admin\SecurityLogController */
+export interface SecurityLog {
+  id: number
+  portal: 'admin' | 'merchant'
+  event: string
+  user_id: number | null
+  username: string
+  merchant_id: number | null
+  merchant_name: string | null
+  ip: string | null
+  user_agent: string | null
+  detail: Record<string, unknown> | null
+  created_at: string | null
+}
+
+export const securityLogApi = {
+  list: (params: Query) => http.get<Paged<SecurityLog>>('/admin/security-logs', params),
+}

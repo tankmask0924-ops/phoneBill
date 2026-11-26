@@ -27,6 +27,7 @@ use App\Model\Product;
 use App\Model\ProductCategory;
 use App\Model\ProductPrice;
 use App\Model\ProductRoute;
+use App\Model\SecurityLog;
 use App\Model\Supplier;
 use App\Model\SupplierProduct;
 use App\Model\SupplierProductOperator;
@@ -75,6 +76,7 @@ trait CreatesCatalog
         MerchantProductPrice::whereIn('merchant_product_id', $merchantProductIds)->delete();
         MerchantProduct::destroy($merchantProductIds);
         MerchantBalanceLog::whereIn('merchant_id', $this->merchantIds)->delete();
+        SecurityLog::where('portal', SecurityLog::PORTAL_MERCHANT)->whereIn('merchant_id', $this->merchantIds)->delete();
         MerchantUser::whereIn('merchant_id', $this->merchantIds)->delete();
         Merchant::destroy($this->merchantIds);
         ProductRoute::whereIn('product_id', $this->productIds)->delete();

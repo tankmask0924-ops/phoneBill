@@ -13,6 +13,7 @@ declare(strict_types=1);
 namespace HyperfTest\Cases\Admin;
 
 use App\Model\AdminUser;
+use App\Model\SecurityLog;
 use App\Service\Admin\AdminBootstrapService;
 use HyperfTest\HttpTestCase;
 use InvalidArgumentException;
@@ -33,6 +34,8 @@ class AuthControllerTest extends HttpTestCase
 
     protected function tearDown(): void
     {
+        // 用不存在的用户名登录也会记安全日志（user_id 为空），按本文件用的用户名前缀清掉
+        SecurityLog::whereNull('user_id')->where('username', 'like', 'no-such-admin-%')->delete();
         $this->cleanUpAdmins();
         parent::tearDown();
     }

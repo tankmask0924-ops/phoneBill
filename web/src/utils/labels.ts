@@ -136,6 +136,33 @@ export const moduleLabels: LabelMap = {
 }
 
 /** 操作日志 action：Service 手动记的 + AdminOperationLogAspect 按方法名自动生成的 */
+/** 登录日志：哪一端，对应 App\Model\SecurityLog::PORTAL_* */
+export const securityPortalLabels: LabelMap = {
+  admin: { label: '管理后台' },
+  merchant: { label: '商户后台' },
+}
+
+/** 登录日志事件，对应 App\Model\SecurityLog::EVENT_* */
+export const securityEventLabels: LabelMap = {
+  login_success: { label: '登录成功', type: 'success' },
+  login_failed: { label: '登录失败', type: 'danger' },
+  login_sms_sent: { label: '密码通过，已发短信验证码' },
+  change_password: { label: '修改自己的密码', type: 'warning' },
+  reset_secret: { label: '重置签名密钥', type: 'warning' },
+  update_ip_whitelist: { label: '修改 IP 白名单', type: 'warning' },
+  bind_mobile: { label: '绑定 / 修改手机' },
+  set_sms_login: { label: '开关登录短信验证' },
+  batch_order: { label: '批量下单', type: 'primary' },
+}
+
+/** 登录失败原因，对应 App\Model\SecurityLog::REASON_* */
+export const securityReasonLabels: LabelMap = {
+  unknown_user: { label: '用户名不存在' },
+  wrong_password: { label: '密码错误' },
+  disabled: { label: '账号已禁用' },
+  sms_code: { label: '短信验证码错误' },
+}
+
 export const operationActionLabels: LabelMap = {
   create_admin_user: { label: '新建管理员' },
   update_admin_user: { label: '修改管理员' },

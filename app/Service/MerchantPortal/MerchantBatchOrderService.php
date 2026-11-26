@@ -16,8 +16,10 @@ use App\Dao\MerchantDao;
 use App\Exception\OpenApiException;
 use App\Model\Merchant;
 use App\Model\MerchantUser;
+use App\Model\SecurityLog;
 use App\Service\AbstractService;
 use App\Service\Order\OrderService;
+use App\Service\Security\SecurityLogService;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpMessage\Exception\HttpException;
 use Hyperf\Logger\LoggerFactory;
@@ -44,6 +46,9 @@ class MerchantBatchOrderService extends AbstractService
 
     #[Inject]
     protected LoggerFactory $loggerFactory;
+
+    #[Inject]
+    protected SecurityLogService $securityLogService;
 
     /**
      * @param array<string, mixed> $params product_code、mobiles
@@ -137,6 +142,13 @@ class MerchantBatchOrderService extends AbstractService
             $items[] = array_replace($item, ['ok' => true, 'order_no' => $order->order_no, 'status' => $presented['status'], 'amount' => $presented['amount']]);
         }
         $successCount = count(array_filter($items, static fn (array $i) => $i['ok']));
+        // 下单花的是商户的钱，账号被盗用时要能查到是哪个 IP 下的
+        $this->securityLogService->record(SecurityLog::PORTAL_MERCHANT, SecurityLog::EVENT_BATCH_ORDER, $user->id, $user->username, $merchant->id, [
+            'batch_no' => $batchNo,
+            'product_code' => $productCode,
+            'total' => count($items),
+            'success' => $successCount,
+        ]);
         $this->loggerFactory->get('merchant')->info('商户后台批量下单', [
             'merchant_id' => $merchant->id,
             'merchant_user_id' => $user->id,

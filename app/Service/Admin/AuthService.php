@@ -17,8 +17,10 @@ use App\Dao\AdminRoleDao;
 use App\Dao\AdminRolePermissionDao;
 use App\Dao\AdminUserDao;
 use App\Model\AdminUser;
+use App\Model\SecurityLog;
 use App\Service\AbstractService;
 use App\Service\Auth\LoginLockoutService;
+use App\Service\Security\SecurityLogService;
 use Carbon\Carbon;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpMessage\Exception\HttpException;
@@ -26,6 +28,7 @@ use Hyperf\HttpMessage\Exception\HttpException;
 /**
  * 管理后台账户登录、当前管理员信息、修改自己的密码。
  * 登录密码连续输错 5 次自动封禁账号（LoginLockoutService），在「管理员账号」里重新启用或用 admin:unlock 解封。
+ * 登录成功 / 失败、改自己的密码都记安全日志（SecurityLogService，带 IP 和 User-Agent）。
  */
 class AuthService extends AbstractService
 {
@@ -46,6 +49,9 @@ class AuthService extends AbstractService
     #[Inject]
     protected LoginLockoutService $loginLockoutService;
 
+    #[Inject]
+    protected SecurityLogService $securityLogService;
+
     /**
      * @return array{token: string, username: string}
      */
@@ -56,6 +62,7 @@ class AuthService extends AbstractService
         $adminUser = $this->adminUserDao->findByUsername($username);
 
         if (! $adminUser) {
+            $this->securityLogService->loginFailed(SecurityLog::PORTAL_ADMIN, null, $username, null, SecurityLog::REASON_UNKNOWN_USER);
             // 账号不存在 / 密码错误共用同一条消息，防止枚举出哪些用户名存在
             throw new HttpException(401, self::GENERIC_LOGIN_FAIL_MESSAGE);
         }
@@ -64,6 +71,7 @@ class AuthService extends AbstractService
         }
 
         if ($adminUser->status === 'disabled') {
+            $this->securityLogService->loginFailed(SecurityLog::PORTAL_ADMIN, $adminUser->id, $adminUser->username, null, SecurityLog::REASON_DISABLED);
             // 密码本身是对的，只是账号被禁用，跟「账号或密码错误」是不同性质的失败，用 403 而不是 401
             throw new HttpException(403, '账号已被禁用');
         }
@@ -73,6 +81,7 @@ class AuthService extends AbstractService
         $adminUser->last_login_at = Carbon::now();
         $adminUser->login_failures = 0;
         $adminUser->save();
+        $this->securityLogService->record(SecurityLog::PORTAL_ADMIN, SecurityLog::EVENT_LOGIN_SUCCESS, $adminUser->id, $adminUser->username);
 
         return [
             'token' => $token,
@@ -120,6 +129,7 @@ class AuthService extends AbstractService
 
         $hash = password_hash($newPassword, PASSWORD_BCRYPT);
         $this->adminUserDao->update($admin->id, ['password' => $hash]);
+        $this->securityLogService->record(SecurityLog::PORTAL_ADMIN, SecurityLog::EVENT_CHANGE_PASSWORD, $admin->id, $admin->username);
 
         return ['token' => $this->tokenGuard->issue($admin->id, $hash)];
     }

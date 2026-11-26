@@ -16,8 +16,10 @@ use App\Auth\MerchantJwtGuard;
 use App\Dao\MerchantUserDao;
 use App\Model\Merchant;
 use App\Model\MerchantUser;
+use App\Model\SecurityLog;
 use App\Service\AbstractService;
 use App\Service\Auth\LoginLockoutService;
+use App\Service\Security\SecurityLogService;
 use App\Service\Sms\SmsCodeService;
 use App\Service\Sms\SmsService;
 use App\Support\Mobile;
@@ -34,7 +36,8 @@ use Hyperf\Redis\Redis;
  * - 账号自己开启了登录短信验证（要先绑定手机）并且平台启用了短信时，登录分两步：账号密码对了先发验证码、
  *   返回一个 10 分钟有效的 ticket，再用 ticket + 验证码换 token（verifyLogin）。平台没启用短信时只校验密码，
  *   避免短信出问题时所有人都登不上；
- * - 绑定 / 修改手机要输登录密码，并且收到新手机号的验证码；开关登录短信验证要输登录密码。
+ * - 绑定 / 修改手机要输登录密码，并且收到新手机号的验证码；开关登录短信验证要输登录密码；
+ * - 登录成功 / 失败、改密码、绑定手机、开关登录短信验证都记安全日志（SecurityLogService，带 IP 和 User-Agent）。
  */
 class MerchantAuthService extends AbstractService
 {
@@ -63,6 +66,9 @@ class MerchantAuthService extends AbstractService
     #[Inject]
     protected LoginLockoutService $loginLockoutService;
 
+    #[Inject]
+    protected SecurityLogService $securityLogService;
+
     /**
      * 不用短信验证时直接返回 token；要验证时返回 ticket（验证码已发出，code_sent 为 false 表示 60 秒内刚发过，没再发）。
      *
@@ -73,13 +79,15 @@ class MerchantAuthService extends AbstractService
         $username = trim($username);
         $user = $username === '' ? null : $this->merchantUserDao->findByUsername($username);
         if (! $user) {
+            $this->securityLogService->loginFailed(SecurityLog::PORTAL_MERCHANT, null, $username, null, SecurityLog::REASON_UNKNOWN_USER);
             // 账号不存在 / 密码错误共用同一条消息，防止枚举出哪些账号存在
             throw new HttpException(401, self::GENERIC_LOGIN_FAIL_MESSAGE);
         }
         if (! password_verify($password, $user->password)) {
-            $this->loginLockoutService->recordFailure($this->merchantUserDao, $user->id, $user->username, 'merchant', '平台');
+            $this->loginLockoutService->recordFailure($this->merchantUserDao, $user->id, $user->username, 'merchant', '平台', $user->merchant_id);
         }
         if ($user->status !== 'active') {
+            $this->securityLogService->loginFailed(SecurityLog::PORTAL_MERCHANT, $user->id, $user->username, $user->merchant_id, SecurityLog::REASON_DISABLED);
             throw new HttpException(403, '账号已被禁用，请联系平台');
         }
         // 密码对了就清零（要短信验证的，验证码错不算密码错）
@@ -90,6 +98,7 @@ class MerchantAuthService extends AbstractService
         }
         $ticket = bin2hex(random_bytes(24));
         $this->redis->setex($this->ticketKey($ticket), self::TICKET_TTL_SECONDS, (string) json_encode(['user_id' => $user->id, 'mobile' => $user->mobile]));
+        $this->securityLogService->record(SecurityLog::PORTAL_MERCHANT, SecurityLog::EVENT_LOGIN_SMS_SENT, $user->id, $user->username, $user->merchant_id);
 
         return ['need_sms' => true, 'ticket' => $ticket, 'mobile' => Mobile::mask((string) $user->mobile), 'code_sent' => $this->sendLoginCode((string) $user->mobile)];
     }
@@ -115,7 +124,12 @@ class MerchantAuthService extends AbstractService
     public function verifyLogin(string $ticket, string $code): array
     {
         [$user, $mobile] = $this->ticket($ticket);
-        $this->smsCodeService->verify(SmsCodeService::SCENE_LOGIN, $mobile, $code);
+        try {
+            $this->smsCodeService->verify(SmsCodeService::SCENE_LOGIN, $mobile, $code);
+        } catch (HttpException $e) {
+            $this->securityLogService->loginFailed(SecurityLog::PORTAL_MERCHANT, $user->id, $user->username, $user->merchant_id, SecurityLog::REASON_SMS_CODE);
+            throw $e;
+        }
         $this->redis->del($this->ticketKey($ticket));
 
         return $this->finishLogin($user);
@@ -158,6 +172,7 @@ class MerchantAuthService extends AbstractService
 
         $hash = password_hash($newPassword, PASSWORD_BCRYPT);
         $this->merchantUserDao->update($user->id, ['password' => $hash]);
+        $this->securityLogService->record(SecurityLog::PORTAL_MERCHANT, SecurityLog::EVENT_CHANGE_PASSWORD, $user->id, $user->username, $user->merchant_id);
 
         return ['token' => $this->tokenGuard->issue($user->id, $hash)];
     }
@@ -185,6 +200,10 @@ class MerchantAuthService extends AbstractService
         $this->smsCodeService->verify(SmsCodeService::SCENE_BIND, $mobile, $code);
         $before = $user->mobile;
         $this->merchantUserDao->update($user->id, ['mobile' => $mobile]);
+        $this->securityLogService->record(SecurityLog::PORTAL_MERCHANT, SecurityLog::EVENT_BIND_MOBILE, $user->id, $user->username, $user->merchant_id, [
+            'before' => $before === null ? null : Mobile::mask($before),
+            'after' => Mobile::mask($mobile),
+        ]);
         $this->loggerFactory->get('merchant')->info($before === null ? '商户账号绑定手机' : '商户账号修改绑定手机', [
             'merchant_id' => $user->merchant_id,
             'user' => $user->username,
@@ -217,6 +236,7 @@ class MerchantAuthService extends AbstractService
         }
         if ($enabled !== (bool) $user->sms_login_enabled) {
             $this->merchantUserDao->update($user->id, ['sms_login_enabled' => $enabled]);
+            $this->securityLogService->record(SecurityLog::PORTAL_MERCHANT, SecurityLog::EVENT_SET_SMS_LOGIN, $user->id, $user->username, $user->merchant_id, ['enabled' => $enabled]);
             $this->loggerFactory->get('merchant')->info($enabled ? '商户账号开启登录短信验证' : '商户账号关闭登录短信验证', [
                 'merchant_id' => $user->merchant_id,
                 'user' => $user->username,
@@ -271,6 +291,7 @@ class MerchantAuthService extends AbstractService
     {
         $user->last_login_at = Carbon::now();
         $user->save();
+        $this->securityLogService->record(SecurityLog::PORTAL_MERCHANT, SecurityLog::EVENT_LOGIN_SUCCESS, $user->id, $user->username, $user->merchant_id);
 
         return ['token' => $this->tokenGuard->issue($user->id, $user->password), 'username' => $user->username];
     }

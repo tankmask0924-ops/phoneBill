@@ -140,6 +140,12 @@ const router = createRouter({
           component: () => import('@/views/system/OperationLogView.vue'),
           meta: { title: '操作日志' },
         },
+        {
+          path: 'system/security-logs',
+          name: 'security-logs',
+          component: () => import('@/views/system/SecurityLogView.vue'),
+          meta: { title: '登录日志' },
+        },
       ],
     },
     { path: '/:pathMatch(.*)*', redirect: '/' },

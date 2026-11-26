@@ -17,6 +17,7 @@ use App\Model\AdminPermission;
 use App\Model\AdminRole;
 use App\Model\AdminRolePermission;
 use App\Model\AdminUser;
+use App\Model\SecurityLog;
 use App\Service\Admin\AdminBootstrapService;
 
 use function Hyperf\Support\make;
@@ -34,6 +35,7 @@ trait CreatesAdmins
     {
         if ($this->adminUserIds !== []) {
             AdminOperationLog::whereIn('admin_user_id', $this->adminUserIds)->delete();
+            SecurityLog::where('portal', SecurityLog::PORTAL_ADMIN)->whereIn('user_id', $this->adminUserIds)->delete();
         }
         AdminUser::destroy($this->adminUserIds);
         foreach ($this->roleIds as $id) {

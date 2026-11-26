@@ -16,6 +16,7 @@ use App\Model\Merchant;
 use App\Model\MerchantUser;
 use App\Model\Order;
 use App\Model\Product;
+use App\Model\SecurityLog;
 use App\Model\SystemSetting;
 use App\Service\Order\OrderDispatcher;
 use App\Service\Setting\OrderSettingService;
@@ -135,6 +136,9 @@ class MerchantBatchOrderTest extends HttpTestCase
         $order = Order::where('order_no', $ok['order_no'])->first();
         $this->assertSame([$merchant->id, $first, $batch['batch_no'] . '-001'], [$order->merchant_id, $order->mobile, $order->merchant_order_no]);
         $this->assertSame([$order->id], array_column($this->dispatcher->submits, 'order_id'), '建单后照常推提交任务');
+        $log = SecurityLog::where('merchant_id', $merchant->id)->where('event', SecurityLog::EVENT_BATCH_ORDER)->first();
+        $this->assertEquals(['batch_no' => $batch['batch_no'], 'product_code' => $product->code, 'total' => 2, 'success' => 1], $log->detail, '批量下单留痕，带 IP');
+        $this->assertSame('127.0.0.1', $log->ip);
 
         // 同一批再提交一次（比如超时后重点）：返回之前的订单，不重复扣款
         $again = $this->body($this->jsonRequest('POST', '/merchant/batch-orders', $token, $batch));

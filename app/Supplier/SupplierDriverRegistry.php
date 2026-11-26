@@ -27,10 +27,14 @@ use App\Supplier\Driver\YbDriver;
 use App\Supplier\Driver\YingyetingDriver;
 use App\Supplier\Driver\ZhixinDriver;
 use App\Supplier\Driver\ZhongkongDriver;
+use Hyperf\Contract\ConfigInterface;
 use Psr\Container\ContainerInterface;
 
 /**
  * 已登记的供应商驱动，按 suppliers.driver 找到对应的实现。
+ *
+ * 模拟驱动 MockDriver 只在 `SUPPLIER_MOCK_ENABLED=true`（config supplier.mock_enabled）时可用：关着时后台选不到、
+ * 建不了；已有的 mock 供应商提交时按「调用异常」处理（处理中、转人工），不会被当成充值成功。
  */
 class SupplierDriverRegistry
 {
@@ -66,7 +70,10 @@ class SupplierDriverRegistry
      */
     public function all(): array
     {
-        return array_map(fn (string $class) => $this->container->get($class), self::DRIVERS);
+        $mockEnabled = (bool) $this->container->get(ConfigInterface::class)->get('supplier.mock_enabled', false);
+        $classes = array_values(array_filter(self::DRIVERS, static fn (string $class) => $mockEnabled || $class !== MockDriver::class));
+
+        return array_map(fn (string $class) => $this->container->get($class), $classes);
     }
 
     public function find(string $code): ?SupplierDriverInterface
