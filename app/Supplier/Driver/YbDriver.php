@@ -18,14 +18,17 @@ use App\Supplier\RechargeRequest;
 use App\Supplier\RechargeResult;
 use App\Supplier\SupplierDriverInterface;
 use Hyperf\Di\Annotation\Inject;
+use Hyperf\Support\Network;
 use Psr\Http\Message\ServerRequestInterface;
 use RuntimeException;
+use Throwable;
 
 /**
  * YB 接口，文档见 docs/YB接口文档-2026.md（最后是对接方式和结果判定表）。只接话费：下单、查单、余额、回调；不接撤单。
  *
  * - 所有接口同一个地址，表单 POST，按 Method 区分；OrderNo 传提交单号 attempt_no，ProductID 传供应商商品编码，
- *   Account 传手机号，BuyNum 固定 1，ChargeWay / Game / Zone / Server 传空串，CustomerSalePrice 固定传 0（不让上游校验进价）；
+ *   Account 传手机号，BuyNum 固定 1，ChargeWay / Game / Zone / Server 传空串，CustomerSalePrice 固定传 0（不让上游校验进价），
+ *   CustomerIp 按文档传服务器 IP，自动取本机 IP，不用配置；
  * - 签名：参数按名 ASCII 升序拼 k=v&...（值不做 URL 编码，空值也参与），末尾拼 &key=，按 GB2312 编码后 md5 小写；
  * - 下单 Code=success 按 iOrderStatus 判断：1 成功、-1 失败、其他处理中；Code=fail 判失败换下一家，
  *   但 Msg 是「订单重复提交」时上游已有这笔单，按处理中等回调 / 查单；
@@ -82,7 +85,6 @@ class YbDriver implements SupplierDriverInterface
             ['key' => 'api_url', 'label' => '接口地址', 'type' => 'text', 'required' => true, 'placeholder' => '接口账户信息里的接口地址（完整 URL）'],
             ['key' => 'customer_id', 'label' => '客户编号', 'type' => 'text', 'required' => true],
             ['key' => 'key', 'label' => '密钥', 'type' => 'secret', 'required' => true],
-            ['key' => 'customer_ip', 'label' => '本站 IP', 'type' => 'text', 'required' => true, 'placeholder' => '本站服务器出口 IP，下单时作为 CustomerIp 传给上游'],
         ];
     }
 
@@ -98,7 +100,7 @@ class YbDriver implements SupplierDriverInterface
             'Server' => '',
             'OrderNo' => $request->attemptNo,
             'ReturnUrl' => $request->config['notify_url'] ?? '',
-            'CustomerIp' => $request->config['customer_ip'] ?? '',
+            'CustomerIp' => $this->localIp(),
             'CustomerSalePrice' => self::CUSTOMER_SALE_PRICE,
         ], 10.0);
         $body = $this->decode($response['body']);
@@ -216,6 +218,18 @@ class YbDriver implements SupplierDriverInterface
         $pairs[] = 'key=' . $key;
 
         return md5((string) mb_convert_encoding(implode('&', $pairs), self::SIGN_ENCODING, 'UTF-8'));
+    }
+
+    /**
+     * 下单必填的 CustomerIp（文档：可传服务器 IP），取本机网卡 IP，取不到传 127.0.0.1。
+     */
+    private function localIp(): string
+    {
+        try {
+            return Network::ip();
+        } catch (Throwable) {
+            return '127.0.0.1';
+        }
     }
 
     /**

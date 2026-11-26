@@ -616,7 +616,7 @@ app/Supplier/
 
 上游文档 `docs/YB接口文档-2026.md`（最后是对接方式和结果判定表）：下单、查单、余额、结果回调，所有接口同一个地址、表单 POST、按 `Method` 区分，返回 JSON。只接话费，不接撤单，没有商品列表接口。
 
-- 接口参数：接口地址（完整 URL）、客户编号（`CustomerID`）、密钥、本站 IP（本站服务器出口 IP，作为 `CustomerIp` 传）；回调地址自动生成，每单随下单传 `ReturnUrl`（见 4.2）。
+- 接口参数：接口地址（完整 URL）、客户编号（`CustomerID`）、密钥；`CustomerIp` 按文档传服务器 IP，自动取本机 IP，不用配置；回调地址自动生成，每单随下单传 `ReturnUrl`（见 4.2）。
 - 字段对应：`OrderNo` = 提交单号 `attempt_no`，`ProductID` = 供应商商品编码，`Account` = 手机号，`BuyNum` 固定 `1`，`ChargeWay` / `Game` / `Zone` / `Server` 传空串，`CustomerSalePrice` 固定传 `0`（不让上游校验进价）。上游 `SaleOrderNo`（查单 / 回调的 `Temp1`）存为供应商订单号；查单返回的 `OrderNo` 是我们的提交单号，对不上不采用。
 - 签名：参数按名 ASCII 升序拼 `k=v&...`（值不做 URL 编码，空值也参与），末尾拼 `&key=密钥`，按 GB2312 编码后 md5 小写。回调按 `md5(OrderNo=&OrderStatus=&key=)` 验签（不区分大小写），JSON 和表单都能收，通过回 `SUCCESS`。
 - 结果判定：下单 `Code=success` 按 `iOrderStatus`：`1` 成功、`-1` 失败、其他处理中；`Code=fail` 判失败换下一家，但 `Msg` 是「订单重复提交」时按处理中（文档要求不能直接判失败）；没拿到返回（网络异常、HTTP 出错、返回无法解析或没有 `Code`）立即转异常并标为人工处理单（见 2.5）。查单 / 回调 `1` 成功、`-1` 失败、其他处理中；查单「无该订单信息」按文档：提交（`order_attempts.submitted_at`，经 `RechargeRequest::$submittedAt` 传给驱动）不满 5 分钟只记录，满 5 分钟仍查不到判失败——处理中的换下一家，超时的直接失败退款，人工处理单照 2.5 只记录（2026-11-26 定）。

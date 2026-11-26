@@ -29,6 +29,7 @@ use Hyperf\Context\ApplicationContext;
 use Hyperf\Contract\ApplicationInterface;
 use Hyperf\Di\Container;
 use Hyperf\Di\Definition\DefinitionSourceFactory;
+use Hyperf\Support\Network;
 use Hyperf\Testing\Client;
 use HyperfTest\Cases\Admin\CreatesCatalog;
 use HyperfTest\HttpTestCase;
@@ -52,7 +53,6 @@ class YbDriverTest extends HttpTestCase
         'api_url' => 'http://yb.test/api.aspx',
         'customer_id' => '10789',
         'key' => 'yb_key',
-        'customer_ip' => '1.2.3.4',
         'notify_url' => 'https://pb.test/notify/supplier/yb',
     ];
 
@@ -100,11 +100,12 @@ class YbDriverTest extends HttpTestCase
         $expected = [
             'Method' => 'Product.ApiBuyYB', 'CustomerID' => '10789', 'ProductID' => '12', 'BuyNum' => '1', 'Account' => '13800138000',
             'ChargeWay' => '', 'Game' => '', 'Zone' => '', 'Server' => '', 'OrderNo' => 'A0001',
-            'ReturnUrl' => 'https://pb.test/notify/supplier/yb', 'CustomerIp' => '1.2.3.4', 'CustomerSalePrice' => '0',
+            'ReturnUrl' => 'https://pb.test/notify/supplier/yb', 'CustomerIp' => Network::ip(), 'CustomerSalePrice' => '0',
         ];
         $this->assertSame($expected + ['Sign' => YbDriver::sign($expected, 'yb_key')], $form);
+        $this->assertNotSame('', $form['CustomerIp']);
         $this->assertSame(
-            md5('Account=13800138000&BuyNum=1&ChargeWay=&CustomerID=10789&CustomerIp=1.2.3.4&CustomerSalePrice=0&Game=&Method=Product.ApiBuyYB&OrderNo=A0001&ProductID=12&ReturnUrl=https://pb.test/notify/supplier/yb&Server=&Zone=&key=yb_key'),
+            md5('Account=13800138000&BuyNum=1&ChargeWay=&CustomerID=10789&CustomerIp=' . Network::ip() . '&CustomerSalePrice=0&Game=&Method=Product.ApiBuyYB&OrderNo=A0001&ProductID=12&ReturnUrl=https://pb.test/notify/supplier/yb&Server=&Zone=&key=yb_key'),
             $form['Sign']
         );
         $this->assertStringNotContainsString('yb_key', (string) $result->request);
