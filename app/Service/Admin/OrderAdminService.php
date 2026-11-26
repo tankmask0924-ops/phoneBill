@@ -220,7 +220,6 @@ class OrderAdminService extends AbstractService
             'notify_logs' => $this->notifyLogDao->newQuery()->where('order_id', $order->id)->orderBy('id')->get()
                 ->map(static fn (OrderNotifyLog $l) => [
                     'attempt_no' => $l->attempt_no,
-                    'url' => $l->url,
                     'http_status' => $l->http_status,
                     'response' => $l->response,
                     'success' => $l->success,
@@ -610,7 +609,7 @@ class OrderAdminService extends AbstractService
                 default => null,
             },
             'fail_reason' => $o->fail_reason,
-            'notify_url' => $o->notify_url,
+            // 商户回调地址（notify_url）不返回给前端
             'notify_status' => $o->notify_status,
             'notified_at' => $o->notified_at?->toDateTimeString(),
             // 人工处理单：提交时接口异常，查单结果只记录；上游回调明确成功 / 失败时交回正常流程

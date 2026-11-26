@@ -78,7 +78,8 @@ class OrderControllerTest extends HttpTestCase
         [$merchant, $product, $sp] = $this->fixture();
         $success = $this->createOrder($merchant, $product, $sp, Order::STATUS_SUCCESS);
         $abnormal = $this->createOrder($merchant, $product, $sp, Order::STATUS_ABNORMAL);
-        $success->update(['city' => '广州']);
+        $success->update(['city' => '广州', 'notify_url' => 'https://merchant.example.test/own-notify']);
+        OrderNotifyLog::create(['order_id' => $success->id, 'attempt_no' => 1, 'url' => 'https://merchant.example.test/own-notify', 'payload' => '{}', 'http_status' => 200, 'response' => 'success', 'success' => true, 'created_at' => date('Y-m-d H:i:s')]);
 
         $all = $this->body($this->jsonRequest('GET', "/admin/orders?merchant_id={$merchant->id}", $token));
         $this->assertSame([$abnormal->id, $success->id], array_column($all['data'], 'id'), '新的在前');
@@ -98,6 +99,12 @@ class OrderControllerTest extends HttpTestCase
         $this->assertCount(1, $detail['attempts']);
         $this->assertSame($sp->name, $detail['attempts'][0]['supplier_product_name']);
         $this->assertSame(['order_pay'], array_column($detail['balance_logs'], 'type'));
+        // 商户回调地址不返回给前端：列表、详情、通知记录都不带
+        $this->assertArrayNotHasKey('notify_url', $all['data'][1]);
+        $this->assertArrayNotHasKey('notify_url', $detail);
+        $this->assertCount(1, $detail['notify_logs']);
+        $this->assertArrayNotHasKey('url', $detail['notify_logs'][0]);
+        $this->assertStringNotContainsString('own-notify', json_encode($detail));
 
         $csv = (string) $this->jsonRequest('GET', "/admin/orders/export?merchant_id={$merchant->id}", $token)->getBody();
         $this->assertStringStartsWith("\xEF\xBB\xBF平台订单号", $csv);

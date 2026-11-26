@@ -35,7 +35,6 @@ export interface Order {
   /** 为什么标异常，没标时为 null */
   abnormal_reason: string | null
   fail_reason: string | null
-  notify_url: string | null
   notify_status: string
   notified_at: string | null
   /** 人工处理单：提交时接口异常，查单结果只记录；上游回调明确成功 / 失败时交回正常流程 */
@@ -97,7 +96,6 @@ export interface OrderDetail extends Order {
   attempts: OrderAttempt[]
   notify_logs: {
     attempt_no: number
-    url: string
     http_status: number | null
     response: string | null
     success: boolean
