@@ -34,6 +34,8 @@ final class RechargeRequest
         public readonly ?string $supplierOrderNo = null,
         /** 这次提交的成本价（元，供应商商品的进价）；下单时要传结算价的供应商用 */
         public readonly ?string $costPrice = null,
+        /** 这次提交的时间（秒级时间戳，order_attempts.submitted_at）；查单时按提交多久判断结果的供应商用 */
+        public readonly ?int $submittedAt = null,
     ) {
     }
 }

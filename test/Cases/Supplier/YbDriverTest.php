@@ -88,6 +88,7 @@ class YbDriverTest extends HttpTestCase
     public function testRechargeSendsSignedFormAndMapsResults()
     {
         $this->respond(['Status' => ['Code' => 'success', 'Msg' => '订单已提交，正在处理中'], 'Data' => [['iOrderStatus' => '3', 'OrderID' => 'x', 'SaleOrderNo' => 'S001', 'SaleDate' => '2026-11-26 10:00:00']]]);
+        // 有成本价也固定传 0
         $result = $this->driver()->recharge($this->request(null, '98.80'));
 
         $this->assertSame(RechargeStatus::Processing, $result->status);
@@ -99,18 +100,14 @@ class YbDriverTest extends HttpTestCase
         $expected = [
             'Method' => 'Product.ApiBuyYB', 'CustomerID' => '10789', 'ProductID' => '12', 'BuyNum' => '1', 'Account' => '13800138000',
             'ChargeWay' => '', 'Game' => '', 'Zone' => '', 'Server' => '', 'OrderNo' => 'A0001',
-            'ReturnUrl' => 'https://pb.test/notify/supplier/yb', 'CustomerIp' => '1.2.3.4', 'CustomerSalePrice' => '98.80',
+            'ReturnUrl' => 'https://pb.test/notify/supplier/yb', 'CustomerIp' => '1.2.3.4', 'CustomerSalePrice' => '0',
         ];
         $this->assertSame($expected + ['Sign' => YbDriver::sign($expected, 'yb_key')], $form);
         $this->assertSame(
-            md5('Account=13800138000&BuyNum=1&ChargeWay=&CustomerID=10789&CustomerIp=1.2.3.4&CustomerSalePrice=98.80&Game=&Method=Product.ApiBuyYB&OrderNo=A0001&ProductID=12&ReturnUrl=https://pb.test/notify/supplier/yb&Server=&Zone=&key=yb_key'),
+            md5('Account=13800138000&BuyNum=1&ChargeWay=&CustomerID=10789&CustomerIp=1.2.3.4&CustomerSalePrice=0&Game=&Method=Product.ApiBuyYB&OrderNo=A0001&ProductID=12&ReturnUrl=https://pb.test/notify/supplier/yb&Server=&Zone=&key=yb_key'),
             $form['Sign']
         );
         $this->assertStringNotContainsString('yb_key', (string) $result->request);
-
-        // 没有成本价传 0
-        $this->driver()->recharge($this->request());
-        $this->assertSame('0', $this->http->requests[1]['payload']['CustomerSalePrice']);
 
         // iOrderStatus 1 直接成功、-1 直接失败（都没有回调）
         $this->respond(['Status' => ['Code' => 'success', 'Msg' => '充值成功'], 'Data' => [['iOrderStatus' => 1, 'SaleOrderNo' => 'S002']]]);
@@ -165,24 +162,28 @@ class YbDriverTest extends HttpTestCase
         $this->respond(['Status' => ['Code' => 'success', 'Msg' => '查询成功'], 'Data' => [['Status' => '-1', 'OrderNo' => 'A0001', 'ProcessNote' => '号码已停机']]]);
         $this->assertSame('号码已停机', $this->driver()->query($this->request())->message);
 
-        // OrderNo 是平台单号也认
-        $this->respond(['Status' => ['Code' => 'success', 'Msg' => '查询成功'], 'Data' => [['Status' => '1', 'OrderNo' => 'S001']]]);
-        $this->assertSame(RechargeStatus::Success, $this->driver()->query($this->request('S001'))->status);
-
-        // 无该订单信息：只记录，处理中
+        // 无该订单信息：提交不满 5 分钟（或不知道提交时间）只记录，处理中
         $this->respond(['Status' => ['Code' => 'fail', 'Msg' => '无该订单信息']]);
-        $result = $this->driver()->query($this->request());
-        $this->assertSame(RechargeStatus::Processing, $result->status);
-        $this->assertStringContainsString('无该订单', $result->message);
+        foreach ([time() - 299, null] as $submittedAt) {
+            $result = $this->driver()->query($this->request(null, null, $submittedAt));
+            $this->assertSame(RechargeStatus::Processing, $result->status);
+            $this->assertStringContainsString('无该订单', $result->message);
+        }
+        // 满 5 分钟仍查不到：失败
+        $result = $this->driver()->query($this->request('S001', null, time() - 300));
+        $this->assertSame(RechargeStatus::Failed, $result->status);
+        $this->assertSame('S001', $result->supplierOrderNo);
+        $this->assertStringContainsString('无该订单信息', $result->message);
 
-        // 其他报错、单号对不上、没有状态、无法解析：处理中
+        // 其他报错、单号对不上（平台单号也不认）、没有状态、无法解析：处理中
         foreach ([
             ['Status' => ['Code' => 'fail', 'Msg' => '请求非法，签名错误']],
             ['Status' => ['Code' => 'success', 'Msg' => '查询成功'], 'Data' => [['Status' => '1', 'OrderNo' => 'OTHER']]],
+            ['Status' => ['Code' => 'success', 'Msg' => '查询成功'], 'Data' => [['Status' => '1', 'OrderNo' => 'S001']]],
             ['Status' => ['Code' => 'success', 'Msg' => '查询成功'], 'Data' => []],
         ] as $body) {
             $this->respond($body);
-            $this->assertSame(RechargeStatus::Processing, $this->driver()->query($this->request())->status, json_encode($body));
+            $this->assertSame(RechargeStatus::Processing, $this->driver()->query($this->request('S001', null, time() - 600))->status, json_encode($body));
         }
         $this->http->responses = [['status' => 502, 'body' => 'Bad Gateway']];
         $this->assertSame(RechargeStatus::Processing, $this->driver()->query($this->request())->status);
@@ -248,6 +249,28 @@ class YbDriverTest extends HttpTestCase
         $this->assertSame(Order::STATUS_FAILED, Order::find($order->id)->status);
     }
 
+    public function testQueryNotFoundFailsFiveMinutesAfterSubmit()
+    {
+        [$merchant, $product, $mobile] = $this->scenario();
+
+        $this->respond(['Status' => ['Code' => 'success', 'Msg' => '订单已提交，正在处理中'], 'Data' => [['iOrderStatus' => '3', 'SaleOrderNo' => 'S300']]]);
+        $order = $this->placeOrder($merchant, $product, $mobile);
+        $this->process()->submit($order->id);
+        $attempt = OrderAttempt::where('order_id', $order->id)->first();
+
+        // 刚提交：查不到只记录
+        $this->respond(['Status' => ['Code' => 'fail', 'Msg' => '无该订单信息']]);
+        $this->process()->queryAttempt(OrderAttempt::find($attempt->id));
+        $this->assertSame(OrderAttempt::STATUS_PROCESSING, OrderAttempt::find($attempt->id)->status);
+
+        // 提交时间由网关从 order_attempts.submitted_at 带给驱动：满 5 分钟仍查不到判失败
+        OrderAttempt::where('id', $attempt->id)->update(['submitted_at' => date('Y-m-d H:i:s', time() - 360)]);
+        $this->process()->queryAttempt(OrderAttempt::find($attempt->id));
+        $this->assertSame(OrderAttempt::STATUS_FAILED, OrderAttempt::find($attempt->id)->status);
+        $this->process()->submit($order->id);
+        $this->assertSame(Order::STATUS_FAILED, Order::find($order->id)->status);
+    }
+
     /**
      * @return array<string, string>
      */
@@ -309,9 +332,9 @@ class YbDriverTest extends HttpTestCase
         return Order::where('order_no', $body['data']['order_no'])->first();
     }
 
-    private function request(?string $supplierOrderNo = null, ?string $costPrice = null): RechargeRequest
+    private function request(?string $supplierOrderNo = null, ?string $costPrice = null, ?int $submittedAt = null): RechargeRequest
     {
-        return new RechargeRequest('A0001', '13800138000', 100, 'cmcc', '广东', '12', self::CONFIG, $supplierOrderNo, $costPrice);
+        return new RechargeRequest('A0001', '13800138000', 100, 'cmcc', '广东', '12', self::CONFIG, $supplierOrderNo, $costPrice, $submittedAt);
     }
 
     private function driver(): YbDriver

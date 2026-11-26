@@ -25,12 +25,13 @@ use RuntimeException;
  * YB 接口，文档见 docs/YB接口文档-2026.md（最后是对接方式和结果判定表）。只接话费：下单、查单、余额、回调；不接撤单。
  *
  * - 所有接口同一个地址，表单 POST，按 Method 区分；OrderNo 传提交单号 attempt_no，ProductID 传供应商商品编码，
- *   Account 传手机号，BuyNum 固定 1，ChargeWay / Game / Zone / Server 传空串，CustomerSalePrice 传这次提交的成本价（没有时传 0）；
+ *   Account 传手机号，BuyNum 固定 1，ChargeWay / Game / Zone / Server 传空串，CustomerSalePrice 固定传 0（不让上游校验进价）；
  * - 签名：参数按名 ASCII 升序拼 k=v&...（值不做 URL 编码，空值也参与），末尾拼 &key=，按 GB2312 编码后 md5 小写；
  * - 下单 Code=success 按 iOrderStatus 判断：1 成功、-1 失败、其他处理中；Code=fail 判失败换下一家，
  *   但 Msg 是「订单重复提交」时上游已有这笔单，按处理中等回调 / 查单；
  *   网络异常、HTTP 出错、返回无法解析（没有拿到返回值）按接口异常处理，订单立即转异常人工处理；
- * - 查单 Status 1 成功、-1 失败、其他处理中；「无该订单信息」只记录，订单状态不动；
+ * - 查单 Status 1 成功、-1 失败、其他处理中；返回的 OrderNo 必须是提交单号；
+ *   「无该订单信息」按文档：提交不满 5 分钟只记录，满 5 分钟仍查不到判失败（上游没收到这笔单）；
  * - 回调是 JSON，签名 md5(OrderNo=&OrderStatus=&key=)，OrderStatus 1 / -1 才处理订单，验签通过回 SUCCESS。
  */
 class YbDriver implements SupplierDriverInterface
@@ -46,8 +47,14 @@ class YbDriver implements SupplierDriverInterface
     /** 下单返回这个信息时上游已有这笔单，不能判失败 */
     private const MSG_DUPLICATE = '订单重复提交';
 
-    /** 查单时上游查不到：只记录，订单状态不动 */
+    /** 查单时上游查不到：提交满 NOT_FOUND_FAIL_AFTER 秒仍查不到判失败，之前只记录 */
     private const MSG_NOT_FOUND = '无该订单信息';
+
+    /** 文档：返回无该订单信息时过 5 分钟再查，还是这样就可以作失败处理 */
+    private const NOT_FOUND_FAIL_AFTER = 300;
+
+    /** 不让上游按进价拦单 */
+    private const CUSTOMER_SALE_PRICE = '0';
 
     private const STATUS_SUCCESS = '1';
 
@@ -75,7 +82,7 @@ class YbDriver implements SupplierDriverInterface
             ['key' => 'api_url', 'label' => '接口地址', 'type' => 'text', 'required' => true, 'placeholder' => '接口账户信息里的接口地址（完整 URL）'],
             ['key' => 'customer_id', 'label' => '客户编号', 'type' => 'text', 'required' => true],
             ['key' => 'key', 'label' => '密钥', 'type' => 'secret', 'required' => true],
-            ['key' => 'customer_ip', 'label' => '服务器 IP', 'type' => 'text', 'required' => true, 'placeholder' => '下单时作为 CustomerIp 传给上游，填本服务器出口 IP'],
+            ['key' => 'customer_ip', 'label' => '本站 IP', 'type' => 'text', 'required' => true, 'placeholder' => '本站服务器出口 IP，下单时作为 CustomerIp 传给上游'],
         ];
     }
 
@@ -92,7 +99,7 @@ class YbDriver implements SupplierDriverInterface
             'OrderNo' => $request->attemptNo,
             'ReturnUrl' => $request->config['notify_url'] ?? '',
             'CustomerIp' => $request->config['customer_ip'] ?? '',
-            'CustomerSalePrice' => $request->costPrice ?? '0',
+            'CustomerSalePrice' => self::CUSTOMER_SALE_PRICE,
         ], 10.0);
         $body = $this->decode($response['body']);
         if ($body === null) {
@@ -121,16 +128,21 @@ class YbDriver implements SupplierDriverInterface
         [$sent, $response] = $this->call($request->config, self::METHOD_QUERY, ['OrderNo' => $request->attemptNo]);
         $body = $this->decode($response['body']);
         if ($body !== null && $body['code'] !== self::CODE_OK && str_contains($body['msg'], self::MSG_NOT_FOUND)) {
-            return RechargeResult::processing($request->supplierOrderNo, '查单：上游无该订单，只记录：' . $this->describe($body, $response), $sent, $response['body']);
+            // 不知道提交时间时不判失败
+            if ($request->submittedAt !== null && time() - $request->submittedAt >= self::NOT_FOUND_FAIL_AFTER) {
+                return RechargeResult::failed('提交 5 分钟后上游仍无该订单信息，按失败处理', $request->supplierOrderNo, $sent, $response['body']);
+            }
+
+            return RechargeResult::processing($request->supplierOrderNo, '查单：上游无该订单，提交未满 5 分钟，只记录：' . $this->describe($body, $response), $sent, $response['body']);
         }
         $data = $body !== null && $body['code'] === self::CODE_OK ? $body['data'] : [];
         $status = $this->scalar($data, 'Status');
         if ($status === null) {
             return RechargeResult::processing($request->supplierOrderNo, '查单未拿到明确结果：' . $this->describe($body, $response), $sent, $response['body']);
         }
-        // 文档说 OrderNo 是我们的单号，示例里却像平台单号：两个都认，对不上才不采用
+        // OrderNo 是我们的提交单号（已和上游确认），对不上不采用
         $returned = $this->scalar($data, 'OrderNo');
-        if ($returned !== null && $returned !== $request->attemptNo && $returned !== $request->supplierOrderNo) {
+        if ($returned !== null && $returned !== $request->attemptNo) {
             return RechargeResult::processing($request->supplierOrderNo, '查单返回的订单号对不上：' . $returned, $sent, $response['body']);
         }
         $orderNo = $this->scalar($data, 'Temp1') ?? $request->supplierOrderNo;
