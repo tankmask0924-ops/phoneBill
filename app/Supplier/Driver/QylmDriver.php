@@ -26,14 +26,17 @@ use RuntimeException;
 
 /**
  * QYLM 卡站平台代理端下单接口，文档见 docs/QYLM开放接口对接文档-代理端下单-V1.0.md（最后是对接方式和结果判定表）。
- * 只接话费：商品列表、下单、查单、余额；上游没有回调，结果靠查单。
+ * 只接话费：商品列表、下单、查单、余额、结果回调；回调优先，查单兜底。
  *
- * - product_id 传供应商商品编码（上游商品 ID），params 传手机号；上游没有接入方单号，只能按它返回的 order_no 查单；
+ * - product_id 传供应商商品编码（上游商品 ID），params 传手机号，notify_url 传自动生成的回调地址；
+ *   上游没有接入方单号，只能按它返回的 order_no 查单、对回调；
  * - 鉴权放在请求头：X-Agent-Id、秒级 X-Timestamp、X-Nonce、X-Sign = hmac_sha256(agent_id\nMETHOD\nURI\ntimestamp\nnonce\nraw_body)，十六进制小写；
  * - 下单 code=0 且带 order_no 算受理；上游有返回、code 是别的（401 签名、404 商品、422 参数 / 余额不足等）一律判失败换下一家；
  *   网络异常、返回无法解析（没有拿到返回值），或说成功却没给 order_no（查不了单）按接口异常处理，订单立即转异常人工处理；
  * - 查单 success 成功；failed / cancelled / refunded / unpaid 失败（上游失败会自动退款）；partial_refund 部分退款不判结果，留给人工核实；
- *   404 订单不存在只记录：单号是上游自己返回的，查不到不正常，不能判失败。
+ *   404 订单不存在只记录：单号是上游自己返回的，查不到不正常，不能判失败；
+ * - 回调只推终态，JSON：sign = hmac_sha256(timestamp\norder_no)，timestamp 和服务器相差超过 300 秒不收；
+ *   success 成功，failed / cancelled / refunded / unpaid 失败，其他不处理订单；验签通过回 success（2xx），不通过回 fail（HTTP 400，上游会重试）。
  */
 class QylmDriver implements SupplierDriverInterface, ProvidesUpstreamProducts
 {
@@ -55,6 +58,9 @@ class QylmDriver implements SupplierDriverInterface, ProvidesUpstreamProducts
 
     /** 部分退款：不能判成功也不能全额退款，留给人工核实 */
     private const STATUS_PARTIAL_REFUND = 'partial_refund';
+
+    /** 回调 timestamp 和服务器时间最多差 300 秒（文档建议，防重放） */
+    private const CALLBACK_MAX_SKEW = 300;
 
     /** 商品列表每页最多 100 条 */
     private const PRODUCT_PAGE_SIZE = 100;
@@ -90,6 +96,10 @@ class QylmDriver implements SupplierDriverInterface, ProvidesUpstreamProducts
     public function recharge(RechargeRequest $request): RechargeResult
     {
         $payload = ['product_id' => ctype_digit($request->externalCode) ? (int) $request->externalCode : $request->externalCode, 'params' => $request->mobile];
+        $notifyUrl = trim($request->config['notify_url'] ?? '');
+        if ($notifyUrl !== '') {
+            $payload['notify_url'] = $notifyUrl;
+        }
         $tradePassword = $request->config['trade_password'] ?? '';
         $body = (string) json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         // 原始报文里不留交易密码
@@ -150,11 +160,38 @@ class QylmDriver implements SupplierDriverInterface, ProvidesUpstreamProducts
     }
 
     /**
-     * 上游没有结果回调，结果以查单为准。
+     * 按文档第 07 章验签：sign = hex_lower(hmac_sha256(timestamp + "\n" + order_no, 接口 KEY))，并校验 timestamp 在 300 秒内。
+     * 回调不带我们的单号，按上游 order_no 找回提交。
      */
     public function parseCallback(ServerRequestInterface $request, array $config): CallbackResult
     {
-        return new CallbackResult(false, 'fail');
+        $raw = (string) $request->getBody();
+        $params = json_decode($raw, true);
+        if (! is_array($params)) {
+            $params = $request->getParsedBody();
+        }
+        $params = is_array($params) ? array_map(static fn ($v) => is_scalar($v) ? (string) $v : '', $params) : [];
+        $orderNo = $params['order_no'] ?? '';
+        $timestamp = $params['timestamp'] ?? '';
+        $given = strtolower($params['sign'] ?? '');
+        $apiKey = $config['api_key'] ?? '';
+        if ($orderNo === '' || ! ctype_digit($timestamp) || $given === '' || $apiKey === ''
+            || ! hash_equals(self::callbackSign($timestamp, $orderNo, $apiKey), $given)
+            || abs(time() - (int) $timestamp) > self::CALLBACK_MAX_SKEW) {
+            return new CallbackResult(false, 'fail');
+        }
+        unset($params['sign']);
+        $raw = (string) json_encode($params, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $status = $params['status'] ?? '';
+        $message = trim($params['message'] ?? '');
+        $result = match (true) {
+            $status === self::STATUS_SUCCESS => RechargeResult::success($orderNo, null, null, $raw),
+            in_array($status, self::STATUS_FAILED, true) => RechargeResult::failed(($message === '' ? '上游充值失败' : $message) . '（' . $status . '）', $orderNo, null, $raw),
+            // 回调只推终态，表外的状态（含 partial_refund）不处理订单，留给查单 / 人工
+            default => RechargeResult::processing($orderNo, '回调 status 未确认：' . $status, null, $raw),
+        };
+
+        return new CallbackResult(true, 'success', null, $orderNo, $result);
     }
 
     public function balance(array $config): ?string
@@ -202,6 +239,14 @@ class QylmDriver implements SupplierDriverInterface, ProvidesUpstreamProducts
     public static function sign(string $agentId, string $method, string $uri, string $timestamp, string $nonce, string $body, string $apiKey): string
     {
         return hash_hmac('sha256', implode("\n", [$agentId, strtoupper($method), $uri, $timestamp, $nonce, $body]), $apiKey);
+    }
+
+    /**
+     * 按文档第 07 章计算回调签名：timestamp 和 order_no 用 \n 连接，接口 KEY 做 HMAC-SHA256，十六进制小写。
+     */
+    public static function callbackSign(string $timestamp, string $orderNo, string $apiKey): string
+    {
+        return hash_hmac('sha256', $timestamp . "\n" . $orderNo, $apiKey);
     }
 
     /**

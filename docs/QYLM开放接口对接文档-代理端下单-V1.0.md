@@ -48,7 +48,7 @@ Q Y L M · 卡站平台
 2. 按第 01 章「签名规则」生成 **X-Sign**；
 3. 调用 **GET /api/open/v1/products** 获取商品 ID 与价格；
 4. 调用 **POST /api/open/v1/orders** 提交订单；
-5. 轮询 **GET /api/open/v1/orders/{order_no}** 获取最终结果。
+5. 通过 **07 订单回调通知** 获取最终结果，轮询 **GET /api/open/v1/orders/{order_no}** 作为兜底。
 
 ## 接口目录
 
@@ -58,6 +58,7 @@ Q Y L M · 卡站平台
 - **04 订单提交**：POST /api/open/v1/orders
 - **05 订单详情**：GET /api/open/v1/orders/{order_no}
 - **06 账户余额**：GET /api/open/v1/account
+- **07 订单回调通知**：订单终态时主动 POST 推送
 
 # 01 签名规则
 
@@ -342,13 +343,15 @@ GET /api/open/v1/products/12
 | product_id | int | 是 | 商品 ID，来自商品列表 |
 | params | string | 是 | 充值账号/下单参数，最长 255 字符 |
 | trade_password | string | 条件必填 | 账号开启交易密码时必须填写 |
+| notify_url | string | 否 | 回调地址，订单终态时推送结果（见第 07 章），最长 255 字符 |
 
 请求示例：
 
 ```json
 {
   "product_id": 12,
-  "params": "13800138000"
+  "params": "13800138000",
+  "notify_url": "https://your-domain.com/callback"
 }
 ```
 
@@ -561,21 +564,144 @@ GET /api/open/v1/account
 - 订单失败退款后，余额会由系统自动加回；
 - 本接口只返回当前签名代理账号的数据。
 
+# 07 订单回调通知（异步推送）
+
+订单到达终态（充值成功 / 充值失败 / 已取消 / 已退款）时，系统会主动把结果 POST 推送到你方服务器，无需轮询「订单详情」接口。
+
+推荐对接方式：提单时传入 `notify_url` 回调地址，优先使用异步回调获取订单终态；「05 订单详情」轮询仅作为对账与补偿的兜底手段。
+
+## 回调地址配置
+
+回调地址由你方在提单时通过 `notify_url` 参数传入（见第 04 章「订单提交」），系统按订单记录并回调到该地址，无需预先在平台登记：
+
+```json
+{
+  "product_id": 12,
+  "params": "13800138000",
+  "notify_url": "https://your-domain.com/callback"
+}
+```
+
+- `notify_url` 必须为公网可访问的 http/https 地址，建议使用 https，最长 255 字符；
+- 每笔订单可以传不同的回调地址，不传则不推送该订单；
+- 若你方账号在管理端配置了固定的「订单回调地址」，提单未传 `notify_url` 时将推送到该地址（兜底）。
+
+## 推送规则
+
+- 触发时机：归属你方账号、且提单时传入 `notify_url`（或账号配置了回调地址）的订单进入终态时（含开放接口下单与门户下单）：
+
+| status | 含义 |
+| --- | --- |
+| success | 充值成功 |
+| failed | 充值失败（余额已自动退还） |
+| cancelled | 已取消（已退款） |
+| unpaid | 取消交易（未支付） |
+| refunded | 已退款 |
+
+- 推送方式：POST，`Content-Type: application/json; charset=utf-8`，推送超时 10 秒；
+- 成功判定：HTTP 状态码为 2xx 即视为推送成功（响应内容不做要求）；
+- 失败重试：非 2xx 或超时按 10 秒 / 1 分钟 / 5 分钟 / 15 分钟 / 30 分钟 / 1 小时 间隔重试，共 6 次，之后停止并标记失败；
+- 幂等：同一订单终态只推送一次（以 `order_no` 幂等），重复收到相同 `order_no` 的通知请勿重复入账；
+- 网络超时重试是安全的：你方应按 `order_no` 做幂等处理。
+
+## 推送接口地址
+
+推送的接口地址即你方提单时传入的 `notify_url`（未传时为账号配置的固定回调地址），由本系统主动发起，示例：
+
+```http
+POST /callback HTTP/1.1
+Host: your-domain.com
+Content-Type: application/json; charset=utf-8
+X-Event: order.completed
+```
+
+## 回调报文
+
+```json
+{
+  "event": "order.completed",
+  "order_no": "AP2026112412000012AB34CD56",
+  "product_id": 12,
+  "product_name": "全国移动话费 10 元",
+  "params": "13800138000",
+  "amount": "9.90",
+  "status": "success",
+  "message": "充值成功",
+  "created_at": "2026-11-24 12:00:00",
+  "completed_at": "2026-11-24 12:01:12",
+  "timestamp": 1762500672,
+  "sign": "3f2a9c8d51b0e7a4c6d2f8b9a0e3c1d5f7b6a4c2e0d8f6b4a2c0e8d6f4b2a0c8"
+}
+```
+
+## 字段说明
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| event | string | 固定 order.completed |
+| order_no | string | 订单号（幂等键） |
+| product_id | int | 商品 ID |
+| product_name | string | 商品名称 |
+| params | string | 充值目标（手机号 / 账号） |
+| amount | string | 订单金额，两位小数字符串 |
+| status | string | 终态状态，见上表 |
+| message | string | 系统处理说明 |
+| created_at | string | 下单时间 |
+| completed_at | string | 完成时间 |
+| timestamp | int | 推送时刻 Unix 时间戳（秒） |
+| sign | string | 验签字段，算法见下 |
+
+## 验签算法
+
+```text
+sign = hex_lower( HMAC-SHA256( key = 接口KEY, message = timestamp + "\n" + order_no ) )
+```
+
+- 与开放接口请求签名使用同一把接口 KEY；系统重新生成接口 KEY 后，验签密钥需同步更新；
+- 建议同时校验 timestamp 与服务器时间相差不超过 300 秒（防重放）。
+
+## PHP 接收示例
+
+```php
+<?php
+$payload = json_decode(file_get_contents('php://input'), true);
+$apiKey = '你的接口KEY';
+$expect = hash_hmac('sha256', $payload['timestamp'] . "\n" . $payload['order_no'], $apiKey);
+if (!hash_equals($expect, (string)($payload['sign'] ?? ''))) {
+    http_response_code(403);
+    exit('invalid sign');
+}
+if (abs(time() - (int)$payload['timestamp']) > 300) {
+    http_response_code(403);
+    exit('expired');
+}
+// 验签通过：按 $payload['status'] 更新本地订单，返回 2xx
+http_response_code(200);
+echo 'success';
+```
+
+## 接收端注意事项
+
+1. 先验签再处理业务，处理完成后返回 2xx（如输出 success）；
+2. 需要系统稍后重试时，返回非 2xx 状态码（如 500）；
+3. 回调只通知「终态」，处理中进度请通过「05 订单详情」查询；
+4. 请保存 order_no 与你方业务单号的对应关系，便于双方对账。
+
 ---
 
 # 我们的对接方式（驱动 `qylm`）
 
-- 接口参数：接口根地址（`http://120.26.33.144/api/open/v1`，驱动在后面拼 `/products`、`/orders`、`/orders/{order_no}`、`/account`）、接口 ID（代理账号 ID，`X-Agent-Id`）、接口 KEY；选填交易密码（上游账号开启交易密码时填，加密存储，随单发送但不记进原始报文）。
-- 只接话费。字段对应：`product_id` = 供应商商品编码（上游商品 ID，可从商品列表里选；纯数字时按整数发），`params` = 手机号。上游返回的 `order_no` 存为供应商订单号。
+- 接口参数：接口根地址（`http://120.26.33.144/api/open/v1`，驱动在后面拼 `/products`、`/orders`、`/orders/{order_no}`、`/account`）、接口 ID（代理账号 ID，`X-Agent-Id`）、接口 KEY；选填交易密码（上游账号开启交易密码时填，加密存储，随单发送但不记进原始报文）。回调地址自动生成（`回调域名/notify/supplier/{供应商编码}`），每单随下单传 `notify_url`。
+- 只接话费。字段对应：`product_id` = 供应商商品编码（上游商品 ID，可从商品列表里选；纯数字时按整数发），`params` = 手机号，`notify_url` = 回调地址（没配回调域名、地址为空时不传）。上游返回的 `order_no` 存为供应商订单号，回调也按它找回提交。
 - **上游没有接入方单号**：下单不带我们的提交单号，查单只能按上游 `order_no`。下单没拿到返回（或说成功却没给 `order_no`）的提交查不了单，这种单已经转人工处理单，要到上游后台核实；也不能拿同一笔再下一次单来「查」（会重复扣款）。
-- **上游没有回调**：结果全靠定时查单；打到回调地址的请求一律回 `fail` 不采用。
+- **回调优先、查单兜底**（第 07 章）：回调只推终态，POST JSON；按 `sign = hex_lower(HMAC-SHA256(timestamp + "\n" + order_no, 接口 KEY))` 验签（不区分大小写），并要求 `timestamp` 和服务器时间相差不超过 300 秒；通过回 `success`（HTTP 200），不通过回 `fail`（HTTP 400，上游按间隔重试 6 次）。没收到回调的单照常由定时查单拿结果。
 - 鉴权放在请求头：`X-Agent-Id`、`X-Timestamp`（秒级）、`X-Nonce`（每次新生成 24 位十六进制）、`X-Sign`。签名串按第 01 章：`agent_id`、大写 METHOD、URI（请求路径含查询字符串，取实际请求地址）、timestamp、nonce、原始请求体（GET 为空串）用 `\n` 连接，接口 KEY 做 HMAC-SHA256，十六进制小写。POST 的请求体就是签名用的那段 JSON 原文。
 - 余额取 `data.balance`（4 位小数，原样显示）。
 - 商品列表每页 100 条逐页取完：`id` 作编码、`price` 作进价；列表不给面值，管理员自己填；没有运营商字段，商品名里带运营商名（移动 / 联通 / 电信 / 广电）时才认，否则留空；`stock=0` 算没货（`null` 不限库存）；分类名和下单参数提示作为补充说明。
 
 | 情况 | 结果 |
 |---|---|
-| 下单 `code=0` 且带 `order_no`（HTTP 201） | 处理中，等查单 |
+| 下单 `code=0` 且带 `order_no`（HTTP 201） | 处理中，等回调 / 查单 |
 | 下单 `code` 不是 0（401 签名 / 账号、404 商品不可购买、422 参数 / 交易密码 / 余额不足、表外的码），不论 HTTP 状态码 | 失败，换下一个供应商（上游有返回、不是成功码就判失败） |
 | 下单 `code=0` 但没有 `order_no` | 立即转异常订单并标为人工处理单（查不了单） |
 | 下单网络超时、连不上、返回无法解析或没有 `code`（没有拿到返回值） | 立即转异常订单并标为人工处理单：上游结果只记录，状态全部人工（见 docs/project.md 2.5） |
@@ -585,11 +711,14 @@ GET /api/open/v1/account
 | 查单 `status=pending` / `processing` / `awaiting` 或其他 | 处理中 |
 | 查单 `code=404` 订单不存在 | 只记录，订单状态不动（单号是上游自己返回的，查不到不正常，不能判失败）；一直没结果的到时转异常人工处理 |
 | 查单其他非 0 的 code、返回的 `order_no` 对不上、没有 `status`、没拿到返回 | 处理中，只记录；一直没结果的到时转异常人工处理 |
-| 回调 | 上游没有回调，一律回 `fail` |
+| 回调验签不通过、`timestamp` 超过 300 秒、缺 `order_no` | 回 `fail`（HTTP 400），不处理订单 |
+| 回调 `status=success` | 成功 |
+| 回调 `status=failed` / `cancelled` / `refunded` / `unpaid` | 失败；失败原因取 `message` |
+| 回调其他 `status` | 回 `success`，不处理订单 |
 
 # 待和上游确认
 
 1. 能否支持接入方单号（下单带我们的单号、按它查单、重复提交幂等），以便下单超时时能查到、不会重复下单。
-2. 能否提供结果回调。
-3. `refunded` 会不会出现在充值成功之后（成功后撤销）；现在按失败处理，成功后再查到的由订单流程按冲正规则人工处理。
-4. 商品列表能否给出面值和运营商字段。
+2. `refunded` 会不会出现在充值成功之后（成功后撤销）；现在按失败处理，成功后再查到的由订单流程按冲正规则人工处理。
+3. 商品列表能否给出面值和运营商字段。
+4. 回调重试时 `timestamp` 是否按每次推送时刻重新生成（不重新生成的话 5 分钟后的重试会因超过 300 秒被拒，那些单靠查单兜底）。

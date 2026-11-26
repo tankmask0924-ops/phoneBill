@@ -39,7 +39,7 @@ use RuntimeException;
 use function Hyperf\Support\make;
 
 /**
- * QYLM 驱动：请求头 HMAC-SHA256 签名、商品列表、下单、查单、余额（docs/QYLM开放接口对接文档-代理端下单-V1.0.md 最后一节）。
+ * QYLM 驱动：请求头 HMAC-SHA256 签名、商品列表、下单、查单、余额、回调（docs/QYLM开放接口对接文档-代理端下单-V1.0.md 最后一节）。
  *
  * @internal
  * @coversNothing
@@ -82,6 +82,12 @@ class QylmDriverTest extends HttpTestCase
         );
     }
 
+    public function testCallbackSignFollowsDocumentAlgorithm()
+    {
+        // timestamp 和 order_no 用 \n 连接，hmac-sha256 小写十六进制
+        $this->assertSame(hash_hmac('sha256', "1762500672\nAP1", 'k'), QylmDriver::callbackSign('1762500672', 'AP1', 'k'));
+    }
+
     public function testRechargeSendsSignedJsonAndMapsResults()
     {
         $this->respond(['code' => 0, 'msg' => 'ok', 'data' => ['order_no' => 'AP202611072043121A2B3C', 'amount' => '9.9000', 'balance_after' => '113.5500', 'status' => 'pending', 'status_label' => '等待处理']], 201);
@@ -92,17 +98,22 @@ class QylmDriverTest extends HttpTestCase
         $sent = $this->http->requests[0];
         $this->assertSame('POST', $sent['method']);
         $this->assertSame('http://qylm.test/api/open/v1/orders', $sent['url']);
-        $this->assertSame('{"product_id":12,"params":"13800138000"}', $sent['payload']['body']);
-        $this->assertSame('{"product_id":12,"params":"13800138000"}', $result->request);
+        $this->assertSame('{"product_id":12,"params":"13800138000","notify_url":"https://pb.test/notify/supplier/qylm"}', $sent['payload']['body']);
+        $this->assertSame('{"product_id":12,"params":"13800138000","notify_url":"https://pb.test/notify/supplier/qylm"}', $result->request);
         $this->assertSignedHeaders($sent, 'POST', '/api/open/v1/orders');
         $this->assertSame('application/json', $sent['payload']['headers']['Content-Type']);
 
         // 配了交易密码：随单发送，但不记进原始报文
         $this->respond(['code' => 0, 'msg' => 'ok', 'data' => ['order_no' => 'AP2']], 201);
         $result = $this->driver()->recharge($this->request(null, ['trade_password' => 'tp123']));
-        $this->assertSame('{"product_id":12,"params":"13800138000","trade_password":"tp123"}', $this->http->requests[1]['payload']['body']);
+        $this->assertSame('{"product_id":12,"params":"13800138000","notify_url":"https://pb.test/notify/supplier/qylm","trade_password":"tp123"}', $this->http->requests[1]['payload']['body']);
         $this->assertStringNotContainsString('tp123', (string) $result->request);
         $this->assertSignedHeaders($this->http->requests[1], 'POST', '/api/open/v1/orders');
+
+        // 没有回调地址时不传 notify_url
+        $this->respond(['code' => 0, 'msg' => 'ok', 'data' => ['order_no' => 'AP3']], 201);
+        $this->driver()->recharge($this->request(null, ['notify_url' => '']));
+        $this->assertSame('{"product_id":12,"params":"13800138000"}', $this->http->requests[2]['payload']['body']);
 
         // code 非 0（签名、商品、参数、余额不足、表外的码）：失败换下一家
         foreach ([[401, '签名错误'], [404, '商品不存在或不可购买'], [422, '余额不足，请先充值'], [500, '']] as [$code, $msg]) {
@@ -232,7 +243,7 @@ class QylmDriverTest extends HttpTestCase
         $this->driver()->balance(self::CONFIG);
     }
 
-    public function testOrderFlowSubmitsQueriesAndRejectsCallbacks()
+    public function testOrderFlowAppliesSignedCallbacks()
     {
         [$merchant, $product, $mobile, $supplier] = $this->scenario();
 
@@ -242,18 +253,103 @@ class QylmDriverTest extends HttpTestCase
         $attempt = OrderAttempt::where('order_id', $order->id)->first();
         $this->assertSame(Order::STATUS_PROCESSING, Order::find($order->id)->status);
         $this->assertSame('AP000001', $attempt->supplier_order_no);
-        $this->assertSame(['product_id' => 12, 'params' => $mobile], json_decode($this->http->requests[0]['payload']['body'], true));
+        $this->assertSame(
+            ['product_id' => 12, 'params' => $mobile, 'notify_url' => self::CONFIG['notify_url']],
+            json_decode($this->http->requests[0]['payload']['body'], true)
+        );
 
-        // 上游没有回调：一律不采用，订单不变
-        $response = $this->client->request('POST', "/notify/supplier/{$supplier->code}", ['json' => ['order_no' => 'AP000001', 'status' => 'success']]);
-        $this->assertSame([400, 'fail'], [$response->getStatusCode(), (string) $response->getBody()]);
+        // 签名不对、timestamp 超过 300 秒、缺字段：回 fail（HTTP 400，上游会重试），订单不变
+        foreach ([
+            ['sign' => str_repeat('0', 64)],
+            ['timestamp' => time() - 301],
+            ['timestamp' => time() + 301],
+            ['order_no' => ''],
+        ] as $override) {
+            $this->assertSame([400, 'fail'], $this->supplierCallback($supplier, $this->callbackParams('AP000001', 'success', $override)), json_encode($override));
+        }
         $this->assertSame(Order::STATUS_PROCESSING, Order::find($order->id)->status);
 
-        // 定时查单拿到成功
-        $this->respond(['code' => 0, 'msg' => 'ok', 'data' => ['order_no' => 'AP000001', 'status' => 'success']]);
-        $this->process()->queryAttempt(OrderAttempt::find($attempt->id));
-        $this->assertSame('http://qylm.test/api/open/v1/orders/AP000001', $this->http->requests[1]['url']);
+        // 表外的状态：回 success，不处理订单
+        $this->assertSame([200, 'success'], $this->supplierCallback($supplier, $this->callbackParams('AP000001', 'partial_refund')));
+        $this->assertSame(Order::STATUS_PROCESSING, Order::find($order->id)->status);
+
+        // 回调成功（签名大写也认），按上游 order_no 找回提交
+        $params = $this->callbackParams('AP000001', 'success');
+        $params['sign'] = strtoupper($params['sign']);
+        $this->assertSame([200, 'success'], $this->supplierCallback($supplier, $params));
         $this->assertSame(Order::STATUS_SUCCESS, Order::find($order->id)->status);
+        $this->assertCount(1, $this->http->requests, '回调不再查单');
+    }
+
+    public function testCallbackFailureAndQueryFallback()
+    {
+        [$merchant, $product, $mobile, $supplier] = $this->scenario();
+
+        // 回调失败：换下一家，只有这一家时订单失败退款
+        $this->respond(['code' => 0, 'msg' => 'ok', 'data' => ['order_no' => 'AP000002', 'status' => 'pending']], 201);
+        $order = $this->placeOrder($merchant, $product, $mobile);
+        $this->process()->submit($order->id);
+        $attempt = OrderAttempt::where('order_id', $order->id)->first();
+        $this->assertSame([200, 'success'], $this->supplierCallback($supplier, $this->callbackParams('AP000002', 'cancelled', ['message' => '已取消'])));
+        $attempt = OrderAttempt::find($attempt->id);
+        $this->assertSame(OrderAttempt::STATUS_FAILED, $attempt->status);
+        $this->assertSame('已取消（cancelled）', $attempt->message);
+        $this->process()->submit($order->id);
+        $this->assertSame(Order::STATUS_FAILED, Order::find($order->id)->status);
+
+        // 没收到回调：定时查单兜底
+        $this->respond(['code' => 0, 'msg' => 'ok', 'data' => ['order_no' => 'AP000003', 'status' => 'pending']], 201);
+        $order = $this->placeOrder($merchant, $product, $mobile);
+        $this->process()->submit($order->id);
+        $attempt = OrderAttempt::where('order_id', $order->id)->first();
+        $this->respond(['code' => 0, 'msg' => 'ok', 'data' => ['order_no' => 'AP000003', 'status' => 'success']]);
+        $this->process()->queryAttempt(OrderAttempt::find($attempt->id));
+        $this->assertSame('http://qylm.test/api/open/v1/orders/AP000003', $this->http->requests[count($this->http->requests) - 1]['url']);
+        $this->assertSame(Order::STATUS_SUCCESS, Order::find($order->id)->status);
+    }
+
+    /**
+     * 文档第 07 章的回调报文，按接口 KEY 签名；$override 覆盖签名前的字段（sign 直接覆盖签名）。
+     *
+     * @param array<string, mixed> $override
+     * @return array<string, mixed>
+     */
+    private function callbackParams(string $orderNo, string $status, array $override = []): array
+    {
+        $sign = $override['sign'] ?? null;
+        unset($override['sign']);
+        $params = $override + [
+            'event' => 'order.completed',
+            'order_no' => $orderNo,
+            'product_id' => 12,
+            'product_name' => '全国移动话费 10 元',
+            'params' => '13800138000',
+            'amount' => '9.90',
+            'status' => $status,
+            'message' => $status === 'success' ? '充值成功' : '',
+            'created_at' => '2026-11-24 12:00:00',
+            'completed_at' => '2026-11-24 12:01:12',
+            'timestamp' => time(),
+        ];
+        $params['sign'] = $sign ?? QylmDriver::callbackSign((string) $params['timestamp'], (string) $params['order_no'], 'qylm_key');
+
+        return $params;
+    }
+
+    /**
+     * 回调是 POST JSON，带 X-Event 头。
+     *
+     * @param array<string, mixed> $params
+     * @return array{0: int, 1: string}
+     */
+    private function supplierCallback(Supplier $supplier, array $params): array
+    {
+        $response = $this->client->request('POST', "/notify/supplier/{$supplier->code}", [
+            'json' => $params,
+            'headers' => ['Content-Type' => 'application/json', 'X-Event' => 'order.completed'],
+        ]);
+
+        return [$response->getStatusCode(), (string) $response->getBody()];
     }
 
     /**
