@@ -760,7 +760,7 @@ onMounted(async () => {
   </el-drawer>
 
   <!-- 商户后台账号 -->
-  <el-drawer v-model="usersVisible" :title="`商户后台账号 - ${usersTarget?.name ?? ''}`" size="720px">
+  <el-drawer v-model="usersVisible" :title="`商户后台账号 - ${usersTarget?.name ?? ''}`" size="1100px">
     <div class="muted users-tip">商户用这些账号登录商户后台，只能查看自己的订单、资金流水和接入信息。</div>
     <el-form v-if="canManage" inline class="user-form" @submit.prevent="createUser">
       <el-form-item>
@@ -799,7 +799,7 @@ onMounted(async () => {
       <el-table-column label="最近登录" width="170">
         <template #default="{ row }">{{ row.last_login_at ?? '-' }}</template>
       </el-table-column>
-      <el-table-column v-if="canManage" label="操作" width="230">
+      <el-table-column v-if="canManage" label="操作" width="230" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" @click="resetUserPassword(row as MerchantUser)">重置密码</el-button>
           <el-button v-if="row.mobile" link type="warning" @click="unbindUserMobile(row as MerchantUser)">解绑手机</el-button>
