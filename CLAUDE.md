@@ -69,7 +69,7 @@ npm --prefix web run build          # vue-tsc + vite build，产物在 dist/
 
 - 接口约定见 `SupplierDriverInterface` 注释：只有上游明确成功 / 失败才返回 Success / Failed；每次调用 10 秒内返回；`code()` 上线后不能改。
 - `configSchema()` 决定后台表单，`secret` 类型字段用 `APP_ENCRYPTION_KEY` 加密存储（`App\Security\Encrypter`，上线后不能换 key）。
-- 每家的上游文档在 `docs/` 下，对接规则写在 docs/project.md 第 7 章（7.1～7.13），README 有对应关系；新接一家要同步这两处。
+- 每家的上游文档在 `docs/` 下，对接规则写在 docs/project.md 第 7 章（7.1～7.14），README 有对应关系；新接一家要同步这两处。
 
 ### 缓存与后台进程
 

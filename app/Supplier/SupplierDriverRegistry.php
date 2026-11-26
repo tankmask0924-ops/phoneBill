@@ -23,6 +23,7 @@ use App\Supplier\Driver\QylmDriver;
 use App\Supplier\Driver\ShangtengDriver;
 use App\Supplier\Driver\TurboDriver;
 use App\Supplier\Driver\XuanjieDriver;
+use App\Supplier\Driver\YbDriver;
 use App\Supplier\Driver\YingyetingDriver;
 use App\Supplier\Driver\ZhixinDriver;
 use App\Supplier\Driver\ZhongkongDriver;
@@ -53,6 +54,7 @@ class SupplierDriverRegistry
         LinxianDriver::class,
         TurboDriver::class,
         QylmDriver::class,
+        YbDriver::class,
     ];
 
     public function __construct(private ContainerInterface $container)

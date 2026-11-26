@@ -445,6 +445,7 @@ app/Supplier/
     ├── LinxianDriver.php         # 邻显科技话费 API（docs/邻显科技.md）
     ├── TurboDriver.php           # Turbo TOPUP 话费 API（docs/Turbo-TOPUP-API.md）
     ├── QylmDriver.php            # QYLM 卡站话费 API（docs/QYLM开放接口对接文档-代理端下单-V1.0.md）
+    ├── YbDriver.php              # YB 话费 API（docs/YB接口文档-2026.md）
     └── XxxDriver.php             # 每家供应商一个
 ```
 
@@ -610,6 +611,15 @@ app/Supplier/
 - 签名：请求头 `X-Agent-Id`、秒级 `X-Timestamp`、`X-Nonce`、`X-Sign`；签名串 `agent_id\nMETHOD\nURI\ntimestamp\nnonce\nraw_body`（URI 含查询字符串，GET 请求体为空串），接口 KEY 做 HMAC-SHA256，十六进制小写。
 - 结果判定：下单 `code=0` 且有 `order_no` 算受理；其他 code（401 / 404 / 422 和表外的码，不论 HTTP 状态码）判失败换下一家；没拿到返回（网络异常、返回无法解析或没有 `code`）立即转异常并标为人工处理单（见 2.5）。查单 `success` 成功；`failed` / `cancelled` / `refunded` / `unpaid` 失败；`partial_refund` 不判结果，留给人工核实；`pending` / `processing` / `awaiting` 和其他处理中；`404` 订单不存在只记录、订单状态不动。
 - 上游商品列表：每页 100 条逐页取完；不给面值；商品名里带运营商名才认运营商；`stock=0` 算下架（`null` 不限库存）；分类名和下单参数提示作为补充说明。
+
+### 7.14 YB（驱动 `yb`）
+
+上游文档 `docs/YB接口文档-2026.md`（最后是对接方式、结果判定表和待确认事项）：下单、查单、余额、结果回调，所有接口同一个地址、表单 POST、按 `Method` 区分，返回 JSON。只接话费，不接撤单，没有商品列表接口。
+
+- 接口参数：接口地址（完整 URL）、客户编号（`CustomerID`）、密钥、服务器 IP（作为 `CustomerIp` 传）；回调地址自动生成，每单随下单传 `ReturnUrl`（见 4.2）。
+- 字段对应：`OrderNo` = 提交单号 `attempt_no`，`ProductID` = 供应商商品编码，`Account` = 手机号，`BuyNum` 固定 `1`，`ChargeWay` / `Game` / `Zone` / `Server` 传空串，**`CustomerSalePrice` = 这次提交的成本价**（`RechargeRequest::$costPrice`，没有时传 `0`），上游涨价超过它时拒单。上游 `SaleOrderNo`（查单 / 回调的 `Temp1`）存为供应商订单号。
+- 签名：参数按名 ASCII 升序拼 `k=v&...`（值不做 URL 编码，空值也参与），末尾拼 `&key=密钥`，按 GB2312 编码后 md5 小写。回调按 `md5(OrderNo=&OrderStatus=&key=)` 验签（不区分大小写），JSON 和表单都能收，通过回 `SUCCESS`。
+- 结果判定：下单 `Code=success` 按 `iOrderStatus`：`1` 成功、`-1` 失败、其他处理中；`Code=fail` 判失败换下一家，但 `Msg` 是「订单重复提交」时按处理中（文档要求不能直接判失败）；没拿到返回（网络异常、HTTP 出错、返回无法解析或没有 `Code`）立即转异常并标为人工处理单（见 2.5）。查单 / 回调 `1` 成功、`-1` 失败、其他处理中；查单「无该订单信息」只记录、订单状态不动（文档说 5 分钟后仍查不到可判失败，暂不放开）。
 
 ## 8. 权限
 
