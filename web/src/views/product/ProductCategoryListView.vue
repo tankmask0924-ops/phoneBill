@@ -169,7 +169,7 @@ onMounted(async () => {
         <span class="hint">数字越小越靠前</span>
       </el-form-item>
       <el-form-item label="备注">
-        <el-input v-model="form.remark" type="textarea" :rows="2" maxlength="255" show-word-limit placeholder="选填" />
+        <el-input v-model="form.remark" type="textarea" :rows="2" maxlength="255" show-word-limit placeholder="选填，商户后台「可下单商品」会显示给商户" />
       </el-form-item>
 
       <div class="section-title">

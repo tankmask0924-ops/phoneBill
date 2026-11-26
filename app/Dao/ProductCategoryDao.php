@@ -41,6 +41,19 @@ class ProductCategoryDao extends AbstractDao
 
     /**
      * @param list<int> $ids
+     * @return array<int, null|string> id => 备注
+     */
+    public function remarksFor(array $ids): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+
+        return $this->newQuery()->whereIn('id', $ids)->pluck('remark', 'id')->all();
+    }
+
+    /**
+     * @param list<int> $ids
      * @return array<int, string> id => 名称
      */
     public function namesFor(array $ids): array

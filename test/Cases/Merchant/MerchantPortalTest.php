@@ -168,6 +168,7 @@ class MerchantPortalTest extends HttpTestCase
     {
         [$merchant, $product] = $this->merchantWithProduct();
         $category = $this->createCategory();
+        $category->update(['remark' => '慢充，72 小时内到账']);
         $product->update(['category_id' => $category->id]);
         $token = $this->merchantLogin($this->createMerchantUser($merchant)->username, self::PASSWORD);
         $now = time();
@@ -208,6 +209,7 @@ class MerchantPortalTest extends HttpTestCase
         $products = $this->body($this->jsonRequest('GET', '/merchant/products', $token));
         $this->assertSame($category->id, $products['products'][0]['category_id']);
         $this->assertSame($category->name, $products['products'][0]['category_name']);
+        $this->assertSame('慢充，72 小时内到账', $products['products'][0]['category_remark']);
         $this->assertSame([['id' => $category->id, 'name' => $category->name]], $products['categories']);
     }
 
@@ -231,8 +233,9 @@ class MerchantPortalTest extends HttpTestCase
             $this->assertSame(date('Y-m-d', strtotime('-1 day')), $body['to']);
             $this->assertSame([$product->code], array_column($body['products'], 'product_code'), '只看到自己开通的');
             $this->assertNotContains($notMine->code, array_column($body['products'], 'product_code'));
+            $this->assertNull($body['products'][0]['category_remark'], '没有分类时备注为空');
             $this->assertSame(
-                [['operator' => 'cmcc', 'price' => '99.50', 'order_count' => 11, 'success_rate' => '81.81', 'avg_duration' => 11]],
+                [['operator' => 'cmcc', 'price' => '99.50', 'discount' => '99.50', 'order_count' => 11, 'success_rate' => '81.81', 'avg_duration' => 11]],
                 $body['products'][0]['operators']
             );
         } finally {

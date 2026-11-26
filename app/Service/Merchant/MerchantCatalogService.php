@@ -85,7 +85,8 @@ class MerchantCatalogService extends AbstractService
 
     /**
      * 商户后台「可下单商品」：每个商品按运营商列出价格，以及平台整体近 7 天（不含今天）的成功率、平均耗时。
-     * 没有订单的运营商统计为 null。带上商品分类（老商品可能没有分类，为 null），前端按分类分 tab。
+     * 没有订单的运营商统计为 null。带上商品分类和分类备注（老商品可能没有分类，为 null），前端按分类分 tab。
+     * 折扣 = 售价 / 面值 × 100，保留 2 位（前端显示成百分比）。
      *
      * @return array{from: string, to: string, products: list<array<string, mixed>>, categories: list<array{id: int, name: string}>}
      */
@@ -96,6 +97,7 @@ class MerchantCatalogService extends AbstractService
         $ids = $models->map(static fn (Product $p) => $p->id)->all();
         $categories = $this->categoryDao->optionsFor($models->pluck('category_id')->filter()->unique()->values()->all());
         $categoryNames = array_column($categories, 'name', 'id');
+        $categoryRemarks = $this->categoryDao->remarksFor(array_column($categories, 'id'));
         $from = date('Y-m-d', strtotime('-' . self::STATS_DAYS . ' days'));
         $to = date('Y-m-d', strtotime('-1 day'));
         $totals = $this->statDao->rangeTotalsByOperator(array_values(array_map('intval', $ids)), $from, $to);
@@ -105,10 +107,11 @@ class MerchantCatalogService extends AbstractService
             $categoryId = $models->get($product['product_code'])?->category_id;
             $product['category_id'] = $categoryId;
             $product['category_name'] = $categoryId === null ? null : ($categoryNames[$categoryId] ?? null);
+            $product['category_remark'] = $categoryId === null ? null : (($categoryRemarks[$categoryId] ?? '') ?: null);
             $product['operators'] = [];
             foreach ($product['prices'] as $operator => $price) {
                 $t = $productTotals[$operator] ?? null;
-                $product['operators'][] = ['operator' => $operator, 'price' => $price] + ($t === null
+                $product['operators'][] = ['operator' => $operator, 'price' => $price, 'discount' => self::discount((string) $price, (int) $product['face_value'])] + ($t === null
                     ? ['order_count' => 0, 'success_rate' => null, 'avg_duration' => null]
                     : array_intersect_key(
                         ProductStatsAdminService::summarize($t['order_count'], $t['success_count'], $t['failed_count'], $t['total_duration']),
@@ -119,6 +122,14 @@ class MerchantCatalogService extends AbstractService
         unset($product);
 
         return ['from' => $from, 'to' => $to, 'products' => $products, 'categories' => $categories];
+    }
+
+    /**
+     * 折扣 = 售价 / 面值 × 100，保留 2 位；面值为 0 时为 null。
+     */
+    public static function discount(string $price, int $faceValue): ?string
+    {
+        return $faceValue > 0 ? bcdiv(bcmul($price, '100', 4), (string) $faceValue, 2) : null;
     }
 
     /**

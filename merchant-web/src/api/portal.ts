@@ -101,9 +101,13 @@ export interface CatalogProduct {
   /** 老商品可能没有分类 */
   category_id: number | null
   category_name: string | null
+  /** 分类备注，没有时为 null */
+  category_remark: string | null
   operators: {
     operator: string
     price: string
+    /** 折扣 = 售价 / 面值 × 100（2 位小数），页面加 % 显示 */
+    discount: string | null
     order_count: number
     /** 成功 /（成功 + 失败）的百分比，没有出结果的单时为 null */
     success_rate: string | null

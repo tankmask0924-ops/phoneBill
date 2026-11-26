@@ -34,7 +34,7 @@ const visibleProducts = computed(() => {
   return products.value.filter((p) => String(p.category_id) === activeTab.value)
 })
 
-/** 每个商品按运营商拆成多行，商品编码、名称、面值合并单元格 */
+/** 每个商品按运营商拆成多行，商品编码、名称、面值、分类备注合并单元格 */
 const rows = computed(() =>
   visibleProducts.value.flatMap((p) =>
     p.operators.map((op, i) => ({ ...op, product: p, first: i === 0, span: p.operators.length })),
@@ -44,7 +44,7 @@ const rows = computed(() =>
 type Row = (typeof rows.value)[number]
 
 function spanMethod({ row, columnIndex }: { row: Row; columnIndex: number }) {
-  if (columnIndex > 2) {
+  if (columnIndex > 3) {
     return [1, 1]
   }
   return row.first ? [row.span, 1] : [0, 0]
@@ -68,7 +68,7 @@ onMounted(async () => {
     <div class="tip">
       下单时 <code>product_code</code> 传商品编码。成功率、平均耗时是平台整体
       <template v-if="range">{{ range.from }} ~ {{ range.to }}</template>（近 7 天，不含今天）的数据，每天凌晨更新；
-      成功率 = 成功 /（成功 + 失败），耗时是下单受理到充值成功。
+      成功率 = 成功 /（成功 + 失败），耗时是下单受理到充值成功；折扣 = 你的价格 / 面值 × 100%。
     </div>
     <el-tabs v-if="tabs.length > 1" v-model="activeTab">
       <el-tab-pane v-for="t in tabs" :key="t.name" :name="t.name" :label="`${t.label} (${t.count})`" />
@@ -83,11 +83,23 @@ onMounted(async () => {
       <el-table-column label="面值" width="90" align="right">
         <template #default="{ row }">{{ row.product.face_value }} 元</template>
       </el-table-column>
+      <el-table-column label="分类备注" min-width="160">
+        <template #default="{ row }">
+          <span v-if="row.product.category_remark" class="remark">{{ row.product.category_remark }}</span>
+          <span v-else class="muted">-</span>
+        </template>
+      </el-table-column>
       <el-table-column label="运营商" width="90">
         <template #default="{ row }">{{ labelOf(operatorLabels, row.operator) }}</template>
       </el-table-column>
       <el-table-column label="你的价格（元）" width="120" align="right">
         <template #default="{ row }">{{ row.price }}</template>
+      </el-table-column>
+      <el-table-column label="折扣" width="90" align="right">
+        <template #default="{ row }">
+          <span v-if="row.discount === null" class="muted">-</span>
+          <span v-else>{{ row.discount }}%</span>
+        </template>
       </el-table-column>
       <el-table-column label="近 7 天成功率" width="130" align="right">
         <template #default="{ row }">
@@ -113,6 +125,10 @@ onMounted(async () => {
   color: #909399;
   font-size: 12px;
   line-height: 20px;
+}
+
+.remark {
+  white-space: pre-wrap;
 }
 
 .muted {
