@@ -154,6 +154,22 @@ async function toggleStatus(row: Merchant) {
   await list.load()
 }
 
+async function removeMerchant(row: Merchant) {
+  try {
+    await ElMessageBox.confirm(
+      `删除后「${row.name}」从列表里消失，名下的后台账号一起删除、立即退出登录，开放接口不能再下单；历史订单和流水还能查到。` +
+        '余额必须是 0，且没有充值中 / 异常 / 超时的订单、待审核的加款申请。商户名称删除后仍然占用。确定删除吗？',
+      '删除商户',
+      { type: 'warning', confirmButtonText: '删除', confirmButtonClass: 'el-button--danger' },
+    )
+  } catch {
+    return
+  }
+  await merchantApi.remove(row.id)
+  ElMessage.success('已删除')
+  await list.load()
+}
+
 // ---- 加款 / 扣款 ----
 const balanceVisible = ref(false)
 const balanceTarget = ref<Merchant | null>(null)
@@ -410,6 +426,21 @@ async function toggleUser(user: MerchantUser) {
   await loadUsers()
 }
 
+async function removeUser(user: MerchantUser) {
+  try {
+    await ElMessageBox.confirm(`删除账号「${user.username}」？对方会立即退出登录、不能再登录，账号名删除后仍然占用。`, '删除账号', {
+      type: 'warning',
+      confirmButtonText: '删除',
+      confirmButtonClass: 'el-button--danger',
+    })
+  } catch {
+    return
+  }
+  await merchantApi.removeUser(user.merchant_id, user.id)
+  ElMessage.success('已删除')
+  await loadUsers()
+}
+
 async function resetUserPassword(user: MerchantUser) {
   let password: string
   try {
@@ -507,7 +538,7 @@ onMounted(async () => {
       <el-table-column label="状态" width="80">
         <template #default="{ row }"><StatusTag :map="supplierStatusLabels" :value="row.status" /></template>
       </el-table-column>
-      <el-table-column label="操作" width="480" fixed="right">
+      <el-table-column label="操作" width="520" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" @click="openProducts(row as Merchant)">商品与价格</el-button>
           <el-button link type="primary" @click="openUsers(row as Merchant)">后台账号</el-button>
@@ -521,6 +552,7 @@ onMounted(async () => {
             <el-button link :type="row.status === 'active' ? 'danger' : 'success'" @click="toggleStatus(row as Merchant)">
               {{ row.status === 'active' ? '停用' : '启用' }}
             </el-button>
+            <el-button link type="danger" @click="removeMerchant(row as Merchant)">删除</el-button>
           </template>
         </template>
       </el-table-column>
@@ -767,13 +799,14 @@ onMounted(async () => {
       <el-table-column label="最近登录" width="170">
         <template #default="{ row }">{{ row.last_login_at ?? '-' }}</template>
       </el-table-column>
-      <el-table-column v-if="canManage" label="操作" width="190">
+      <el-table-column v-if="canManage" label="操作" width="230">
         <template #default="{ row }">
           <el-button link type="primary" @click="resetUserPassword(row as MerchantUser)">重置密码</el-button>
           <el-button v-if="row.mobile" link type="warning" @click="unbindUserMobile(row as MerchantUser)">解绑手机</el-button>
           <el-button link :type="row.status === 'active' ? 'danger' : 'success'" @click="toggleUser(row as MerchantUser)">
             {{ row.status === 'active' ? '禁用' : '启用' }}
           </el-button>
+          <el-button link type="danger" @click="removeUser(row as MerchantUser)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>

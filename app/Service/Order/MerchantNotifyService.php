@@ -70,7 +70,8 @@ class MerchantNotifyService extends AbstractService
         if ($order === null || $round !== $order->notify_round) {
             return;
         }
-        $merchant = $this->merchantDao->find($order->merchant_id);
+        // 商户删除前订单都已出结果，还没推完的通知照常推完
+        $merchant = $this->merchantDao->findWithTrashed($order->merchant_id);
         $url = $order->notify_url ?: $merchant?->notify_url;
         if ($merchant === null || ! $url) {
             $this->orderDao->update($order->id, ['notify_status' => Order::NOTIFY_NONE]);

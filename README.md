@@ -155,7 +155,7 @@ npm run build        # 产物在 merchant-web/dist，部署在 /merchant/ 路径
 | GET | `/admin/risk/blacklist`、`/admin/risk/maintenances`、`/admin/risk/maintenances/options` | `risk.view` |
 | POST/DELETE | `/admin/risk/blacklist`、`/admin/risk/blacklist/{id}`、`/admin/risk/maintenances`、`/{id}/finish` | `risk.manage` |
 | GET | `/admin/merchants`、`/options`、`/{id}/products`、`/{id}/available-products`、`/admin/balance-logs`、`/admin/balance-logs/export` | `merchant.view` |
-| POST/PUT | `/admin/merchants`、`/{id}`、`/{id}/status`、`/{id}/secret` | `merchant.manage` |
+| POST/PUT/DELETE | `/admin/merchants`、`/{id}`、`/{id}/status`、`/{id}/secret`；`DELETE /admin/merchants/{id}`（软删除） | `merchant.manage` |
 | PUT | `/admin/merchants/{id}/products/{productId}` | `merchant.price` |
 | POST | `/admin/merchants/{id}/balance` | `merchant.balance` |
 | PUT | `/admin/merchants/{id}/credit-limit`（授信额度） | `merchant.credit` |
@@ -165,7 +165,7 @@ npm run build        # 产物在 merchant-web/dist，部署在 /merchant/ 路径
 | GET/POST | `/open/v1/recharge`、`/order`、`/balance`、`/products` | 商户签名，见 [docs/api.md](docs/api.md) |
 | GET/POST | `/notify/supplier/{供应商编码}` | 供应商回调，由驱动验签 |
 | GET | `/admin/merchants/{id}/users` | `merchant.view` |
-| POST | `/admin/merchants/{id}/users`、`/{id}/users/{userId}/status`、`/{id}/users/{userId}/password`、`/{id}/users/{userId}/unbind-mobile` | `merchant.manage` |
+| POST/DELETE | `/admin/merchants/{id}/users`、`/{id}/users/{userId}/status`、`/{id}/users/{userId}/password`、`/{id}/users/{userId}/unbind-mobile`；`DELETE /admin/merchants/{id}/users/{userId}`（软删除） | `merchant.manage` |
 | POST | `/merchant/auth/login`、`/merchant/auth/login/sms-code`、`/merchant/auth/login/verify`（开启了登录短信验证时第二步验证短信） | 公开（商户后台） |
 | GET/PUT/POST | `/merchant/auth/me`、`/merchant/auth/password`、`/merchant/auth/mobile/code`、`PUT /merchant/auth/mobile`（绑定 / 修改手机，要登录密码 + 验证码）、`PUT /merchant/auth/sms-login`（开关登录短信验证，要登录密码）、`PUT /merchant/account/balance-alert`（余额提醒阈值） | 商户登录 |
 | GET | `/merchant/dashboard`、`/orders`、`/order-filter-options`、`/orders/{id}`、`/balance-logs`、`/products`（可下单商品和近 7 天统计）、`/account` | 商户登录，只能看自己的数据 |

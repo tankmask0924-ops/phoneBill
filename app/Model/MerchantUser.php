@@ -13,6 +13,7 @@ declare(strict_types=1);
 namespace App\Model;
 
 use Carbon\Carbon;
+use Hyperf\Database\Model\SoftDeletes;
 
 /**
  * 商户后台登录账号，一个商户可以有多个。
@@ -29,9 +30,12 @@ use Carbon\Carbon;
  * @property null|Carbon $last_login_at
  * @property Carbon $created_at
  * @property Carbon $updated_at
+ * @property null|Carbon $deleted_at 软删除时间，删除后账号名仍然占用
  */
 class MerchantUser extends Model
 {
+    use SoftDeletes;
+
     protected ?string $table = 'merchant_users';
 
     protected array $fillable = [

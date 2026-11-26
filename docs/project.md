@@ -256,7 +256,12 @@ stateDiagram-v2
 
 ### 4.6 商户中心
 
-- **商户**：名称、联系人、电话、状态、AppKey / AppSecret（可重置）、回调地址、IP 白名单；管理商户后台登录账号（可多个，创建、重置密码、启停）。
+- **商户**：名称、联系人、电话、状态、AppKey / AppSecret（可重置）、回调地址、IP 白名单；管理商户后台登录账号（可多个，创建、重置密码、启停、删除）。
+- **删除商户 / 商户后台账号**（`merchant.manage`，2026-11-26 加）：都是**软删除**（`deleted_at`），数据不真删。
+    - 删除商户：余额必须是 0（先加 / 扣款到 0），且没有充值中 / 异常 / 超时的订单、待审核的加款申请、待付款的支付宝转账单，否则拒绝（在事务里锁住商户行再检查）。名下后台账号一起软删除，之前的登录立即失效；开放接口找不到商户（事务提交后清掉 AppKey 缓存）。
+    - 删除后商户列表、下拉、收款配置的分配里不再出现；订单、资金流水、加款申请、支付宝转账单、安全日志里还能看到名字，后面带「（已删除）」；订单筛选的商户下拉也保留（排在后面），还能按商户查历史订单。已删除商户的订单不能再冲正、手动回调（会动余额）；删除前已经出结果、还没推完的通知照常推完。
+    - 删除单个账号：只删这个账号，之前的登录立即失效。
+    - 商户名称、账号名删除后仍然占用（数据库唯一索引），不能再建同名的。
 - **商户商品与价格**：为商户开通商品，按运营商设置价格（开通时带出默认售价）。
 - **余额调整**：加款/扣款，必须填备注，记录操作人。扣款不能超出授信额度（见 2.4）。
 - **授信额度**（`merchant.credit`）：商户列表「授信」设置，列表的余额列在有授信时显示授信和可用额度，负数余额标红。
@@ -402,8 +407,8 @@ erDiagram
 | `mobile_blacklist` | 号码黑名单 | `mobile`（唯一）、`reason` |
 | `channel_maintenances` | 通道维护 | `supplier_id`、`operator`（可空）、`province`（可空）、`start_at`、`end_at`、`reason` |
 | **商户** | | |
-| `merchants` | 商户 | `name`、`contact`、`phone`、`app_key`（唯一）、`app_secret`（加密）、`balance`（有授信时可以是负数）、`credit_limit`（授信额度）、`rate_limit_seconds` / `rate_limit_orders`（下单限流，0 不限）、`alipay_account_id`（支付宝转账加款账户）、`notify_url`、`ip_whitelist`、`status` |
-| `merchant_users` | 商户后台账号 | `merchant_id`、`username`（唯一）、`password`、`status`、`login_failures`（连续输错密码次数，见 8.1）、`last_login_at` |
+| `merchants` | 商户 | `name`、`contact`、`phone`、`app_key`（唯一）、`app_secret`（加密）、`balance`（有授信时可以是负数）、`credit_limit`（授信额度）、`rate_limit_seconds` / `rate_limit_orders`（下单限流，0 不限）、`alipay_account_id`（支付宝转账加款账户）、`notify_url`、`ip_whitelist`、`status`、`deleted_at`（软删除） |
+| `merchant_users` | 商户后台账号 | `merchant_id`、`username`（唯一）、`password`、`status`、`login_failures`（连续输错密码次数，见 8.1）、`last_login_at`、`deleted_at`（软删除） |
 | `merchant_products` | 商户开通的商品 | `merchant_id`、`product_id`、`status`；唯一 `(merchant_id, product_id)` |
 | `merchant_product_prices` | 商户各运营商价格 | `merchant_product_id`、`operator`、`price`；唯一 `(merchant_product_id, operator)` |
 | `merchant_balance_logs` | 资金流水 | `merchant_id`、`type`、`amount`（有正负）、`balance_after`、`order_id`、`remark`、`admin_id` |

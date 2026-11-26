@@ -25,6 +25,7 @@ use App\Service\Admin\MerchantUserAdminService;
 use App\Service\Admin\ReceivingAccountAdminService;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpServer\Annotation\Controller;
+use Hyperf\HttpServer\Annotation\DeleteMapping;
 use Hyperf\HttpServer\Annotation\GetMapping;
 use Hyperf\HttpServer\Annotation\Middleware;
 use Hyperf\HttpServer\Annotation\PostMapping;
@@ -99,6 +100,20 @@ class MerchantController extends AbstractController
         return $this->merchantAdminService->changeStatus($this->admin(), $id, $this->request->input('status'), $this->clientIp());
     }
 
+    /**
+     * 软删除商户，规则见 MerchantAdminService::delete()。
+     */
+    #[Middleware(AdminAuthMiddleware::class)]
+    #[Middleware(AdminPermissionMiddleware::class)]
+    #[RequiresPermission('merchant.manage')]
+    #[DeleteMapping(path: '{id:\d+}')]
+    public function destroy(int $id): array
+    {
+        $this->merchantAdminService->delete($this->admin(), $id, $this->clientIp());
+
+        return ['success' => true];
+    }
+
     #[Middleware(AdminAuthMiddleware::class)]
     #[Middleware(AdminPermissionMiddleware::class)]
     #[RequiresPermission('merchant.manage')]
@@ -169,6 +184,17 @@ class MerchantController extends AbstractController
     public function changeUserStatus(int $id, int $userId): array
     {
         return $this->merchantUserAdminService->changeStatus($this->admin(), $id, $userId, $this->request->input('status'), $this->clientIp());
+    }
+
+    #[Middleware(AdminAuthMiddleware::class)]
+    #[Middleware(AdminPermissionMiddleware::class)]
+    #[RequiresPermission('merchant.manage')]
+    #[DeleteMapping(path: '{id:\d+}/users/{userId:\d+}')]
+    public function deleteUser(int $id, int $userId): array
+    {
+        $this->merchantUserAdminService->delete($this->admin(), $id, $userId, $this->clientIp());
+
+        return ['success' => true];
     }
 
     #[Middleware(AdminAuthMiddleware::class)]

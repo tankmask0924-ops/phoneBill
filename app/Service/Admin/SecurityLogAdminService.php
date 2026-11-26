@@ -58,10 +58,7 @@ class SecurityLogAdminService extends AbstractService
         }
 
         [$logs, $total] = $this->securityLogDao->paginate($filters, $page, $perPage);
-        $merchants = $this->merchantDao->newQuery()
-            ->whereIn('id', $logs->pluck('merchant_id')->filter()->unique()->values()->all())
-            ->get(['id', 'name'])
-            ->keyBy('id');
+        $merchants = $this->merchantDao->namesWithTrashed($logs->pluck('merchant_id')->filter()->unique()->values()->all());
 
         return [
             'data' => $logs->map(fn (SecurityLog $log) => [
@@ -71,7 +68,7 @@ class SecurityLogAdminService extends AbstractService
                 'user_id' => $log->user_id,
                 'username' => $log->username,
                 'merchant_id' => $log->merchant_id,
-                'merchant_name' => $log->merchant_id === null ? null : $merchants->get($log->merchant_id)?->name,
+                'merchant_name' => $log->merchant_id === null ? null : ($merchants[$log->merchant_id] ?? null),
                 'ip' => $log->ip,
                 'user_agent' => $log->user_agent,
                 'detail' => $log->detail,

@@ -217,7 +217,7 @@ class OnlinePaymentAdminService extends AbstractService
     {
         $ids = array_values(array_unique(array_filter($ids)));
 
-        return $ids === [] ? [] : $this->merchantDao->newQuery()->whereIn('id', $ids)->pluck('name', 'id')->all();
+        return $this->merchantDao->namesWithTrashed($ids);
     }
 
     /**

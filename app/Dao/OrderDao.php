@@ -218,6 +218,17 @@ class OrderDao extends AbstractDao
             ->exists();
     }
 
+    /**
+     * 这个商户还有没有没出结果的订单（等待中、充值中、异常、超时），删除商户前检查。
+     */
+    public function hasUnfinishedForMerchant(int $merchantId): bool
+    {
+        return $this->newQuery()
+            ->whereIn('status', [Order::STATUS_PENDING, Order::STATUS_PROCESSING, Order::STATUS_ABNORMAL, Order::STATUS_TIMEOUT])
+            ->where('merchant_id', $merchantId)
+            ->exists();
+    }
+
     public function findByOrderNo(string $orderNo): ?Order
     {
         return $this->newQuery()->where('order_no', $orderNo)->first();

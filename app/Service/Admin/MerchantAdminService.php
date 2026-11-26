@@ -14,7 +14,11 @@ namespace App\Service\Admin;
 
 use App\Dao\AdminOperationLogDao;
 use App\Dao\MerchantDao;
+use App\Dao\MerchantFundingRequestDao;
+use App\Dao\MerchantOnlinePaymentDao;
 use App\Dao\MerchantProductDao;
+use App\Dao\MerchantUserDao;
+use App\Dao\OrderDao;
 use App\Exception\InsufficientBalanceException;
 use App\Model\AdminUser;
 use App\Model\Merchant;
@@ -24,6 +28,7 @@ use App\Service\AbstractService;
 use App\Service\Merchant\MerchantAccessService;
 use App\Service\Merchant\MerchantBalanceService;
 use App\Service\Merchant\MerchantConsumptionService;
+use App\Service\Merchant\MerchantLookupService;
 use Hyperf\DbConnection\Db;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpMessage\Exception\HttpException;
@@ -33,7 +38,7 @@ use Hyperf\HttpMessage\Exception\HttpException;
  *
  * - AppKey 建好后不变；AppSecret 加密存储，只在新建和重置时返回一次明文，之后谁都看不到；
  * - 加减款必须填备注，每次都写资金流水并记录操作人，扣款不能扣成负数；
- * - 不提供删除，不合作了就停用。
+ * - 删除是软删除（见 delete()）：列表里不再出现，名下账号一起删掉、不能登录，开放接口一律拒绝；订单、流水等历史记录还能看到名字。
  */
 class MerchantAdminService extends AbstractService
 {
@@ -66,6 +71,21 @@ class MerchantAdminService extends AbstractService
 
     #[Inject]
     protected MerchantConsumptionService $consumptionService;
+
+    #[Inject]
+    protected MerchantUserDao $merchantUserDao;
+
+    #[Inject]
+    protected OrderDao $orderDao;
+
+    #[Inject]
+    protected MerchantFundingRequestDao $fundingRequestDao;
+
+    #[Inject]
+    protected MerchantOnlinePaymentDao $onlinePaymentDao;
+
+    #[Inject]
+    protected MerchantLookupService $lookupService;
 
     /**
      * 每行带今日消费、累计消费（成功订单售价合计，见 MerchantConsumptionService）。
@@ -260,6 +280,42 @@ class MerchantAdminService extends AbstractService
         return $this->format($this->findOrFail($merchant->id));
     }
 
+    /**
+     * 软删除商户，名下的后台账号一起软删除（之前的登录立即失效）。以下情况不能删：
+     * 余额不是 0（先加 / 扣款到 0）、还有没出结果的订单、还有没审核的加款申请或没付款的支付宝转账单。
+     * 在事务里锁住商户行再检查，防止检查完正好有扣款、加款。删除后商户名称仍然占用，不能再建同名商户。
+     */
+    public function delete(AdminUser $operator, int $id, ?string $ip): void
+    {
+        $merchant = $this->findOrFail($id);
+        $before = $this->format($merchant);
+        $users = Db::transaction(function () use ($merchant) {
+            $locked = $this->merchantDao->lockForUpdate($merchant->id);
+            if ($locked === null) {
+                throw new HttpException(404, '商户不存在');
+            }
+            if (bccomp((string) $locked->balance, '0', 2) !== 0) {
+                throw new HttpException(422, "「{$locked->name}」的余额还有 {$locked->balance} 元，请先加 / 扣款到 0 再删除");
+            }
+            if ($this->orderDao->hasUnfinishedForMerchant($locked->id)) {
+                throw new HttpException(422, "「{$locked->name}」还有没出结果的订单（充值中、异常、超时），处理完再删除");
+            }
+            if ($this->fundingRequestDao->hasPendingForMerchant($locked->id)) {
+                throw new HttpException(422, "「{$locked->name}」还有待审核的加款申请，审核完再删除");
+            }
+            if ($this->onlinePaymentDao->hasPendingForMerchant($locked->id)) {
+                throw new HttpException(422, "「{$locked->name}」还有待付款的支付宝转账单，等它过期或取消后再删除");
+            }
+            $users = $this->merchantUserDao->deleteForMerchant($locked->id);
+            $locked->delete();
+
+            return $users;
+        });
+        // 事务提交后再清一次开放接口的商户缓存，防止提交前被别的请求读回旧数据
+        $this->lookupService->forget($merchant->app_key);
+        $this->operationLogDao->record($operator->id, self::MODULE, 'delete_merchant', 'merchant', $merchant->id, $before, ['deleted_users' => $users], $ip);
+    }
+
     public function findOrFail(int $id): Merchant
     {
         $merchant = $this->merchantDao->find($id);
@@ -281,12 +337,8 @@ class MerchantAdminService extends AbstractService
         $attrs = [];
         if ($merchant === null || array_key_exists('name', $data)) {
             $name = $this->requiredString($data['name'] ?? null, '商户名称', 64);
-            $exists = $this->merchantDao->newQuery()
-                ->where('name', $name)
-                ->when($merchant !== null, fn ($q) => $q->where('id', '!=', $merchant->id))
-                ->exists();
-            if ($exists) {
-                throw new HttpException(422, "商户「{$name}」已存在");
+            if ($this->merchantDao->nameTaken($name, $merchant?->id)) {
+                throw new HttpException(422, "商户「{$name}」已存在（已删除的商户也占用名称）");
             }
             $attrs['name'] = $name;
         }

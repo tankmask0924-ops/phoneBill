@@ -121,7 +121,8 @@ class OrderAdminService extends AbstractService
     public function filterOptions(): array
     {
         return [
-            'merchants' => $this->merchantDao->newQuery()->orderBy('id')->get(['id', 'name'])->toArray(),
+            // 含已删除的商户（名字带「（已删除）」），还能按商户查历史订单
+            'merchants' => $this->merchantDao->optionsWithTrashed(),
             // 含已删除的，方便查历史订单
             'suppliers' => array_map(
                 static fn (array $s) => ['id' => $s['id'], 'name' => $s['deleted'] ? $s['name'] . '（已删除）' : $s['name']],
@@ -307,6 +308,7 @@ class OrderAdminService extends AbstractService
     public function reverse(AdminUser $operator, int $id, mixed $remark, ?string $ip): array
     {
         $order = $this->findOrFail($id);
+        $this->assertMerchantNotDeleted($order);
         $remark = $this->requiredString($remark, '冲正原因', 200);
         if ($order->status !== Order::STATUS_SUCCESS) {
             throw new HttpException(422, '只有成功的订单可以冲正');
@@ -485,6 +487,7 @@ class OrderAdminService extends AbstractService
      */
     private function settleAndNotify(AdminUser $operator, Order $order, string $to, string $remark, ?string $ip): void
     {
+        $this->assertMerchantNotDeleted($order);
         if ($order->status === Order::STATUS_SUCCESS && $to === Order::STATUS_FAILED && ! $this->rolePermissionDao->roleHasPermission($operator->role_id, 'order.reverse')) {
             throw new HttpException(403, '成功的订单回调失败（冲正）需要订单冲正权限');
         }
@@ -517,6 +520,16 @@ class OrderAdminService extends AbstractService
             'round' => $round,
             'remark' => $remark,
         ] + $money, $ip);
+    }
+
+    /**
+     * 商户删除后它的订单只能看，不能再冲正、手动回调（会动已删除商户的余额）。
+     */
+    private function assertMerchantNotDeleted(Order $order): void
+    {
+        if ($this->merchantDao->find($order->merchant_id) === null) {
+            throw new HttpException(422, '这笔订单的商户已删除，不能再操作');
+        }
     }
 
     private function findOrFail(int $id): Order
@@ -572,7 +585,7 @@ class OrderAdminService extends AbstractService
      */
     private function formatMany(array $orders): array
     {
-        $merchants = $this->merchantDao->newQuery()->whereIn('id', array_unique(array_map(static fn (Order $o) => $o->merchant_id, $orders)))->pluck('name', 'id');
+        $merchants = $this->merchantDao->namesWithTrashed(array_values(array_unique(array_map(static fn (Order $o) => $o->merchant_id, $orders))));
         $suppliers = $this->supplierDao->namesWithTrashed(array_values(array_filter(array_unique(array_map(static fn (Order $o) => $o->supplier_id, $orders)))));
         $supplierProducts = $this->supplierProductDao->namesWithTrashed(array_values(array_filter(array_unique(array_map(static fn (Order $o) => $o->supplier_product_id, $orders)))));
         $unclear = $this->attemptDao->unclearProcessing(array_map(static fn (Order $o) => $o->id, $orders));

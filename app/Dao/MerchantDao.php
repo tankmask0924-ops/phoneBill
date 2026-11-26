@@ -19,11 +19,58 @@ use Hyperf\DbConnection\Db;
 
 class MerchantDao extends AbstractDao
 {
+    public const DELETED_SUFFIX = '（已删除）';
+
     protected string $model = Merchant::class;
 
     public function find(int $id): ?Merchant
     {
         return Merchant::find($id);
+    }
+
+    /**
+     * 含已删除的商户（订单通知、历史记录用）。
+     */
+    public function findWithTrashed(int $id): ?Merchant
+    {
+        return Merchant::withTrashed()->find($id);
+    }
+
+    /**
+     * 历史记录（订单、流水、加款）显示商户名用，含已删除的，已删除的名字后面带「（已删除）」。
+     *
+     * @param list<int> $ids
+     * @return array<int, string> id => 名称
+     */
+    public function namesWithTrashed(array $ids): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+
+        return Merchant::withTrashed()->whereIn('id', $ids)->get(['id', 'name', 'deleted_at'])
+            ->mapWithKeys(static fn (Merchant $m) => [$m->id => $m->name . ($m->deleted_at === null ? '' : self::DELETED_SUFFIX)])
+            ->all();
+    }
+
+    /**
+     * 订单筛选的商户下拉：含已删除的（还能按商户查历史订单），已删除的排在后面、名字带「（已删除）」。
+     *
+     * @return list<array{id: int, name: string}>
+     */
+    public function optionsWithTrashed(): array
+    {
+        return Merchant::withTrashed()->orderByRaw('deleted_at is not null')->orderBy('id')->get(['id', 'name', 'deleted_at'])
+            ->map(static fn (Merchant $m) => ['id' => $m->id, 'name' => $m->name . ($m->deleted_at === null ? '' : self::DELETED_SUFFIX)])
+            ->values()->all();
+    }
+
+    /**
+     * 商户名称有没有被用过，含已删除的（数据库唯一索引也算已删除的）。
+     */
+    public function nameTaken(string $name, ?int $exceptId = null): bool
+    {
+        return Merchant::withTrashed()->where('name', $name)->when($exceptId !== null, static fn ($q) => $q->where('id', '!=', $exceptId))->exists();
     }
 
     public function findByAppKey(string $appKey): ?Merchant

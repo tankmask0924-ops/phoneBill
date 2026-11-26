@@ -32,6 +32,24 @@ class MerchantUserDao extends AbstractDao
     }
 
     /**
+     * 账号名有没有被用过，含已删除的（数据库唯一索引也算已删除的）。
+     */
+    public function usernameTaken(string $username): bool
+    {
+        return MerchantUser::withTrashed()->where('username', $username)->exists();
+    }
+
+    /**
+     * 软删除商户名下的全部账号（删除商户时调用）。
+     *
+     * @return int 删了几个
+     */
+    public function deleteForMerchant(int $merchantId): int
+    {
+        return $this->newQuery()->where('merchant_id', $merchantId)->delete();
+    }
+
+    /**
      * 商户下启用中的账号绑定的手机号（去重）。
      *
      * @return list<string>

@@ -103,6 +103,8 @@ export const merchantApi = {
   create: (data: MerchantForm) => http.post<Merchant & { app_secret: string }>('/admin/merchants', data),
   update: (id: number, data: Partial<MerchantForm>) => http.put<Merchant>(`/admin/merchants/${id}`, data),
   changeStatus: (id: number, status: string) => http.post<Merchant>(`/admin/merchants/${id}/status`, { status }),
+  /** 软删除，余额不为 0、有没出结果的订单、待审核的加款时后端会拒绝 */
+  remove: (id: number) => http.delete<{ success: boolean }>(`/admin/merchants/${id}`),
   resetSecret: (id: number) => http.post<{ app_key: string; app_secret: string }>(`/admin/merchants/${id}/secret`),
   adjustBalance: (id: number, data: { type: 'recharge' | 'deduct'; amount: string; remark: string }) =>
     http.post<Merchant>(`/admin/merchants/${id}/balance`, data),
@@ -116,6 +118,8 @@ export const merchantApi = {
     http.post<MerchantUser>(`/admin/merchants/${id}/users`, data),
   changeUserStatus: (id: number, userId: number, status: string) =>
     http.post<MerchantUser>(`/admin/merchants/${id}/users/${userId}/status`, { status }),
+  /** 软删除账号，账号名仍然占用 */
+  removeUser: (id: number, userId: number) => http.delete<{ success: boolean }>(`/admin/merchants/${id}/users/${userId}`),
   resetUserPassword: (id: number, userId: number, password: string) =>
     http.post<{ success: boolean }>(`/admin/merchants/${id}/users/${userId}/password`, { password }),
   /** 解绑手机：商户换了手机收不到登录验证码时用，同时关掉登录短信验证 */

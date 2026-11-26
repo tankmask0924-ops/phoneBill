@@ -217,8 +217,9 @@ class ReceivingAccountAdminService extends AbstractService
                 + [
                     'status' => $a->status,
                     'remark' => $a->remark,
-                    'merchant_ids' => $ids,
-                    'merchant_names' => array_values(array_map(static fn ($id) => $names[$id] ?? "#{$id}", $ids)),
+                    // 已删除的商户不算（分配关系保留着，但已经用不到）
+                    'merchant_ids' => array_values(array_filter($ids, static fn ($id) => isset($names[$id]))),
+                    'merchant_names' => array_values(array_filter(array_map(static fn ($id) => $names[$id] ?? null, $ids))),
                     'created_at' => $a->created_at?->toDateTimeString(),
                     'updated_at' => $a->updated_at?->toDateTimeString(),
                 ];

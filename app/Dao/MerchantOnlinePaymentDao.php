@@ -52,4 +52,12 @@ class MerchantOnlinePaymentDao extends AbstractDao
     {
         return $this->newQuery()->where('id', $id)->where('status', $from)->update(['status' => $to] + $attrs) === 1;
     }
+
+    /**
+     * 商户还有没付款、没过期的支付宝转账单，删除商户前检查（付了款要入账到商户余额）。
+     */
+    public function hasPendingForMerchant(int $merchantId): bool
+    {
+        return $this->newQuery()->where('merchant_id', $merchantId)->where('status', MerchantOnlinePayment::STATUS_PENDING)->exists();
+    }
 }

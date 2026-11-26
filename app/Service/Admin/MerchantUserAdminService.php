@@ -23,7 +23,7 @@ use Hyperf\HttpMessage\Exception\HttpException;
 /**
  * 商户中心 - 商户后台账号：平台给商户开账号、重置密码、启用禁用、解绑手机（商户换了手机收不到登录验证码时用）。
  *
- * 重置密码、禁用后该账号之前的登录立即失效（见 MerchantAuthMiddleware）。
+ * 重置密码、禁用、删除后该账号之前的登录立即失效（见 MerchantAuthMiddleware）。删除是软删除，账号名仍然占用。
  */
 class MerchantUserAdminService extends AbstractService
 {
@@ -62,8 +62,8 @@ class MerchantUserAdminService extends AbstractService
         if (! preg_match('/^[A-Za-z0-9_.@-]{3,64}$/', $username)) {
             throw new HttpException(422, '账号为 3~64 位字母、数字或 _ . @ -');
         }
-        if ($this->merchantUserDao->findByUsername($username)) {
-            throw new HttpException(422, "账号「{$username}」已存在");
+        if ($this->merchantUserDao->usernameTaken($username)) {
+            throw new HttpException(422, "账号「{$username}」已存在（已删除的账号也占用账号名）");
         }
         $password = (string) ($data['password'] ?? '');
         if ($password === '') {
@@ -132,6 +132,18 @@ class MerchantUserAdminService extends AbstractService
         }
 
         return $this->format($this->findOrFail($merchantId, $userId));
+    }
+
+    /**
+     * 软删除账号，之前的登录立即失效。
+     */
+    public function delete(AdminUser $operator, int $merchantId, int $userId, ?string $ip): void
+    {
+        $this->merchantAdminService->findOrFail($merchantId);
+        $user = $this->findOrFail($merchantId, $userId);
+        $before = $this->format($user);
+        $this->merchantUserDao->delete($user->id);
+        $this->operationLogDao->record($operator->id, self::MODULE, 'delete_merchant_user', 'merchant', $merchantId, $before, null, $ip);
     }
 
     private function findOrFail(int $merchantId, int $userId): MerchantUser

@@ -15,7 +15,9 @@ namespace App\Model;
 use App\Service\Merchant\MerchantLookupService;
 use Carbon\Carbon;
 use Hyperf\Context\ApplicationContext;
+use Hyperf\Database\Model\Events\Deleted;
 use Hyperf\Database\Model\Events\Saved;
+use Hyperf\Database\Model\SoftDeletes;
 
 /**
  * 商户。app_secret 是加密后的签名密钥；balance 只能通过 MerchantBalanceService 改。
@@ -43,9 +45,12 @@ use Hyperf\Database\Model\Events\Saved;
  * @property null|int $alipay_account_id 支付宝转账加款用的收款账户，空表示不能用
  * @property Carbon $created_at
  * @property Carbon $updated_at
+ * @property null|Carbon $deleted_at 软删除时间，见 MerchantAdminService::delete()
  */
 class Merchant extends Model
 {
+    use SoftDeletes;
+
     protected ?string $table = 'merchants';
 
     protected array $fillable = [
@@ -94,6 +99,14 @@ class Merchant extends Model
      * 资料、状态、密钥变了，清掉按 AppKey 的缓存（见 MerchantLookupService）。余额不在缓存里，用查询构造器改不会走到这里。
      */
     public function saved(Saved $event): void
+    {
+        ApplicationContext::getContainer()->get(MerchantLookupService::class)->forget($this->app_key);
+    }
+
+    /**
+     * 软删除不走 saved()，同样清掉缓存（删除事务提交后 MerchantAdminService 还会再清一次）。
+     */
+    public function deleted(Deleted $event): void
     {
         ApplicationContext::getContainer()->get(MerchantLookupService::class)->forget($this->app_key);
     }

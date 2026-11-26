@@ -77,8 +77,8 @@ trait CreatesCatalog
         MerchantProduct::destroy($merchantProductIds);
         MerchantBalanceLog::whereIn('merchant_id', $this->merchantIds)->delete();
         SecurityLog::where('portal', SecurityLog::PORTAL_MERCHANT)->whereIn('merchant_id', $this->merchantIds)->delete();
-        MerchantUser::whereIn('merchant_id', $this->merchantIds)->delete();
-        Merchant::destroy($this->merchantIds);
+        MerchantUser::withTrashed()->whereIn('merchant_id', $this->merchantIds)->forceDelete();
+        Merchant::withTrashed()->whereIn('id', $this->merchantIds)->forceDelete();
         ProductRoute::whereIn('product_id', $this->productIds)->delete();
         ProductRoute::whereIn('supplier_product_id', $this->supplierProductIds)->delete();
         ProductPrice::whereIn('product_id', $this->productIds)->delete();

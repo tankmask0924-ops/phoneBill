@@ -138,7 +138,7 @@ class BalanceLogAdminService extends AbstractService
      */
     private function formatMany(Collection $logs): array
     {
-        $merchants = $this->merchantDao->newQuery()->whereIn('id', $logs->pluck('merchant_id')->unique()->all())->pluck('name', 'id');
+        $merchants = $this->merchantDao->namesWithTrashed($logs->pluck('merchant_id')->unique()->values()->all());
         $admins = $this->adminUserDao->newQuery()->whereIn('id', $logs->pluck('admin_user_id')->filter()->unique()->all())->pluck('real_name', 'id');
         $orders = $this->orderDao->newQuery()->whereIn('id', $logs->pluck('order_id')->filter()->unique()->all())->get(['id', 'order_no', 'mobile'])->keyBy('id');
 

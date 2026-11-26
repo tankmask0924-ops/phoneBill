@@ -32,4 +32,12 @@ class MerchantFundingRequestDao extends AbstractDao
     {
         return $this->newQuery()->where('id', $id)->where('status', $from)->update(['status' => $to] + $attrs) === 1;
     }
+
+    /**
+     * 商户还有没审核的加款申请，删除商户前检查。
+     */
+    public function hasPendingForMerchant(int $merchantId): bool
+    {
+        return $this->newQuery()->where('merchant_id', $merchantId)->where('status', MerchantFundingRequest::STATUS_PENDING)->exists();
+    }
 }
