@@ -260,8 +260,8 @@ onMounted(async () => {
     />
   </el-card>
 
-  <el-dialog v-model="dialogVisible" :title="editing ? '编辑供应商' : '新建供应商'" width="640px" @closed="formRef?.clearValidate()">
-    <el-form ref="formRef" :model="form" :rules="rules" label-width="96px">
+  <el-dialog v-model="dialogVisible" :title="editing ? '编辑供应商' : '新建供应商'" width="820px" @closed="formRef?.clearValidate()">
+    <el-form ref="formRef" :model="form" :rules="rules" label-width="200px">
       <el-form-item label="名称" prop="name">
         <el-input v-model="form.name" maxlength="64" />
       </el-form-item>
