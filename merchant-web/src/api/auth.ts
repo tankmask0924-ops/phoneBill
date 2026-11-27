@@ -27,7 +27,7 @@ export interface Me {
   id: number
   username: string
   real_name: string | null
-  /** 绑定的手机号 */
+  /** 打码后的手机号（138****1234），没绑定为 null */
   mobile: string | null
   /** 登录时是否要短信验证码（要先绑定手机） */
   sms_login_enabled: boolean

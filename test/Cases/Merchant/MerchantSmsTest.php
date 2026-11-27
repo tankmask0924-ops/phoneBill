@@ -165,8 +165,10 @@ class MerchantSmsTest extends HttpTestCase
         $bind = ['mobile' => $mobile, 'code' => $code, 'password' => self::PASSWORD];
         $this->assertSame(422, $this->jsonRequest('PUT', '/merchant/auth/mobile', $token, ['password' => 'wrong'] + $bind)->getStatusCode());
         $this->assertSame(422, $this->jsonRequest('PUT', '/merchant/auth/mobile', $token, ['code' => $this->wrong($code)] + $bind)->getStatusCode());
-        $this->assertSame(200, $this->jsonRequest('PUT', '/merchant/auth/mobile', $token, $bind)->getStatusCode());
+        $masked = substr($mobile, 0, 3) . '****' . substr($mobile, -4);
+        $this->assertSame($masked, $this->body($this->jsonRequest('PUT', '/merchant/auth/mobile', $token, $bind))['mobile'], '商户后台只返回打码后的手机号');
         $this->assertSame($mobile, MerchantUser::find($user->id)->mobile);
+        $this->assertSame($masked, $this->body($this->jsonRequest('GET', '/merchant/auth/me', $token))['mobile']);
         $this->assertSame(422, $this->jsonRequest('PUT', '/merchant/auth/mobile', $token, $bind)->getStatusCode(), '验证码用过就作废');
 
         // 只绑定、没开启登录短信验证：照常只校验密码

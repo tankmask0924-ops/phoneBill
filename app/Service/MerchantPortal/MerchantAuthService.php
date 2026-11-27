@@ -144,7 +144,8 @@ class MerchantAuthService extends AbstractService
             'id' => $user->id,
             'username' => $user->username,
             'real_name' => $user->real_name,
-            'mobile' => $user->mobile,
+            // 商户后台只显示打码后的手机号（138****1234），完整号码只在管理后台看
+            'mobile' => ($user->mobile ?? '') === '' ? null : Mobile::mask((string) $user->mobile),
             'sms_login_enabled' => (bool) $user->sms_login_enabled,
             'sms_available' => $this->smsService->available(),
             'merchant_id' => $merchant->id,
@@ -189,7 +190,7 @@ class MerchantAuthService extends AbstractService
     /**
      * 绑定或修改手机：登录密码 + 新手机号收到的验证码。
      *
-     * @return array{mobile: string}
+     * @return array{mobile: string} 打码后的手机号
      */
     public function bindMobile(MerchantUser $user, string $password, mixed $mobile, string $code, ?string $ip): array
     {
@@ -212,7 +213,7 @@ class MerchantAuthService extends AbstractService
             'after' => Mobile::mask($mobile),
         ]);
 
-        return ['mobile' => $mobile];
+        return ['mobile' => Mobile::mask($mobile)];
     }
 
     /**
