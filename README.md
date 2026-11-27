@@ -97,9 +97,9 @@ docker exec pb php bin/hyperf.php stats:province-daily 2026-10-05 --days=7    # 
 ```bash
 cd web
 npm install
-npm run dev          # http://localhost:5175/admin/ ，/api/* 代理到 http://127.0.0.1:9502 并去掉 /api 前缀
+npm run dev          # http://localhost:5175/yhylhf/ ，/api/* 代理到 http://127.0.0.1:9502 并去掉 /api 前缀
 npm run type-check   # 类型检查
-npm run build        # 产物在 web/dist，部署在 /admin/ 路径下
+npm run build        # 产物在 web/dist，部署在 /yhylhf/ 路径下（入口地址，接口仍是 /api/admin/...）
 ```
 
 生产环境在 nginx 里同样把 `/api/` 转发到后端并去掉 `/api` 前缀。

@@ -25,7 +25,7 @@ docker exec pb php bin/hyperf.php admin:sync-permissions   # 新增权限编码�
 前端（两个项目命令一样）：
 
 ```bash
-npm --prefix web run dev            # http://localhost:5175/admin/，/api/* 代理到 127.0.0.1:9502 并去掉 /api 前缀
+npm --prefix web run dev            # http://localhost:5175/yhylhf/，/api/* 代理到 127.0.0.1:9502 并去掉 /api 前缀
 npm --prefix merchant-web run dev   # http://localhost:5176/merchant/
 npm --prefix web run type-check
 npm --prefix web run build          # vue-tsc + vite build，产物在 dist/
@@ -79,9 +79,9 @@ npm --prefix web run build          # vue-tsc + vite build，产物在 dist/
 
 ## 前端
 
-`web/` 和 `merchant-web/` 结构相同，分开构建、分开部署（`/admin/`、`/merchant/`）。`merchant-web/.env` 不在仓库里，本机构建时用内联环境变量（`VITE_APP_TITLE`、`VITE_API_BASE_URL=/api`）。
+`web/` 和 `merchant-web/` 结构相同，分开构建、分开部署（管理后台入口 `/yhylhf/`、商户后台 `/merchant/`；只是页面地址，接口仍是 `/api/admin/...`、`/api/merchant/...`）。`merchant-web/.env` 不在仓库里，本机构建时用内联环境变量（`VITE_APP_TITLE`、`VITE_API_BASE_URL=/api`）。
 
 ## 打包与部署
 
-- 「打包」= `release/` 下的 `server.tar.gz`（`git archive --prefix=phoneBill/ HEAD`，不含 `web`、`merchant-web`）、`admin.tar.gz`、`merchant.tar.gz`（构建后的 dist，顶层目录 `admin/`、`merchant/`）。`release/` 已忽略。nginx 配置见 `deploy/nginx/`。
+- 「打包」= `release/` 下的 `server.tar.gz`（`git archive --prefix=phoneBill/ HEAD`，不含 `web`、`merchant-web`）、`admin.tar.gz`、`merchant.tar.gz`（构建后的 dist，顶层目录 `yhylhf/`、`merchant/`）。`release/` 已忽略。nginx 配置见 `deploy/nginx/`。
 - 部署要点（`.env` 必填项、`TRUSTED_PROXIES` 等）见 README「部署要点」；新增配置项要同步 `.env.example`（填占位值）。

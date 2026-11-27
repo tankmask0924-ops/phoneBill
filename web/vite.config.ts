@@ -3,7 +3,8 @@ import vue from '@vitejs/plugin-vue'
 import { defineConfig } from 'vite'
 
 export default defineConfig({
-  base: '/admin/',
+  // 管理后台前端入口（只是页面地址；调后端接口仍是 /api/admin/...）
+  base: '/yhylhf/',
   plugins: [vue()],
   resolve: {
     alias: {
