@@ -52,8 +52,9 @@ Hyperf 3.1 + PHP 8.4 + Swoole 后端，附带 Web 管理后台（Vue 3 + TypeScr
 cp .env.example .env                                   # 填数据库、Redis、ADMIN_JWT_SECRET
 docker compose up -d                                   # 启动，宿主机端口 9502
 docker exec pb php bin/hyperf.php migrate              # 执行数据库迁移
-docker exec pb php bin/hyperf.php admin:create --username=admin --password=你的密码
+docker exec pb php bin/hyperf.php admin:create --username=admin --password=你的密码 --mobile=13800000000   # 手机号可选，平台启用短信后没有手机号登不上
 docker exec pb php bin/hyperf.php admin:unlock --username=admin   # 解封密码连续输错 5 次被封的管理员（见 docs/project.md 8.1）
+docker exec pb php bin/hyperf.php admin:set-mobile --username=admin --mobile=13800000000   # 设置管理员手机号，登录验证码发到这里（见 docs/project.md 8.2）
 docker compose restart                                 # 改完代码后重启生效（Swoole 常驻内存）
 docker exec pb composer test                           # 全部测试
 docker exec pb composer analyse                        # 静态分析
@@ -129,11 +130,11 @@ npm run build        # 产物在 merchant-web/dist，部署在 /merchant/ 路径
 | 方法 | 路径 | 权限 |
 |---|---|---|
 | GET | `/` | 公开，健康检查 |
-| POST | `/admin/auth/login` | 公开 |
+| POST | `/admin/auth/login`、`/admin/auth/login/sms-code`、`/admin/auth/login/verify`（平台启用短信时第二步验证短信） | 公开 |
 | GET | `/admin/auth/me` | 登录即可 |
 | PUT | `/admin/auth/password` | 登录即可 |
 | GET | `/admin/admin-users`、`/admin/admin-users/role-options` | `admin_user.view` |
-| POST/PUT | `/admin/admin-users`、`/{id}`、`/{id}/status`、`/{id}/password` | `admin_user.manage` |
+| POST/PUT | `/admin/admin-users`、`/{id}`（新建、编辑时手机号必填）、`/{id}/status`、`/{id}/password` | `admin_user.manage` |
 | GET | `/admin/roles`、`/admin/roles/permissions` | `role.view` |
 | POST/PUT/DELETE | `/admin/roles`、`/admin/roles/{id}` | `role.manage` |
 | GET | `/admin/operation-logs` | `operation_log.view` |
@@ -181,6 +182,7 @@ npm run build        # 产物在 merchant-web/dist，部署在 /merchant/ 路径
 - 部署在反向代理后面时配置 `TRUSTED_PROXIES`，操作日志、登录日志才能记到真实 IP
 - 线上不要配 `SUPPLIER_MOCK_ENABLED`（默认关）：开着时后台能建「固定返回成功」的模拟供应商
 - 确认容器里有 `crontab-dispatcher`、`async-queue`（默认 2 个）、`async-queue-notify` 这几个进程，否则定时任务和异步队列不执行
+- 平台启用了短信时管理员登录要短信验证码，没有手机号的管理员登不上：上线前先在「管理员账号」里给每个管理员补上手机号，或用 `admin:set-mobile` 设置
 - 部署后执行 `admin:sync-permissions`；这次加了登录态的 aud 校验，已登录的管理员需要重新登录一次
 
 ## 清理订单和商品（上线前清测试数据）

@@ -34,6 +34,7 @@ class AdminUser extends Model
         'username',
         'password',
         'real_name',
+        'mobile',
         'role_id',
         'status',
         'login_failures',

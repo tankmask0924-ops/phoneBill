@@ -38,7 +38,8 @@ class CreateAdminCommand extends HyperfCommand
         $this->setDescription('创建管理后台的超级管理员账号（幂等，可重复执行以创建更多账号）')
             ->addOption('username', null, InputOption::VALUE_REQUIRED, '登录用户名')
             ->addOption('password', null, InputOption::VALUE_REQUIRED, '登录密码')
-            ->addOption('real-name', null, InputOption::VALUE_OPTIONAL, '显示名称，缺省时等于 username');
+            ->addOption('real-name', null, InputOption::VALUE_OPTIONAL, '显示名称，缺省时等于 username')
+            ->addOption('mobile', null, InputOption::VALUE_OPTIONAL, '手机号；平台启用了短信时登录验证码发到这里，没有手机号登不上');
 
         parent::configure();
     }
@@ -49,9 +50,11 @@ class CreateAdminCommand extends HyperfCommand
         $password = (string) $this->input->getOption('password');
         $realNameOption = $this->input->getOption('real-name');
         $realName = is_string($realNameOption) ? $realNameOption : null;
+        $mobileOption = $this->input->getOption('mobile');
+        $mobile = is_string($mobileOption) ? $mobileOption : null;
 
         try {
-            $adminUser = $this->adminBootstrapService->createSuperAdmin($username, $password, $realName);
+            $adminUser = $this->adminBootstrapService->createSuperAdmin($username, $password, $realName, $mobile);
         } catch (InvalidArgumentException $e) {
             $this->error($e->getMessage());
 

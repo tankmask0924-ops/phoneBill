@@ -30,7 +30,7 @@ const dialogVisible = ref(false)
 const editing = ref<AdminUser | null>(null)
 const saving = ref(false)
 const formRef = ref<FormInstance>()
-const form = reactive({ username: '', real_name: '', role_id: undefined as number | undefined, password: '' })
+const form = reactive({ username: '', real_name: '', mobile: '', role_id: undefined as number | undefined, password: '' })
 const rules = computed<FormRules>(() => ({
   username: editing.value
     ? []
@@ -39,6 +39,10 @@ const rules = computed<FormRules>(() => ({
         { pattern: /^[A-Za-z0-9_.@-]{3,64}$/, message: '3~64 位字母、数字或 _ . @ -', trigger: 'blur' },
       ],
   real_name: [{ required: true, message: '请输入姓名', trigger: 'blur' }],
+  mobile: [
+    { required: true, message: '请输入手机号', trigger: 'blur' },
+    { pattern: /^1[3-9]\d{9}$/, message: '请输入正确的 11 位手机号', trigger: 'blur' },
+  ],
   role_id: [{ required: true, message: '请选择角色', trigger: 'change' }],
   password: editing.value
     ? []
@@ -49,13 +53,13 @@ const rules = computed<FormRules>(() => ({
 
 function openCreate() {
   editing.value = null
-  Object.assign(form, { username: '', real_name: '', role_id: undefined, password: '' })
+  Object.assign(form, { username: '', real_name: '', mobile: '', role_id: undefined, password: '' })
   dialogVisible.value = true
 }
 
 function openEdit(row: AdminUser) {
   editing.value = row
-  Object.assign(form, { username: row.username, real_name: row.real_name, role_id: row.role_id, password: '' })
+  Object.assign(form, { username: row.username, real_name: row.real_name, mobile: row.mobile ?? '', role_id: row.role_id, password: '' })
   dialogVisible.value = true
 }
 
@@ -66,13 +70,13 @@ async function save() {
   saving.value = true
   try {
     if (editing.value) {
-      const data: { real_name: string; role_id?: number } = { real_name: form.real_name }
+      const data: { real_name: string; mobile: string; role_id?: number } = { real_name: form.real_name, mobile: form.mobile.trim() }
       if (form.role_id !== editing.value.role_id) {
         data.role_id = form.role_id
       }
       await adminUserApi.update(editing.value.id, data)
     } else {
-      await adminUserApi.create({ ...form, role_id: form.role_id as number })
+      await adminUserApi.create({ ...form, mobile: form.mobile.trim(), role_id: form.role_id as number })
     }
     ElMessage.success('已保存')
     dialogVisible.value = false
@@ -148,6 +152,12 @@ onMounted(async () => {
       <el-table-column prop="id" label="ID" width="70" />
       <el-table-column prop="username" label="用户名" min-width="140" />
       <el-table-column prop="real_name" label="姓名" min-width="110" />
+      <el-table-column label="手机号" width="140">
+        <template #default="{ row }">
+          <span v-if="row.mobile">{{ row.mobile }}</span>
+          <el-tag v-else size="small" type="warning">未设置</el-tag>
+        </template>
+      </el-table-column>
       <el-table-column label="角色" min-width="110">
         <template #default="{ row }">{{ roleLabel(row.role_name) }}</template>
       </el-table-column>
@@ -194,6 +204,10 @@ onMounted(async () => {
       </el-form-item>
       <el-form-item label="姓名" prop="real_name">
         <el-input v-model="form.real_name" maxlength="64" />
+      </el-form-item>
+      <el-form-item label="手机号" prop="mobile">
+        <el-input v-model="form.mobile" maxlength="11" placeholder="11 位手机号" />
+        <div class="tip">平台启用了短信时，登录要输入发到这个手机的验证码</div>
       </el-form-item>
       <el-form-item label="角色" prop="role_id">
         <el-select v-model="form.role_id" :disabled="editing?.id === myId" style="width: 100%">

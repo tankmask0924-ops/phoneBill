@@ -161,6 +161,7 @@ export const securityReasonLabels: LabelMap = {
   wrong_password: { label: '密码错误' },
   disabled: { label: '账号已禁用' },
   sms_code: { label: '短信验证码错误' },
+  no_mobile: { label: '没有设置手机号' },
 }
 
 export const operationActionLabels: LabelMap = {

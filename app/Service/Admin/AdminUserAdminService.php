@@ -18,12 +18,15 @@ use App\Dao\AdminUserDao;
 use App\Model\AdminRole;
 use App\Model\AdminUser;
 use App\Service\AbstractService;
+use App\Support\Mobile;
 use Hyperf\DbConnection\Db;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpMessage\Exception\HttpException;
 
 /**
- * 系统设置 - 管理员账号：列表、新建、改姓名/角色、启用禁用、重置密码。
+ * 系统设置 - 管理员账号：列表、新建、改姓名/手机号/角色、启用禁用、重置密码。
+ *
+ * 手机号新建、编辑时必填（平台启用了短信时登录验证码发到这里，见 AuthService）。
  *
  * 防止把自己或整个后台锁在外面：
  * - 不能禁用自己、不能改自己的角色（自己的密码在右上角"修改密码"里改）；
@@ -98,11 +101,13 @@ class AdminUserAdminService extends AbstractService
         }
         $this->validatePassword($password);
         $role = $this->assignableRole($operator, $data['role_id'] ?? null);
+        $mobile = $this->mobile($data['mobile'] ?? null);
 
         $user = $this->adminUserDao->create([
             'username' => $username,
             'password' => password_hash($password, PASSWORD_BCRYPT),
             'real_name' => $realName !== '' ? mb_substr($realName, 0, 64) : $username,
+            'mobile' => $mobile,
             'role_id' => $role->id,
             'status' => 'active',
         ]);
@@ -113,7 +118,7 @@ class AdminUserAdminService extends AbstractService
     }
 
     /**
-     * 改姓名、角色。
+     * 改姓名、手机号、角色。还没有手机号的账号必须这次补上。
      *
      * @param array<string, mixed> $data
      * @return array<string, mixed>
@@ -133,6 +138,13 @@ class AdminUserAdminService extends AbstractService
                     throw new HttpException(422, '姓名不能为空');
                 }
                 $attrs['real_name'] = mb_substr($realName, 0, 64);
+            }
+
+            if (array_key_exists('mobile', $data) || ($user->mobile ?? '') === '') {
+                $mobile = $this->mobile($data['mobile'] ?? null);
+                if ($mobile !== $user->mobile) {
+                    $attrs['mobile'] = $mobile;
+                }
             }
 
             if (array_key_exists('role_id', $data) && (int) $data['role_id'] !== $user->role_id) {
@@ -222,6 +234,15 @@ class AdminUserAdminService extends AbstractService
         return $user;
     }
 
+    private function mobile(mixed $mobile): string
+    {
+        if ($mobile === null || $mobile === '') {
+            throw new HttpException(422, '请填写手机号');
+        }
+
+        return Mobile::normalize($mobile) ?? throw new HttpException(422, '请填写正确的手机号');
+    }
+
     private function validatePassword(string $password): void
     {
         if ($password === '') {
@@ -276,6 +297,7 @@ class AdminUserAdminService extends AbstractService
             'id' => $user->id,
             'username' => $user->username,
             'real_name' => $user->real_name,
+            'mobile' => $user->mobile,
             'role_id' => $user->role_id,
             'role_name' => $role?->name,
             'status' => $user->status,

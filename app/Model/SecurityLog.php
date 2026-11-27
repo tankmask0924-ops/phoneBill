@@ -64,6 +64,9 @@ class SecurityLog extends Model
 
     public const REASON_SMS_CODE = 'sms_code';
 
+    /** 平台启用了短信，管理员还没设置手机号，收不到登录验证码 */
+    public const REASON_NO_MOBILE = 'no_mobile';
+
     public bool $timestamps = false;
 
     protected ?string $table = 'security_logs';

@@ -9,6 +9,8 @@ export interface AdminUser {
   id: number
   username: string
   real_name: string
+  /** 平台启用了短信时登录验证码发到这里；老账号可能还没有 */
+  mobile: string | null
   role_id: number
   role_name: string | null
   status: string
@@ -30,9 +32,9 @@ export interface RoleOption {
 export const adminUserApi = {
   list: (params: Query) => http.get<Paged<AdminUser>>('/admin/admin-users', params),
   roleOptions: () => http.get<RoleOption[]>('/admin/admin-users/role-options'),
-  create: (data: { username: string; password: string; real_name: string; role_id: number }) =>
+  create: (data: { username: string; password: string; real_name: string; mobile: string; role_id: number }) =>
     http.post<AdminUser>('/admin/admin-users', data),
-  update: (id: number, data: { real_name?: string; role_id?: number }) => http.put<AdminUser>(`/admin/admin-users/${id}`, data),
+  update: (id: number, data: { real_name?: string; mobile?: string; role_id?: number }) => http.put<AdminUser>(`/admin/admin-users/${id}`, data),
   changeStatus: (id: number, status: string) => http.post<AdminUser>(`/admin/admin-users/${id}/status`, { status }),
   resetPassword: (id: number, password: string) => http.post<Ok>(`/admin/admin-users/${id}/password`, { password }),
 }

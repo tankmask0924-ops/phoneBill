@@ -45,6 +45,24 @@ class AuthController extends AbstractController
         return $this->authService->login($username, $password);
     }
 
+    /**
+     * 平台启用了短信时登录的第二步：重新发送验证码。
+     */
+    #[PostMapping(path: 'login/sms-code')]
+    public function resendLoginCode(): array
+    {
+        return $this->authService->resendLoginCode((string) $this->request->input('ticket', ''));
+    }
+
+    /**
+     * 平台启用了短信时登录的第二步：ticket + 验证码换 token。
+     */
+    #[PostMapping(path: 'login/verify')]
+    public function verifyLogin(): array
+    {
+        return $this->authService->verifyLogin((string) $this->request->input('ticket', ''), (string) $this->request->input('code', ''));
+    }
+
     #[Middleware(AdminAuthMiddleware::class)]
     #[GetMapping(path: 'me')]
     public function me(): array

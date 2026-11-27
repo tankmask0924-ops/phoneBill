@@ -33,6 +33,9 @@ class SmsCodeService extends AbstractService
 
     public const SCENE_RESET_SECRET = 'reset_secret';
 
+    /** 管理后台登录（和商户后台登录分开，同一个手机号两边都有账号时互不影响） */
+    public const SCENE_ADMIN_LOGIN = 'admin_login';
+
     public const COOLDOWN_SECONDS = 60;
 
     private const TTL_SECONDS = 300;

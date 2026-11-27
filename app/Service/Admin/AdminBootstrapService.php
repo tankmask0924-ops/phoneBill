@@ -20,6 +20,7 @@ use App\Model\AdminPermission;
 use App\Model\AdminRole;
 use App\Model\AdminUser;
 use App\Service\AbstractService;
+use App\Support\Mobile;
 use Hyperf\DbConnection\Db;
 use Hyperf\Di\Annotation\Inject;
 use InvalidArgumentException;
@@ -109,14 +110,19 @@ class AdminBootstrapService extends AbstractService
      * 创建一个拥有当前已知全部权限的超级管理员账号，find-or-create 角色/权限/授权关系，
      * 只有最终的 AdminUser 行是本次调用真正新建的东西。
      */
-    public function createSuperAdmin(string $username, string $password, ?string $realName = null): AdminUser
+    public function createSuperAdmin(string $username, string $password, ?string $realName = null, ?string $mobile = null): AdminUser
     {
         $username = trim($username);
         $realName = $this->resolveRealName($realName, $username);
 
         $this->validate($username, $password);
+        if ($mobile !== null && $mobile !== '') {
+            $mobile = $this->normalizeMobile($mobile);
+        } else {
+            $mobile = null;
+        }
 
-        return Db::transaction(function () use ($username, $password, $realName) {
+        return Db::transaction(function () use ($username, $password, $realName, $mobile) {
             $role = $this->ensureSuperAdminRole();
             $this->ensureRoleHasKnownPermissions($role);
             $this->ensurePresetRoles();
@@ -125,6 +131,7 @@ class AdminBootstrapService extends AbstractService
                 'username' => $username,
                 'password' => password_hash($password, PASSWORD_BCRYPT),
                 'real_name' => $realName,
+                'mobile' => $mobile,
                 'role_id' => $role->id,
                 'status' => 'active',
             ]);
@@ -146,6 +153,24 @@ class AdminBootstrapService extends AbstractService
         $this->adminUserDao->update($adminUser->id, ['status' => 'active', 'login_failures' => 0]);
 
         return $adminUser;
+    }
+
+    /**
+     * 命令行设置管理员手机号（admin:set-mobile）。平台启用了短信后，没有手机号的管理员登不上后台，
+     * 唯一的超级管理员没设置手机号、或者换了手机时，靠这个兜底。
+     *
+     * @throws InvalidArgumentException 用户名不存在、手机号不对
+     */
+    public function setAdminMobile(string $username, string $mobile): AdminUser
+    {
+        $adminUser = $this->adminUserDao->findByUsername(trim($username));
+        if ($adminUser === null) {
+            throw new InvalidArgumentException("管理员账号不存在：{$username}");
+        }
+        $mobile = $this->normalizeMobile($mobile);
+        $this->adminUserDao->update($adminUser->id, ['mobile' => $mobile]);
+
+        return $this->adminUserDao->find($adminUser->id) ?? $adminUser;
     }
 
     /**
@@ -183,6 +208,11 @@ class AdminBootstrapService extends AbstractService
         }
 
         throw new InvalidArgumentException("未知的权限编码：{$code}");
+    }
+
+    private function normalizeMobile(string $mobile): string
+    {
+        return Mobile::normalize($mobile) ?? throw new InvalidArgumentException("手机号不正确：{$mobile}");
     }
 
     private function validate(string $username, string $password): void

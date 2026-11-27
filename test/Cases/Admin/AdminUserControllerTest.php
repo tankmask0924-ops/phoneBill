@@ -43,12 +43,10 @@ class AdminUserControllerTest extends HttpTestCase
         $role = $this->createRole(['operation_log.view']);
         $username = 'new_' . substr(uniqid(), -8);
 
-        $created = $this->jsonRequest('POST', '/admin/admin-users', $token, [
-            'username' => $username,
-            'password' => 'initial-password',
-            'real_name' => '张三',
-            'role_id' => $role->id,
-        ]);
+        $payload = ['username' => $username, 'password' => 'initial-password', 'real_name' => '张三', 'role_id' => $role->id];
+        $this->assertSame(422, $this->jsonRequest('POST', '/admin/admin-users', $token, $payload)->getStatusCode(), '手机号必填');
+        $this->assertSame(422, $this->jsonRequest('POST', '/admin/admin-users', $token, ['mobile' => '12345'] + $payload)->getStatusCode());
+        $created = $this->jsonRequest('POST', '/admin/admin-users', $token, ['mobile' => '13800001111'] + $payload);
         $id = $this->body($created)['id'] ?? null;
         if ($id) {
             $this->adminUserIds[] = $id;
@@ -56,6 +54,7 @@ class AdminUserControllerTest extends HttpTestCase
 
         $this->assertSame(200, $created->getStatusCode());
         $this->assertSame($role->name, $this->body($created)['role_name']);
+        $this->assertSame('13800001111', $this->body($created)['mobile']);
         $this->assertSame(422, $this->jsonRequest('POST', '/admin/admin-users', $token, [
             'username' => $username, 'password' => 'initial-password', 'role_id' => $role->id,
         ])->getStatusCode());
@@ -66,6 +65,20 @@ class AdminUserControllerTest extends HttpTestCase
         $updated = $this->jsonRequest('PUT', "/admin/admin-users/{$id}", $token, ['real_name' => '李四']);
         $this->assertSame('李四', $this->body($updated)['real_name']);
         $this->assertSame(1, AdminOperationLog::where('action', 'update_admin_user')->where('target_id', $id)->count());
+
+        $this->assertSame(422, $this->jsonRequest('PUT', "/admin/admin-users/{$id}", $token, ['mobile' => ''])->getStatusCode(), '手机号不能清空');
+        $this->assertSame('13800002222', $this->body($this->jsonRequest('PUT', "/admin/admin-users/{$id}", $token, ['mobile' => '13800002222']))['mobile']);
+        $this->assertSame('13800002222', AdminUser::find($id)->mobile);
+    }
+
+    public function testEditingAnAdminWithoutMobileRequiresOne()
+    {
+        $token = $this->loginAs($this->createAdminWithPermissions(['admin_user.manage']));
+        $target = $this->createAdmin($this->createRole(['operation_log.view'])->id);
+
+        $this->assertSame(422, $this->jsonRequest('PUT', "/admin/admin-users/{$target->id}", $token, ['real_name' => '王五'])->getStatusCode());
+        $this->assertSame(200, $this->jsonRequest('PUT', "/admin/admin-users/{$target->id}", $token, ['real_name' => '王五', 'mobile' => '13800003333'])->getStatusCode());
+        $this->assertSame(['王五', '13800003333'], [AdminUser::find($target->id)->real_name, AdminUser::find($target->id)->mobile]);
     }
 
     public function testListWithNoMatchReturnsEmpty()
