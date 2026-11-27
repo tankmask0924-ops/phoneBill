@@ -97,6 +97,12 @@ class PortalController extends AbstractController
         );
     }
 
+    #[PostMapping(path: 'account/reset-secret/code')]
+    public function sendResetSecretCode(): array
+    {
+        return $this->accountService->sendResetSecretCode($this->user());
+    }
+
     #[PostMapping(path: 'account/reset-secret')]
     public function resetSecret(): array
     {
@@ -104,6 +110,7 @@ class PortalController extends AbstractController
             $this->user(),
             $this->merchant(),
             (string) $this->request->input('password', ''),
+            (string) $this->request->input('code', ''),
             $this->clientIpResolver->resolve($this->request),
         );
     }

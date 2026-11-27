@@ -1,5 +1,6 @@
 import router from '@/router'
 import { useAuthStore } from '@/stores/auth'
+import { useMeStore } from '@/stores/me'
 import { createHttp } from '@/utils/http'
 
 export const http = createHttp({
@@ -7,6 +8,7 @@ export const http = createHttp({
   getToken: () => useAuthStore().token,
   onUnauthorized: () => {
     useAuthStore().clear()
+    useMeStore().clear()
     router.push({ name: 'login', query: { redirect: router.currentRoute.value.fullPath } })
   },
 })

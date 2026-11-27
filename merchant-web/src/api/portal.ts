@@ -305,8 +305,11 @@ export const portalApi = {
   /** 改 IP 白名单、重置密钥都要再输一次登录密码 */
   updateIpWhitelist: (password: string, ipWhitelist: string) =>
     http.put<{ ip_whitelist: string[] }>('/merchant/account/ip-whitelist', { password, ip_whitelist: ipWhitelist }),
-  resetSecret: (password: string) =>
-    http.post<{ app_key: string; app_secret: string }>('/merchant/account/reset-secret', { password }),
+  /** 重置密钥前给当前账号绑定的手机发验证码（平台启用了短信时才需要），返回打码后的手机号 */
+  sendResetSecretCode: () => http.post<{ mobile: string }>('/merchant/account/reset-secret/code'),
+  /** code：平台启用了短信时必填，发到当前账号绑定手机的验证码 */
+  resetSecret: (password: string, code: string) =>
+    http.post<{ app_key: string; app_secret: string }>('/merchant/account/reset-secret', { password, code }),
   /** 余额提醒阈值，传 null 关闭；跌破一次提醒一次，充值回到阈值以上后再跌破会再提醒，每天最多 3 条 */
   updateBalanceAlert: (threshold: string | null) =>
     http.put<{ balance_alert_threshold: string | null }>('/merchant/account/balance-alert', { threshold }),

@@ -20,6 +20,9 @@ use App\Security\Encrypter;
 use App\Service\AbstractService;
 use App\Service\Merchant\MerchantAccessService;
 use App\Service\Security\SecurityLogService;
+use App\Service\Sms\SmsCodeService;
+use App\Service\Sms\SmsService;
+use App\Support\Mobile;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpMessage\Exception\HttpException;
 use Hyperf\Logger\LoggerFactory;
@@ -29,6 +32,7 @@ use Psr\Log\LoggerInterface;
  * 商户后台 - 商户自己改 IP 白名单、重置签名密钥（规则和平台后台一样，见 MerchantAccessService）、设余额提醒阈值。
  *
  * - 都会影响开放接口能不能调通，所以要再输一次登录密码确认；
+ * - 重置密钥还要输发到当前账号绑定手机的短信验证码（平台启用了短信时；没启用时只要登录密码）；
  * - 改完立即生效（Merchant 保存时清掉按 AppKey 的缓存）；新密钥只返回这一次，旧密钥立即失效；
  * - 操作记到 merchant 日志渠道，不记密钥本身；改白名单、重置密钥另记一条安全日志（SecurityLogService），平台后台「登录日志」里能查；
  * - 余额提醒阈值不影响接口，不用输密码（发送规则见 MerchantBalanceAlertService）。
@@ -50,6 +54,12 @@ class MerchantAccountService extends AbstractService
     #[Inject]
     protected SecurityLogService $securityLogService;
 
+    #[Inject]
+    protected SmsService $smsService;
+
+    #[Inject]
+    protected SmsCodeService $smsCodeService;
+
     /**
      * @return array{ip_whitelist: list<string>}
      */
@@ -67,11 +77,31 @@ class MerchantAccountService extends AbstractService
     }
 
     /**
+     * 重置密钥前给当前账号绑定的手机发验证码。
+     *
+     * @return array{mobile: string} 打码后的手机号
+     */
+    public function sendResetSecretCode(MerchantUser $user): array
+    {
+        $mobile = $this->resetSecretMobile($user) ?? throw new HttpException(422, '平台还没有开通短信服务，重置密钥不需要验证码');
+        $this->smsCodeService->send(SmsCodeService::SCENE_RESET_SECRET, $mobile);
+
+        return ['mobile' => Mobile::mask($mobile)];
+    }
+
+    /**
      * @return array{app_key: string, app_secret: string}
      */
-    public function resetSecret(MerchantUser $user, Merchant $merchant, string $password, ?string $ip): array
+    public function resetSecret(MerchantUser $user, Merchant $merchant, string $password, string $code, ?string $ip): array
     {
         $this->assertPassword($user, $password);
+        $mobile = $this->resetSecretMobile($user);
+        if ($mobile !== null) {
+            if (trim($code) === '') {
+                throw new HttpException(422, '请输入短信验证码');
+            }
+            $this->smsCodeService->verify(SmsCodeService::SCENE_RESET_SECRET, $mobile, $code);
+        }
         $secret = $this->accessService->newSecret();
         $this->merchantDao->update($merchant->id, ['app_secret' => $this->encrypter->encrypt($secret)]);
         $this->logger()->info('商户重置签名密钥', ['merchant_id' => $merchant->id, 'user' => $user->username, 'ip' => $ip]);
@@ -100,6 +130,21 @@ class MerchantAccountService extends AbstractService
         $this->logger()->info('商户修改余额提醒阈值', ['merchant_id' => $merchant->id, 'user' => $user->username, 'ip' => $ip, 'before' => $before, 'after' => $value]);
 
         return ['balance_alert_threshold' => $value];
+    }
+
+    /**
+     * 重置密钥要验证码时发到哪个手机号；平台没启用短信时返回 null（只校验登录密码）。
+     */
+    private function resetSecretMobile(MerchantUser $user): ?string
+    {
+        if (! $this->smsService->available()) {
+            return null;
+        }
+        if (($user->mobile ?? '') === '') {
+            throw new HttpException(422, '请先绑定手机号');
+        }
+
+        return (string) $user->mobile;
     }
 
     private function assertPassword(MerchantUser $user, string $password): void

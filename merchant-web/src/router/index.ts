@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import Layout from '@/layout/index.vue'
 import { useAuthStore } from '@/stores/auth'
+import { useMeStore } from '@/stores/me'
 
 declare module 'vue-router' {
   interface RouteMeta {
@@ -19,6 +20,12 @@ const router = createRouter({
       name: 'login',
       component: () => import('@/views/LoginView.vue'),
       meta: { title: '登录', public: true },
+    },
+    {
+      path: '/bind-mobile',
+      name: 'bind-mobile',
+      component: () => import('@/views/BindMobileView.vue'),
+      meta: { title: '绑定手机' },
     },
     {
       path: '/',
@@ -45,12 +52,26 @@ const router = createRouter({
   ],
 })
 
-router.beforeEach((to) => {
-  const loggedIn = useAuthStore().isLoggedIn
+router.beforeEach(async (to) => {
+  const auth = useAuthStore()
   if (to.meta.public) {
-    return to.name === 'login' && loggedIn ? { path: '/' } : true
+    return to.name === 'login' && auth.isLoggedIn ? { path: '/' } : true
   }
-  return loggedIn ? true : { name: 'login', query: { redirect: to.fullPath } }
+  if (!auth.isLoggedIn) {
+    return { name: 'login', query: { redirect: to.fullPath } }
+  }
+  // 平台启用了短信、账号没绑定手机：先去绑定（后端同样拦截其他接口）
+  const meStore = useMeStore()
+  try {
+    await meStore.load()
+  } catch {
+    // 401 已由 http 拦截器跳转登录页；其他错误先放行，页面自己会报错
+    return auth.isLoggedIn ? true : { name: 'login', query: { redirect: to.fullPath } }
+  }
+  if (meStore.mobileRequired) {
+    return to.name === 'bind-mobile' ? true : { name: 'bind-mobile', query: { redirect: to.fullPath } }
+  }
+  return to.name === 'bind-mobile' ? { path: '/' } : true
 })
 
 export default router

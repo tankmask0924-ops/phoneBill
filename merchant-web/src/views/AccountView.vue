@@ -4,11 +4,13 @@ import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { bindMobile, fetchMe, type Me, sendBindCode, setSmsLogin } from '@/api/auth'
 import { type Account, portalApi } from '@/api/portal'
+import { useMeStore } from '@/stores/me'
 import { useCountdown } from '@/utils/countdown'
 
 const router = useRouter()
 const account = ref<Account | null>(null)
 const me = ref<Me | null>(null)
+const meStore = useMeStore()
 
 // ---- 绑定 / 修改手机 ----
 const mobileVisible = ref(false)
@@ -49,6 +51,7 @@ async function saveMobile() {
     if (me.value) {
       me.value.mobile = mobile
     }
+    meStore.setMobile(mobile)
     account.value = await portalApi.account()
     mobileVisible.value = false
     ElMessage.success(me.value?.sms_login_enabled ? '已修改，登录验证码会发到新手机' : '已绑定，可以开启登录短信验证')
@@ -147,13 +150,29 @@ async function saveIp() {
 const secretVisible = ref(false)
 const secretSaving = ref(false)
 const secretPassword = ref('')
+const secretCode = ref('')
+const secretCodeSending = ref(false)
+const secretCountdown = useCountdown()
 /** 重置成功后的新密钥，只显示这一次 */
 const newSecret = ref('')
 
 function openSecret() {
   secretPassword.value = ''
+  secretCode.value = ''
   newSecret.value = ''
+  secretCountdown.stop()
   secretVisible.value = true
+}
+
+async function sendSecretCode() {
+  secretCodeSending.value = true
+  try {
+    const { mobile } = await portalApi.sendResetSecretCode()
+    secretCountdown.start()
+    ElMessage.success(`验证码已发送到 ${mobile}`)
+  } finally {
+    secretCodeSending.value = false
+  }
 }
 
 async function resetSecret() {
@@ -161,10 +180,15 @@ async function resetSecret() {
     ElMessage.warning('请输入登录密码')
     return
   }
+  if (me.value?.sms_available && !/^\d{6}$/.test(secretCode.value.trim())) {
+    ElMessage.warning('请输入 6 位短信验证码')
+    return
+  }
   secretSaving.value = true
   try {
-    newSecret.value = (await portalApi.resetSecret(secretPassword.value)).app_secret
+    newSecret.value = (await portalApi.resetSecret(secretPassword.value, secretCode.value.trim())).app_secret
     secretPassword.value = ''
+    secretCode.value = ''
   } finally {
     secretSaving.value = false
   }
@@ -315,6 +339,15 @@ onMounted(async () => {
         <el-form label-width="80px" class="secret-form" @submit.prevent="resetSecret">
           <el-form-item label="登录密码">
             <el-input v-model="secretPassword" type="password" show-password autocomplete="current-password" placeholder="确认是你本人操作" />
+          </el-form-item>
+          <el-form-item v-if="me?.sms_available" label="验证码">
+            <div class="code-row">
+              <el-input v-model="secretCode" maxlength="6" placeholder="6 位验证码" autocomplete="one-time-code" />
+              <el-button :disabled="secretCountdown.seconds.value > 0" :loading="secretCodeSending" @click="sendSecretCode">
+                {{ secretCountdown.seconds.value > 0 ? `${secretCountdown.seconds.value} 秒后重发` : '获取验证码' }}
+              </el-button>
+            </div>
+            <div class="cell-tip">发到当前账号绑定的手机 {{ me.mobile }}</div>
           </el-form-item>
         </el-form>
       </template>

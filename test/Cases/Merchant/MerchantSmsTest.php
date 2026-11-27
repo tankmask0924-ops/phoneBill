@@ -17,6 +17,7 @@ use App\Model\MerchantUser;
 use App\Model\Order;
 use App\Model\SystemSetting;
 use App\Network\HttpClient;
+use App\Security\Encrypter;
 use App\Service\Merchant\MerchantBalanceAlertService;
 use App\Service\Merchant\MerchantConsumptionService;
 use App\Service\Setting\SettingService;
@@ -37,7 +38,7 @@ use HyperfTest\Support\FakeHttpClient;
 use function Hyperf\Support\make;
 
 /**
- * 短信：平台配置阿里云短信、商户绑定手机、绑定后登录要验证码、余额提醒（跌破一次提醒一次，充值后重新开启，每天有上限）、商户列表的今日 / 累计消费。
+ * 短信：平台配置阿里云短信、商户绑定手机（启用短信后强制绑定）、绑定后登录要验证码、重置签名密钥要验证码、余额提醒（跌破一次提醒一次，充值后重新开启，每天有上限）、商户列表的今日 / 累计消费。
  *
  * @internal
  * @coversNothing
@@ -92,7 +93,7 @@ class MerchantSmsTest extends HttpTestCase
         }
         $redis = make(Redis::class);
         foreach ($this->mobiles as $mobile) {
-            $redis->del("sms_cooldown:{$mobile}", "sms_daily:{$mobile}:" . date('Ymd'), "sms_code:login:{$mobile}", "sms_code:bind:{$mobile}");
+            $redis->del("sms_cooldown:{$mobile}", "sms_daily:{$mobile}:" . date('Ymd'), "sms_code:login:{$mobile}", "sms_code:bind:{$mobile}", "sms_code:reset_secret:{$mobile}");
         }
         $this->cleanUpCatalog();
         $this->cleanUpAdmins();
@@ -154,7 +155,7 @@ class MerchantSmsTest extends HttpTestCase
         $this->assertSame(422, $this->jsonRequest('POST', '/merchant/auth/mobile/code', $token, ['mobile' => $mobile])->getStatusCode());
         make(SettingService::class)->set(SmsService::SETTING_KEY, self::CONFIG);
         $this->assertTrue($this->body($this->jsonRequest('GET', '/merchant/auth/me', $token))['sms_available']);
-        $this->assertSame(422, $this->jsonRequest('PUT', '/merchant/auth/sms-login', $token, ['enabled' => true, 'password' => self::PASSWORD])->getStatusCode(), '没绑定手机不能开启');
+        $this->assertSame(403, $this->jsonRequest('PUT', '/merchant/auth/sms-login', $token, ['enabled' => true, 'password' => self::PASSWORD])->getStatusCode(), '没绑定手机不能开启');
 
         $this->assertSame(422, $this->jsonRequest('POST', '/merchant/auth/mobile/code', $token, ['mobile' => '12345'])->getStatusCode());
         $this->assertSame(200, $this->jsonRequest('POST', '/merchant/auth/mobile/code', $token, ['mobile' => $mobile])->getStatusCode());
@@ -209,6 +210,63 @@ class MerchantSmsTest extends HttpTestCase
         $this->assertTrue($users[0]['sms_login_enabled']);
         $unbound = $this->body($this->jsonRequest('POST', "/admin/merchants/{$user->merchant_id}/users/{$user->id}/unbind-mobile", $admin));
         $this->assertSame([null, false], [$unbound['mobile'], $unbound['sms_login_enabled']], '解绑同时关掉登录短信验证');
+    }
+
+    public function testMobileIsRequiredOnceSmsIsAvailable()
+    {
+        $user = $this->createMerchantUser($this->createMerchant());
+        $token = $this->merchantLogin($user->username)['token'];
+
+        // 平台没开短信：没法绑定，照常用
+        $this->assertSame(200, $this->jsonRequest('GET', '/merchant/account', $token)->getStatusCode());
+
+        make(SettingService::class)->set(SmsService::SETTING_KEY, self::CONFIG);
+        foreach (['/merchant/account', '/merchant/dashboard', '/merchant/orders'] as $path) {
+            $this->assertSame(403, $this->jsonRequest('GET', $path, $token)->getStatusCode(), "没绑定手机不能调 {$path}");
+        }
+        $this->assertSame(403, $this->jsonRequest('POST', '/merchant/batch-orders', $token, ['product_code' => 'X', 'mobiles' => ['13800000000'], 'batch_no' => 'B20261127000000aaaaaaaa'])->getStatusCode());
+        $me = $this->body($this->jsonRequest('GET', '/merchant/auth/me', $token));
+        $this->assertSame([null, true], [$me['mobile'], $me['sms_available']], '查自己不拦，前端据此跳到绑定手机');
+
+        // 绑定后放行
+        $mobile = $this->mobile();
+        $this->assertSame(200, $this->jsonRequest('POST', '/merchant/auth/mobile/code', $token, ['mobile' => $mobile])->getStatusCode());
+        $bound = $this->jsonRequest('PUT', '/merchant/auth/mobile', $token, ['mobile' => $mobile, 'code' => $this->lastCode(), 'password' => self::PASSWORD]);
+        $this->assertSame(200, $bound->getStatusCode(), (string) $bound->getBody());
+        $this->assertSame(200, $this->jsonRequest('GET', '/merchant/account', $token)->getStatusCode());
+    }
+
+    public function testResetSecretNeedsSmsCode()
+    {
+        make(SettingService::class)->set(SmsService::SETTING_KEY, self::CONFIG);
+        $merchant = $this->createMerchant();
+        $mobile = $this->mobile();
+        $user = $this->createMerchantUser($merchant, $mobile);
+        $token = $this->verifyLatest($user);
+        $original = Merchant::find($merchant->id)->app_secret;
+        $redis = make(Redis::class);
+
+        $this->assertSame(422, $this->jsonRequest('POST', '/merchant/account/reset-secret', $token, ['password' => self::PASSWORD])->getStatusCode(), '没有验证码不能重置');
+
+        $redis->del("sms_cooldown:{$mobile}");
+        $sent = $this->body($this->jsonRequest('POST', '/merchant/account/reset-secret/code', $token));
+        $this->assertSame(substr($mobile, 0, 3) . '****' . substr($mobile, -4), $sent['mobile']);
+        $this->assertSame($mobile, end($this->http->requests)['payload']['PhoneNumbers'], '发到账号绑定的手机');
+        $this->assertSame(429, $this->jsonRequest('POST', '/merchant/account/reset-secret/code', $token)->getStatusCode(), '60 秒内不能重发');
+        $code = $this->lastCode();
+
+        $this->assertSame(422, $this->jsonRequest('POST', '/merchant/account/reset-secret', $token, ['password' => self::PASSWORD, 'code' => $this->wrong($code)])->getStatusCode());
+        $this->assertSame(422, $this->jsonRequest('POST', '/merchant/account/reset-secret', $token, ['password' => 'wrong', 'code' => $code])->getStatusCode());
+        $this->assertSame($original, Merchant::find($merchant->id)->app_secret, '验证码或密码不对不重置');
+
+        $reset = $this->body($this->jsonRequest('POST', '/merchant/account/reset-secret', $token, ['password' => self::PASSWORD, 'code' => $code]));
+        $this->assertSame($reset['app_secret'], make(Encrypter::class)->decrypt(Merchant::find($merchant->id)->app_secret));
+        $this->assertSame(422, $this->jsonRequest('POST', '/merchant/account/reset-secret', $token, ['password' => self::PASSWORD, 'code' => $code])->getStatusCode(), '验证码用过就作废');
+
+        // 登录验证码不能拿来重置密钥
+        $redis->del("sms_cooldown:{$mobile}");
+        $this->merchantLogin($user->username);
+        $this->assertSame(422, $this->jsonRequest('POST', '/merchant/account/reset-secret', $token, ['password' => self::PASSWORD, 'code' => $this->lastCode()])->getStatusCode());
     }
 
     public function testWrongCodesInvalidateTheCode()

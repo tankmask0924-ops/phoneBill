@@ -31,6 +31,8 @@ class SmsCodeService extends AbstractService
 
     public const SCENE_BIND = 'bind';
 
+    public const SCENE_RESET_SECRET = 'reset_secret';
+
     public const COOLDOWN_SECONDS = 60;
 
     private const TTL_SECONDS = 300;

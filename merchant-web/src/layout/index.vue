@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { changePassword, fetchMe, type Me } from '@/api/auth'
+import { changePassword } from '@/api/auth'
 import ChangePasswordDialog from '@/components/ChangePasswordDialog.vue'
 import { useAuthStore } from '@/stores/auth'
+import { useMeStore } from '@/stores/me'
 import { useSiteStore } from '@/stores/site'
 import AppLayout from './AppLayout.vue'
 import { menus } from './menus'
@@ -12,19 +13,18 @@ const auth = useAuthStore()
 const router = useRouter()
 const site = useSiteStore()
 const passwordDialog = ref(false)
-const me = ref<Me | null>(null)
+const meStore = useMeStore()
+/** 路由守卫进来之前已经取过 */
+const me = computed(() => meStore.me)
 
 /** 右上角显示「商户名 · 账号」 */
 const displayName = computed(() => (me.value ? `${me.value.merchant_name} · ${auth.username}` : auth.username))
 
 function logout() {
   auth.clear()
+  meStore.clear()
   router.push({ name: 'login' })
 }
-
-onMounted(async () => {
-  me.value = await fetchMe()
-})
 </script>
 
 <template>
