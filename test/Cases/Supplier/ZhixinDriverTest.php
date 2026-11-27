@@ -207,6 +207,7 @@ class ZhixinDriverTest extends HttpTestCase
         $this->assertSame(RechargeStatus::Processing, $result->status);
         $this->assertFalse($result->callFailed);
         $this->assertStringContainsString('只记录', $result->message);
+        $this->assertTrue($result->notFound, '上游明确查不到这笔订单');
 
         // 603 查询异常、606、751、表外的码和状态、订单号对不上、没拿到返回：不处理订单
         foreach ([

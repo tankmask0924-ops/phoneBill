@@ -132,10 +132,10 @@ class YbDriver implements SupplierDriverInterface
         if ($body !== null && $body['code'] !== self::CODE_OK && str_contains($body['msg'], self::MSG_NOT_FOUND)) {
             // 不知道提交时间时不判失败
             if ($request->submittedAt !== null && time() - $request->submittedAt >= self::NOT_FOUND_FAIL_AFTER) {
-                return RechargeResult::failed('提交 5 分钟后上游仍无该订单信息，按失败处理', $request->supplierOrderNo, $sent, $response['body']);
+                return RechargeResult::failed('提交 5 分钟后上游仍无该订单信息，按失败处理', $request->supplierOrderNo, $sent, $response['body'])->asNotFound();
             }
 
-            return RechargeResult::processing($request->supplierOrderNo, '查单：上游无该订单，提交未满 5 分钟，只记录：' . $this->describe($body, $response), $sent, $response['body']);
+            return RechargeResult::processing($request->supplierOrderNo, '查单：上游无该订单，提交未满 5 分钟，只记录：' . $this->describe($body, $response), $sent, $response['body'])->asNotFound();
         }
         $data = $body !== null && $body['code'] === self::CODE_OK ? $body['data'] : [];
         $status = $this->scalar($data, 'Status');

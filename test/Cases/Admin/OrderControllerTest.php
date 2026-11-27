@@ -350,7 +350,7 @@ class OrderControllerTest extends HttpTestCase
         $queried = $this->body($this->jsonRequest('POST', "/admin/orders/{$processing->id}/query", $token));
         $this->assertSame('success', $queried['status']);
         // 模拟供应商不发 HTTP 请求，接口通不通记为 null（不显示）
-        $this->assertSame([['attempt_no' => $processing->order_no . '01', 'status' => 'success', 'message' => null, 'http_status' => null, 'applied' => true]], $queried['query_results']);
+        $this->assertSame([['attempt_no' => $processing->order_no . '01', 'status' => 'success', 'message' => null, 'http_status' => null, 'not_found' => false, 'applied' => true]], $queried['query_results']);
         $this->assertNull($queried['attempts'][0]['query_http_status']);
         $this->assertSame('success', $queried['attempts'][0]['query_status'], '查单结果记在提交上，详情里展示');
         $this->assertNotNull($queried['attempts'][0]['last_queried_at']);
@@ -377,7 +377,7 @@ class OrderControllerTest extends HttpTestCase
         $this->assertSame([$manual->id], array_column($this->dispatcher->notifies, 'order_id'));
         // 已经有结果的订单也能查：只记录，不改提交和订单
         $recorded = $this->body($this->jsonRequest('POST', "/admin/orders/{$done->id}/query", $token));
-        $this->assertSame([['attempt_no' => $done->order_no . '01', 'status' => 'success', 'message' => null, 'http_status' => null, 'applied' => false]], $recorded['query_results']);
+        $this->assertSame([['attempt_no' => $done->order_no . '01', 'status' => 'success', 'message' => null, 'http_status' => null, 'not_found' => false, 'applied' => false]], $recorded['query_results']);
         $this->assertSame('success', $recorded['status']);
         $this->assertSame([], $recorded['warnings']);
 

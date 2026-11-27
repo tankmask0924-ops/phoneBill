@@ -168,6 +168,7 @@ class ChongyidaDriverTest extends HttpTestCase
         $this->assertSame(RechargeStatus::Processing, $result->status);
         $this->assertSame('C9', $result->supplierOrderNo);
         $this->assertStringContainsString('查不到这笔订单', $result->message);
+        $this->assertTrue($result->notFound, '上游明确查不到这笔订单');
 
         // 出错、空列表、单号对不上、没有状态、无法解析：处理中
         foreach ([

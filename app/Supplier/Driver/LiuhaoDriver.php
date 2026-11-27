@@ -192,7 +192,7 @@ class LiuhaoDriver implements SupplierDriverInterface
         ]);
         $body = $this->decode($response['body']);
         if ($body !== null && $body['ResultCode'] === self::CODE_NOT_FOUND) {
-            return RechargeResult::processing($supplierOrderNo, '查单：上游订单不存在，只记录：' . $this->describe($body, $response), $sent, $response['body']);
+            return RechargeResult::processing($supplierOrderNo, '查单：上游订单不存在，只记录：' . $this->describe($body, $response), $sent, $response['body'])->asNotFound();
         }
         $status = $body !== null && $body['ResultCode'] === self::CODE_OK && is_scalar($body['OrderStatus'] ?? null) ? (string) $body['OrderStatus'] : null;
 

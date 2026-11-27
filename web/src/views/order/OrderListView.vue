@@ -157,6 +157,9 @@ async function query() {
     if (r.status === 'success') {
       return `${prefix}供应商确认成功${reason}${recorded}`
     }
+    if (r.not_found) {
+      return `${prefix}供应商查不到这笔订单${reason}${recorded}`
+    }
     if (r.status === 'failed') {
       return `${prefix}供应商确认失败${reason}${recorded}`
     }
@@ -171,6 +174,8 @@ async function query() {
     next = '这是人工处理单，上游还没有明确结果，可以稍后再查；也可以到上游核实后置为成功 / 失败（会自动回调商户），确认上游没有充上也可以手动补单。'
   } else if (result.status === 'success') {
     next = '订单已改为成功，会通知商户。'
+  } else if (result.status === 'failed' && result.query_results.some((r) => r.applied && r.not_found)) {
+    next = '供应商查不到这笔订单，订单已置为失败并退款，会通知商户。'
   } else if (result.status === 'failed') {
     next = '订单已失败并退款，会通知商户。'
   } else if (result.status === 'timeout') {

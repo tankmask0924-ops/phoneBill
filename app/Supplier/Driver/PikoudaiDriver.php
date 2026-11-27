@@ -106,7 +106,7 @@ class PikoudaiDriver implements SupplierDriverInterface
         [$sent, $response] = $this->call($request->config, self::PATH_QUERY, ['merchant_order_no' => $request->attemptNo]);
         $body = $this->decode($response['body']);
         if ($body !== null && $body['code'] === self::CODE_NOT_FOUND) {
-            return RechargeResult::processing($request->supplierOrderNo, '查单：上游查不到这笔订单，只记录：' . $this->describe($body, $response), $sent, $response['body']);
+            return RechargeResult::processing($request->supplierOrderNo, '查单：上游查不到这笔订单，只记录：' . $this->describe($body, $response), $sent, $response['body'])->asNotFound();
         }
         $data = $body !== null && $body['code'] === self::CODE_OK && is_array($body['data'] ?? null) ? $body['data'] : null;
         if ($data === null || ! is_string($data['orderStatus'] ?? null) || ! $this->sameOrder($data, $request->attemptNo)) {

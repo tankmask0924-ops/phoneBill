@@ -195,7 +195,7 @@ class TurboDriver implements SupplierDriverInterface, ProvidesUpstreamProducts
                 throw new UnclearResultException(RechargeResult::processing($supplierOrderNo, $message, $sent, $response['body']));
             }
 
-            return RechargeResult::failed($message, $supplierOrderNo, $sent, $response['body']);
+            return RechargeResult::failed($message, $supplierOrderNo, $sent, $response['body'])->asNotFound();
         }
         $data = $body !== null && $body['status'] === self::STATUS_OK && is_array($body['data'] ?? null) ? $body['data'] : null;
         $externalOrderNo = is_scalar($data['externalOrderNo'] ?? null) ? (string) $data['externalOrderNo'] : '';

@@ -254,15 +254,20 @@ class OrderAdminService extends AbstractService
         }
         $results = [];
         foreach ($attempts as $attempt) {
+            $before = $this->orderDao->find($order->id)?->status;
             $result = $this->processService->queryAttempt($attempt, true);
+            // 异常订单上游查不到订单被置为失败：提交可能早已被定时查单记成失败，也算这次处理了
+            $failedNotFound = $result->notFound && $before === Order::STATUS_ABNORMAL && $this->orderDao->find($order->id)?->status === Order::STATUS_FAILED;
             $results[] = [
                 'attempt_no' => $attempt->attempt_no,
                 'status' => $result->status->value,
                 'message' => $result->message,
                 // 接口通不通：HTTP 状态码，0 = 没拿到响应（连不上、超时）
                 'http_status' => $result->httpStatus,
+                // 上游明确回复查不到这笔订单（异常订单人工查单时据此置失败并通知商户）
+                'not_found' => $result->notFound,
                 // 提交本来还在处理中、这次按查单结果处理了；已有结果的只记录
-                'applied' => $attempt->status === OrderAttempt::STATUS_PROCESSING,
+                'applied' => $attempt->status === OrderAttempt::STATUS_PROCESSING || $failedNotFound,
             ];
         }
         $this->operationLogDao->record($operator->id, self::MODULE, 'query_order', 'order', $order->id, null, ['results' => $results], $ip);

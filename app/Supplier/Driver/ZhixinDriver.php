@@ -134,7 +134,7 @@ class ZhixinDriver implements SupplierDriverInterface
         ]);
         $body = $this->decode($response['body']);
         if ($body !== null && $body['code'] === self::CODE_NOT_FOUND) {
-            return RechargeResult::processing($request->supplierOrderNo, '查单：上游订单不存在，只记录：' . $this->describe($body, $response), $sent, $response['body']);
+            return RechargeResult::processing($request->supplierOrderNo, '查单：上游订单不存在，只记录：' . $this->describe($body, $response), $sent, $response['body'])->asNotFound();
         }
         $data = $body !== null && $body['code'] === self::CODE_OK && is_array($body['data'] ?? null) ? $body['data'] : null;
         $status = is_scalar($data['recharge_status'] ?? null) ? (string) $data['recharge_status'] : null;

@@ -141,7 +141,7 @@ export const orderApi = {
   detail: (id: number) => http.get<OrderDetail>(`/admin/orders/${id}`),
   /** 人工查单，query_results 是这次每个提交查到的结果；applied 为 false 的是已有结果的提交，只记录 */
   query: (id: number) =>
-    http.post<OrderDetail & { query_results: { attempt_no: string; status: string; message: string | null; http_status: number | null; applied: boolean }[] }>(
+    http.post<OrderDetail & { query_results: { attempt_no: string; status: string; message: string | null; http_status: number | null; not_found: boolean; applied: boolean }[] }>(
       `/admin/orders/${id}/query`,
     ),
   confirmSuccess: (id: number, remark: string) => http.post<OrderDetail>(`/admin/orders/${id}/success`, { remark }),

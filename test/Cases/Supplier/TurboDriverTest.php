@@ -13,6 +13,7 @@ declare(strict_types=1);
 namespace HyperfTest\Cases\Supplier;
 
 use App\Model\Merchant;
+use App\Model\MerchantBalanceLog;
 use App\Model\Order;
 use App\Model\OrderAttempt;
 use App\Model\Product;
@@ -31,6 +32,7 @@ use Hyperf\Contract\ApplicationInterface;
 use Hyperf\Di\Container;
 use Hyperf\Di\Definition\DefinitionSourceFactory;
 use Hyperf\Testing\Client;
+use HyperfTest\Cases\Admin\CreatesAdmins;
 use HyperfTest\Cases\Admin\CreatesCatalog;
 use HyperfTest\HttpTestCase;
 use HyperfTest\Support\FakeHttpClient;
@@ -47,7 +49,10 @@ use function Hyperf\Support\make;
  */
 class TurboDriverTest extends HttpTestCase
 {
+    use CreatesAdmins;
     use CreatesCatalog;
+
+    private const PASSWORD = 'correct-password';
 
     private const CONFIG = [
         'api_url' => 'https://turbo.test/',
@@ -71,6 +76,7 @@ class TurboDriverTest extends HttpTestCase
     protected function tearDown(): void
     {
         $this->cleanUpCatalog();
+        $this->cleanUpAdmins();
         parent::tearDown();
     }
 
@@ -358,6 +364,51 @@ class TurboDriverTest extends HttpTestCase
         $this->replay($confirms[1]);
         $this->assertCount(2, $this->dispatcher()->callbackConfirms);
         $this->assertSame('success', OrderAttempt::find($attempt->id)->query_status);
+    }
+
+    public function testAdminQueryNotFoundFailsAbnormalOrderAndNotifies()
+    {
+        [$merchant, $product, $mobile] = $this->scenario();
+        $this->http->responses = [['exception' => 'cURL error 28: Operation timed out']];
+        $order = $this->placeOrder($merchant, $product, $mobile);
+        $this->process()->submit($order->id);
+        $attempt = OrderAttempt::where('order_id', $order->id)->first();
+        $this->assertSame([Order::STATUS_ABNORMAL, true], [Order::find($order->id)->status, (bool) Order::find($order->id)->manual_only]);
+        $notFound = ['status' => 'error', 'data' => null, 'error' => ['code' => 'INVALID_PARAMETER', 'details' => 'Order not found.']];
+
+        // 定时查单查不到：人工处理单只记录（提交记成失败，订单不动）
+        $this->respond($notFound, 400);
+        $this->process()->queryAttempt(OrderAttempt::find($attempt->id));
+        $this->assertSame([Order::STATUS_ABNORMAL, OrderAttempt::STATUS_FAILED], [Order::find($order->id)->status, OrderAttempt::find($attempt->id)->status]);
+        $this->assertSame([], $this->dispatcher()->notifies);
+
+        // 人工点查单，上游明确查不到：直接失败退款并通知商户，不再换供应商
+        $submitted = count($this->dispatcher()->submits);
+        $token = $this->loginAs($this->createAdminWithPermissions(['order.view', 'order.manage']));
+        $queried = $this->body($this->jsonRequest('POST', "/admin/orders/{$order->id}/query", $token));
+        $this->assertSame([['attempt_no' => $attempt->attempt_no, 'status' => 'failed', 'http_status' => 400, 'not_found' => true, 'applied' => true]], array_map(
+            static fn (array $r) => array_diff_key($r, ['message' => 1]),
+            $queried['query_results'],
+        ), '提交早被定时查单记成失败，这次置失败也算处理了');
+        $this->assertSame([Order::STATUS_FAILED, false], [$queried['status'], $queried['manual_only']]);
+        $order = Order::find($order->id);
+        $this->assertSame([Order::STATUS_FAILED, false], [$order->status, (bool) $order->manual_only]);
+        $this->assertStringStartsWith('人工查单上游查不到这笔订单：上游无此订单', $order->fail_reason);
+        $this->assertSame(OrderAttempt::STATUS_FAILED, OrderAttempt::find($attempt->id)->status);
+        $this->assertSame(1, MerchantBalanceLog::where('order_id', $order->id)->where('type', MerchantBalanceLog::TYPE_ORDER_REFUND)->count());
+        $dispatcher = $this->dispatcher();
+        $this->assertSame([$order->id], array_column($dispatcher->notifies, 'order_id'));
+        $this->assertCount($submitted, $dispatcher->submits, '不换供应商');
+
+        // 不是异常的订单人工查到查无此单：照原规则（Turbo 判失败换下一家）
+        $this->respond($this->ok(['orderNo' => 'TD2', 'orderStatus' => 'Processing', 'rechargeStatus' => 0]));
+        $other = $this->placeOrder($merchant, $product, $mobile = $this->createSegment('cmcc', '广东'));
+        $this->process()->submit($other->id);
+        $this->respond($notFound, 400);
+        $submitted = count($dispatcher->submits);
+        $this->process()->queryAttempt(OrderAttempt::where('order_id', $other->id)->first(), true);
+        $this->assertSame(Order::STATUS_PROCESSING, Order::find($other->id)->status);
+        $this->assertSame([$other->id], array_column(array_slice($dispatcher->submits, $submitted), 'order_id'));
     }
 
     public function testUnconfirmedCallbackStopsRetryingAfterThreeTimes()

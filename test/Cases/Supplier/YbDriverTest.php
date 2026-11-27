@@ -169,12 +169,14 @@ class YbDriverTest extends HttpTestCase
             $result = $this->driver()->query($this->request(null, null, $submittedAt));
             $this->assertSame(RechargeStatus::Processing, $result->status);
             $this->assertStringContainsString('无该订单', $result->message);
+            $this->assertTrue($result->notFound, '上游明确查不到这笔订单');
         }
         // 满 5 分钟仍查不到：失败
         $result = $this->driver()->query($this->request('S001', null, time() - 300));
         $this->assertSame(RechargeStatus::Failed, $result->status);
         $this->assertSame('S001', $result->supplierOrderNo);
         $this->assertStringContainsString('无该订单信息', $result->message);
+        $this->assertTrue($result->notFound, '上游明确查不到这笔订单');
 
         // 其他报错、单号对不上（平台单号也不认）、没有状态、无法解析：处理中
         foreach ([

@@ -93,7 +93,7 @@ class OpenPlatformDriver implements SupplierDriverInterface, ProvidesUpstreamPro
         $body = $this->decode($response['body']);
         if ($body !== null && (int) $body['code'] === self::CODE_ORDER_NOT_FOUND) {
             // 下单时上游已经受理，查不到只记到这次提交上，订单状态不动（没结果的到时转异常人工处理）
-            return RechargeResult::processing($request->supplierOrderNo, '查单：上游没有这笔订单，只记录：' . $this->describe($body, []), $this->encode($params), $response['body']);
+            return RechargeResult::processing($request->supplierOrderNo, '查单：上游没有这笔订单，只记录：' . $this->describe($body, []), $this->encode($params), $response['body'])->asNotFound();
         }
 
         return $this->toResult($body, $request->supplierOrderNo, $params, $response['body']);

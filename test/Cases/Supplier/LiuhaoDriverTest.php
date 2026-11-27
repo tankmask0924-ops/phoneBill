@@ -148,6 +148,7 @@ class LiuhaoDriverTest extends HttpTestCase
         $this->assertSame(RechargeStatus::Processing, $result->status);
         $this->assertFalse($result->callFailed);
         $this->assertStringContainsString('[2222] 订单不存在', $result->message);
+        $this->assertTrue($result->notFound, '上游明确查不到这笔订单');
 
         // 调用验证失败、没有状态、无法解析：处理中
         foreach ([['ResultCode' => '1111', 'ResultMessage' => '调用验证失败'], ['ResultCode' => '0000', 'ResultMessage' => 'x']] as $body) {

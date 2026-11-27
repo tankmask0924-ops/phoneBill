@@ -162,6 +162,7 @@ class PikoudaiDriverTest extends HttpTestCase
         $this->assertSame(RechargeStatus::Processing, $result->status);
         $this->assertFalse($result->callFailed);
         $this->assertStringContainsString('[2001] 查不到订单', $result->message);
+        $this->assertTrue($result->notFound, '上游明确查不到这笔订单');
 
         // 出错、单号对不上、没有状态：处理中
         foreach ([

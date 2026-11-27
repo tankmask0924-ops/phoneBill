@@ -201,6 +201,7 @@ class XuanjieDriverTest extends HttpTestCase
         $this->assertSame(RechargeStatus::Processing, $result->status);
         $this->assertFalse($result->callFailed);
         $this->assertStringContainsString('只记录', $result->message);
+        $this->assertTrue($result->notFound, '上游明确查不到这笔订单');
 
         // 5002 查询频繁、5003 / 5004 不处理订单，表外的码、单号对不上、没拿到返回：处理中
         foreach ([

@@ -439,13 +439,17 @@ class OrderProcessService extends AbstractService
      * 已经有结果的（人工在详情里查的）只记录，不改提交和订单。
      *
      * @param bool $byAdmin 人工在详情里点的查单：异常订单（含人工处理单）查到明确成功 / 失败就交回正常流程，
-     *                      同回调；定时查单对人工处理单仍只记录（下单没拿到返回时，上游查不到单可能只是还没建好）
+     *                      同回调；上游明确回复查不到这笔订单的，直接失败退款并通知商户（不再换供应商）。
+     *                      定时查单对人工处理单仍只记录（下单没拿到返回时，上游查不到单可能只是还没建好）
      */
     public function queryAttempt(OrderAttempt $attempt, bool $byAdmin = false): RechargeResult
     {
         $order = $this->orderDao->find($attempt->order_id);
         $result = $this->gateway->query($order, $attempt);
         $this->recordQuery($attempt->id, $result);
+        if ($byAdmin && $result->notFound && $attempt->status !== OrderAttempt::STATUS_SUCCESS && $this->failAbnormalNotFound($attempt, $result)) {
+            return $result;
+        }
         if ($attempt->status === OrderAttempt::STATUS_PROCESSING) {
             if ($byAdmin && $result->status !== RechargeStatus::Processing) {
                 $this->releaseAbnormal($attempt->id, $result->status, false);
@@ -552,6 +556,43 @@ class OrderProcessService extends AbstractService
                 'message' => $result->message,
             ]);
         }
+    }
+
+    /**
+     * 异常订单人工查单，上游明确回复查不到这笔订单（查的是订单最后一次提交）：这次提交记失败；没有别的提交
+     * 还在处理中就把订单置为失败、退款并通知商户（人工处理单也一样，取消人工标记）。
+     * 人工处理单的最后一次提交可能已经被定时查单记成了失败（只记录、没改订单），这种也照样处理。
+     * 已手动回调过的订单、不是最后一次提交的只记录。
+     *
+     * @return bool 是否按「查不到订单」处理了（不满足条件时返回 false，照常走 applyResult）
+     */
+    private function failAbnormalNotFound(OrderAttempt $attempt, RechargeResult $result): bool
+    {
+        $order = $this->orderDao->find($attempt->order_id);
+        if ($order === null || $order->status !== Order::STATUS_ABNORMAL || $order->manual_notified_at !== null) {
+            return false;
+        }
+        if ($this->attemptDao->forOrder($order->id)->last()?->id !== $attempt->id) {
+            return false;
+        }
+        $reason = '人工查单上游查不到这笔订单' . ($result->message ? "：{$result->message}" : '');
+        $this->attemptDao->transition($attempt->id, OrderAttempt::STATUS_PROCESSING, OrderAttempt::STATUS_FAILED, [
+            'message' => mb_substr($reason, 0, 255),
+            'finished_at' => date('Y-m-d H:i:s'),
+        ] + ($result->supplierOrderNo ? ['supplier_order_no' => $result->supplierOrderNo] : []));
+        if ($this->attemptDao->hasProcessingForOrder($order->id)) {
+            // 还有别的提交没出结果，等它
+            return true;
+        }
+        // 先取消人工处理单标记，fail() 才会通知商户；这期间订单被别处改了状态就还原标记
+        $this->orderDao->newQuery()->where('id', $order->id)->where('status', Order::STATUS_ABNORMAL)->update(['manual_only' => false]);
+        if ($this->fail($order, [Order::STATUS_ABNORMAL], $reason)) {
+            $this->logger()->info('异常订单人工查单上游查不到订单，置为失败并通知商户', ['order_id' => $order->id, 'attempt_no' => $attempt->attempt_no]);
+        } else {
+            $this->orderDao->newQuery()->where('id', $order->id)->where('status', Order::STATUS_ABNORMAL)->update(['manual_only' => $order->manual_only]);
+        }
+
+        return true;
     }
 
     /**

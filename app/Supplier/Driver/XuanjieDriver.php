@@ -153,7 +153,7 @@ class XuanjieDriver implements SupplierDriverInterface
         $body = $this->decode($response['body']);
         $code = $body['nRtn'] ?? null;
         if ($code === self::QUERY_NOT_FOUND) {
-            return RechargeResult::processing($request->supplierOrderNo, '查单：上游订单不存在，只记录：' . $this->describe($body, $response), $sent, $response['body']);
+            return RechargeResult::processing($request->supplierOrderNo, '查单：上游订单不存在，只记录：' . $this->describe($body, $response), $sent, $response['body'])->asNotFound();
         }
         $orderId = is_scalar($body['szOrderId'] ?? null) ? (string) $body['szOrderId'] : '';
         if ($orderId !== '' && strcasecmp($orderId, $request->attemptNo) !== 0) {

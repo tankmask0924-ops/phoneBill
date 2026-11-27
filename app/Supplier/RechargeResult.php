@@ -27,12 +27,25 @@ final class RechargeResult
         public readonly bool $callFailed = false,
         /** 这次调用最后一个 HTTP 请求的状态码，0 = 没拿到响应（连不上、超时），null = 没发 HTTP 请求；由 SupplierGateway 填 */
         public readonly ?int $httpStatus = null,
+        /**
+         * 查单时上游明确回复查不到这笔订单（按我们的提交单号查的）。状态照各家规则（多数只记录、按处理中），
+         * 异常订单人工查单时据此直接置失败并通知商户（OrderProcessService::queryAttempt）。
+         */
+        public readonly bool $notFound = false,
     ) {
     }
 
     public function withHttpStatus(?int $httpStatus): self
     {
-        return new self($this->status, $this->supplierOrderNo, $this->message, $this->request, $this->response, $this->callFailed, $httpStatus);
+        return new self($this->status, $this->supplierOrderNo, $this->message, $this->request, $this->response, $this->callFailed, $httpStatus, $this->notFound);
+    }
+
+    /**
+     * 标记为「上游查不到这笔订单」，状态不变。
+     */
+    public function asNotFound(): self
+    {
+        return new self($this->status, $this->supplierOrderNo, $this->message, $this->request, $this->response, $this->callFailed, $this->httpStatus, true);
     }
 
     public static function success(?string $supplierOrderNo = null, ?string $message = null, ?string $request = null, ?string $response = null): self

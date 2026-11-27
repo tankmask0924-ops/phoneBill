@@ -115,7 +115,7 @@ class ChongyidaDriver implements SupplierDriverInterface, ProvidesUpstreamProduc
         [$sent, $response] = $this->call($request->config, self::PATH_ORDERS, ['clientOrderNo' => $request->attemptNo]);
         $body = $this->decode($response['body']);
         if ($body !== null && $body['code'] === self::CODE_NOT_FOUND) {
-            return RechargeResult::processing($request->supplierOrderNo, '查单：上游查不到这笔订单，只记录：' . $this->describe($body, $response), $sent, $response['body']);
+            return RechargeResult::processing($request->supplierOrderNo, '查单：上游查不到这笔订单，只记录：' . $this->describe($body, $response), $sent, $response['body'])->asNotFound();
         }
         $order = $body !== null && $body['code'] === self::CODE_OK ? $this->findOrder($body['data'] ?? null, $request->attemptNo) : null;
         if ($order === null || ! is_string($order['orderStatus'] ?? null)) {
