@@ -17,6 +17,7 @@ use App\Dao\SupplierProductDao;
 use App\Model\Order;
 use App\Model\OrderAttempt;
 use App\Model\Supplier;
+use App\Network\HttpClient;
 use App\Security\Encrypter;
 use App\Service\AbstractService;
 use App\Service\Setting\SettingService;
@@ -65,6 +66,9 @@ class SupplierGateway extends AbstractService
     #[Inject]
     protected LoggerFactory $loggerFactory;
 
+    #[Inject]
+    protected HttpClient $http;
+
     public function recharge(Order $order, OrderAttempt $attempt): RechargeResult
     {
         return $this->call('recharge', $order, $attempt);
@@ -77,7 +81,20 @@ class SupplierGateway extends AbstractService
 
     public function parseCallback(Supplier $supplier, ServerRequestInterface $request): CallbackResult
     {
+        $this->http->forgetLastStatus();
         $result = $this->driver($supplier)->parseCallback($request, $this->driverConfig($supplier));
+        // 回调后要查单确认的驱动：记下确认查单时接口通不通
+        $status = $this->http->lastStatus();
+        if ($status !== null) {
+            $result = new CallbackResult(
+                $result->verified,
+                $result->reply,
+                $result->attemptNo,
+                $result->supplierOrderNo,
+                $result->result?->withHttpStatus($status),
+                $result->unconfirmed?->withHttpStatus($status),
+            );
+        }
         $this->logger()->info('callback', [
             'supplier' => $supplier->code,
             'verified' => $result->verified,
@@ -205,6 +222,7 @@ class SupplierGateway extends AbstractService
             $attempt->submitted_at?->getTimestamp(),
         );
 
+        $this->http->forgetLastStatus();
         try {
             $result = $this->driver($supplier)->{$method}($request);
         } catch (UnclearResultException $e) {
@@ -213,12 +231,15 @@ class SupplierGateway extends AbstractService
         } catch (Throwable $e) {
             $result = RechargeResult::callFailed(mb_substr('调用异常：' . $e->getMessage(), 0, 255));
         }
+        // 接口通不通：最后一个 HTTP 请求的状态码，0 = 没拿到响应
+        $result = $result->withHttpStatus($this->http->lastStatus());
         $this->logger()->info($method, [
             'supplier' => $supplier->code,
             'attempt_no' => $attempt->attempt_no,
             'status' => $result->status->value,
             'supplier_order_no' => $result->supplierOrderNo,
             'message' => $result->message,
+            'http_status' => $result->httpStatus,
         ]);
 
         return $result;

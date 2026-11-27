@@ -469,6 +469,7 @@ class OrderProcessService extends AbstractService
             'query_message' => $message === null ? null : mb_substr($message, 0, 255),
             'query_request' => $result->request,
             'query_response' => $result->response,
+            'query_http_status' => $result->httpStatus,
         ]);
     }
 

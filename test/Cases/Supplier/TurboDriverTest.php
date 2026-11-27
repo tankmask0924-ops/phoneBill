@@ -326,6 +326,7 @@ class TurboDriverTest extends HttpTestCase
         $this->assertStringStartsWith('回调后确认查单：调用异常：cURL error 28', $attempt->query_message);
         $this->assertSame($attempt->attempt_no, json_decode((string) $attempt->query_request, true)['orderNo']);
         $this->assertNotNull($attempt->last_queried_at);
+        $this->assertSame(0, $attempt->query_http_status, '没拿到响应：接口不通');
         $confirms = $this->dispatcher()->callbackConfirms;
         $this->assertSame([[$supplier->code, 1, 30]], array_map(static fn ($c) => [$c['supplier'], $c['retry'], $c['delay']], $confirms));
         $this->assertSame($attempt->attempt_no, json_decode($confirms[0]['body'], true)['externalOrderNo']);
@@ -338,6 +339,7 @@ class TurboDriverTest extends HttpTestCase
         $attempt = OrderAttempt::find($attempt->id);
         $this->assertSame('回调后确认查单：上游无此订单：[INVALID_PARAMETER] Order not found.', $attempt->query_message);
         $this->assertSame($notFound, $attempt->query_response);
+        $this->assertSame(400, $attempt->query_http_status, '上游有返回但 HTTP 报错');
         $this->assertSame([OrderAttempt::STATUS_PROCESSING, Order::STATUS_ABNORMAL], [$attempt->status, Order::find($order->id)->status]);
         $confirms = $this->dispatcher()->callbackConfirms;
         $this->assertSame([2, 60], [$confirms[1]['retry'], $confirms[1]['delay']]);
@@ -347,7 +349,7 @@ class TurboDriverTest extends HttpTestCase
         $this->replay($confirms[1]);
         $order = Order::find($order->id);
         $this->assertSame([Order::STATUS_SUCCESS, false], [$order->status, (bool) $order->manual_only]);
-        $this->assertSame(OrderAttempt::STATUS_SUCCESS, OrderAttempt::find($attempt->id)->status);
+        $this->assertSame([OrderAttempt::STATUS_SUCCESS, 200], [OrderAttempt::find($attempt->id)->status, OrderAttempt::find($attempt->id)->query_http_status]);
         $this->assertSame([$order->id], array_column($this->dispatcher()->notifies, 'order_id'));
         $this->assertCount(2, $this->dispatcher()->callbackConfirms, '确认到结果就不再重试');
 
@@ -372,6 +374,7 @@ class TurboDriverTest extends HttpTestCase
         make(SupplierCallbackService::class)->replay($supplier->code, $body, 'application/json', [], count(SupplierCallbackService::RETRY_DELAYS));
         $this->assertSame([], $this->dispatcher()->callbackConfirms);
         $this->assertSame('回调后确认查单：查单未拿到明确结果：HTTP 503 Service Unavailable', OrderAttempt::find($attempt->id)->query_message);
+        $this->assertSame(503, OrderAttempt::find($attempt->id)->query_http_status);
 
         // 定时查单接口超时：查单记录照样带着发出的请求
         $this->http->responses = [['exception' => 'cURL error 7: Failed to connect']];
@@ -380,7 +383,13 @@ class TurboDriverTest extends HttpTestCase
         $this->assertSame('调用异常：cURL error 7: Failed to connect', $attempt->query_message);
         $this->assertSame($attempt->attempt_no, json_decode((string) $attempt->query_request, true)['orderNo']);
         $this->assertNull($attempt->query_response);
+        $this->assertSame(0, $attempt->query_http_status);
         $this->assertSame(Order::STATUS_PROCESSING, Order::find($order->id)->status);
+
+        // 接口正常：HTTP 200
+        $this->respond($this->ok(['externalOrderNo' => $attempt->attempt_no] + $this->orderData('Processing', 0)));
+        $result = $this->process()->queryAttempt(OrderAttempt::find($attempt->id));
+        $this->assertSame([200, 200], [$result->httpStatus, OrderAttempt::find($attempt->id)->query_http_status]);
     }
 
     public function testCallbackFailureFailsOrder()

@@ -214,6 +214,8 @@ class OrderAdminService extends AbstractService
                 'query_message' => $a->query_message,
                 'query_request' => $a->query_request,
                 'query_response' => $a->query_response,
+                // 最后一次查单时接口通不通：HTTP 状态码，0 = 没拿到响应（连不上、超时），null = 没记录
+                'query_http_status' => $a->query_http_status,
                 'finished_at' => $a->finished_at?->toDateTimeString(),
                 // 提交给供应商到出结果（回调或查单）的秒数
                 'duration' => self::seconds($a->submitted_at, $a->finished_at),
@@ -257,6 +259,8 @@ class OrderAdminService extends AbstractService
                 'attempt_no' => $attempt->attempt_no,
                 'status' => $result->status->value,
                 'message' => $result->message,
+                // 接口通不通：HTTP 状态码，0 = 没拿到响应（连不上、超时）
+                'http_status' => $result->httpStatus,
                 // 提交本来还在处理中、这次按查单结果处理了；已有结果的只记录
                 'applied' => $attempt->status === OrderAttempt::STATUS_PROCESSING,
             ];

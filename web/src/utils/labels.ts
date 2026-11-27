@@ -80,6 +80,23 @@ export const attemptStatusLabels: LabelMap = {
   failed: { label: '失败', type: 'warning' },
 }
 
+/**
+ * 调供应商接口通不通（查单记录的 HTTP 状态码）：0 = 没拿到响应（连不上、超时），2xx 正常，其他是上游报错（被限流、服务出错等）。
+ * null 表示没记录（这个字段加上之前的查单，或者驱动不发 HTTP 请求），不显示。
+ */
+export function httpCallLabel(status: number | null | undefined): LabelItem | null {
+  if (status === null || status === undefined) {
+    return null
+  }
+  if (status === 0) {
+    return { label: '接口不通（连不上或超时）', type: 'danger' }
+  }
+  if (status >= 200 && status < 300) {
+    return { label: `接口正常（HTTP ${status}）`, type: 'success' }
+  }
+  return { label: `接口报错（HTTP ${status}）`, type: 'warning' }
+}
+
 /** 通知商户的状态 */
 export const notifyStatusLabels: LabelMap = {
   none: { label: '无需通知', type: 'info' },

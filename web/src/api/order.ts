@@ -85,6 +85,8 @@ export interface OrderAttempt {
   query_message: string | null
   query_request: string | null
   query_response: string | null
+  /** 最后一次查单时接口通不通：HTTP 状态码，0 = 没拿到响应（连不上、超时），null = 没记录 */
+  query_http_status: number | null
   finished_at: string | null
   /** 提交给供应商到出结果（回调或查单）的秒数 */
   duration: number | null
@@ -139,7 +141,7 @@ export const orderApi = {
   detail: (id: number) => http.get<OrderDetail>(`/admin/orders/${id}`),
   /** 人工查单，query_results 是这次每个提交查到的结果；applied 为 false 的是已有结果的提交，只记录 */
   query: (id: number) =>
-    http.post<OrderDetail & { query_results: { attempt_no: string; status: string; message: string | null; applied: boolean }[] }>(
+    http.post<OrderDetail & { query_results: { attempt_no: string; status: string; message: string | null; http_status: number | null; applied: boolean }[] }>(
       `/admin/orders/${id}/query`,
     ),
   confirmSuccess: (id: number, remark: string) => http.post<OrderDetail>(`/admin/orders/${id}/success`, { remark }),

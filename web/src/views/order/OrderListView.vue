@@ -18,6 +18,7 @@ import {
 import {
   attemptStatusLabels,
   balanceTypeLabels,
+  httpCallLabel,
   labelOf,
   notifyStatusLabels,
   operatorLabels,
@@ -150,13 +151,17 @@ async function query() {
     const reason = r.message ? `（${r.message}）` : ''
     // 已有结果的提交只记录，不改提交和订单
     const recorded = r.applied ? '' : '，这次提交之前已有结果，只记录'
+    // 先说接口通不通：接口不通 / 报错时上游没给结果，不是供应商在处理
+    const call = httpCallLabel(r.http_status)
+    const prefix = `${r.attempt_no}：${call ? `【${call.label}】` : ''}`
     if (r.status === 'success') {
-      return `${r.attempt_no}：供应商确认成功${reason}${recorded}`
+      return `${prefix}供应商确认成功${reason}${recorded}`
     }
     if (r.status === 'failed') {
-      return `${r.attempt_no}：供应商确认失败${reason}${recorded}`
+      return `${prefix}供应商确认失败${reason}${recorded}`
     }
-    return `${r.attempt_no}：供应商还没有明确结果${reason}${r.applied ? '，订单状态不变' : recorded}`
+    const pending = call && call.type !== 'success' ? '没拿到上游结果' : '供应商还没有明确结果'
+    return `${prefix}${pending}${reason}${r.applied ? '，订单状态不变' : recorded}`
   })
   lines.push('查单报文可以在「供应商提交」里点开查看')
   let next = ''
@@ -324,11 +329,25 @@ async function copySelected(field: CopyField) {
   }
 }
 
+/** 详情里复制这笔订单的手机号 */
+async function copyMobile() {
+  try {
+    await writeClipboard(detail.value!.mobile)
+    ElMessage.success(`已复制手机号 ${detail.value!.mobile}`)
+  } catch {
+    ElMessage.warning('复制失败，请手动选中复制')
+  }
+}
+
 /** 管理端可能用 http 内网地址访问，那里没有 navigator.clipboard，退回 execCommand */
 async function writeClipboard(text: string) {
   if (navigator.clipboard && window.isSecureContext) {
-    await navigator.clipboard.writeText(text)
-    return
+    try {
+      await navigator.clipboard.writeText(text)
+      return
+    } catch {
+      // 浏览器没给剪贴板权限：退回 execCommand
+    }
   }
   const textarea = document.createElement('textarea')
   textarea.value = text
@@ -606,7 +625,9 @@ onMounted(async () => {
           <el-descriptions-item label="商户">{{ detail.merchant_name }}</el-descriptions-item>
           <el-descriptions-item label="商品">{{ detail.product_name }}（{{ detail.product_code }}）</el-descriptions-item>
           <el-descriptions-item label="号码">
-            {{ detail.mobile }} {{ labelOf(operatorLabels, detail.operator) }} {{ detail.province }} {{ detail.city ?? '' }}
+            {{ detail.mobile }}
+            <el-button link type="primary" :icon="DocumentCopy" class="copy-mobile" @click="copyMobile">复制</el-button>
+            {{ labelOf(operatorLabels, detail.operator) }} {{ detail.province }} {{ detail.city ?? '' }}
           </el-descriptions-item>
           <el-descriptions-item label="面值">{{ detail.face_value }} 元</el-descriptions-item>
           <el-descriptions-item label="扣款">{{ detail.sale_price }} 元</el-descriptions-item>
@@ -634,6 +655,12 @@ onMounted(async () => {
                 <div>
                   <b>最后查单：</b>{{ row.last_queried_at ?? '-' }}
                   <template v-if="row.query_status">
+                    <el-tag
+                      v-if="httpCallLabel(row.query_http_status)"
+                      :type="httpCallLabel(row.query_http_status)!.type"
+                      size="small"
+                      class="manual-tag"
+                    >{{ httpCallLabel(row.query_http_status)!.label }}</el-tag>
                     <StatusTag :map="attemptStatusLabels" :value="row.query_status" class="manual-tag" />
                     {{ row.query_message ?? '' }}
                   </template>
@@ -818,6 +845,11 @@ onMounted(async () => {
 
 .warn {
   color: #e6a23c;
+}
+
+.copy-mobile {
+  margin: 0 6px 0 2px;
+  vertical-align: baseline;
 }
 
 .copy-dropdown {

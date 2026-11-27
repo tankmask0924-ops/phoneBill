@@ -62,8 +62,10 @@ class FakeHttpClient extends HttpClient
 
         $response = count($this->responses) > 1 ? array_shift($this->responses) : $this->responses[0];
         if (isset($response['exception'])) {
+            $this->rememberStatus(0);
             throw new RuntimeException($response['exception']);
         }
+        $this->rememberStatus($response['status']);
 
         return $response;
     }

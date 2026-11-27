@@ -34,6 +34,7 @@ use Carbon\Carbon;
  * @property null|string $query_message
  * @property null|string $query_request 最后一次查单的原始报文
  * @property null|string $query_response
+ * @property null|int $query_http_status 最后一次查单的 HTTP 状态码，0 = 没拿到响应（连不上、超时）
  * @property null|Carbon $finished_at
  * @property Carbon $created_at
  * @property Carbon $updated_at
@@ -65,7 +66,12 @@ class OrderAttempt extends Model
         'query_message',
         'query_request',
         'query_response',
+        'query_http_status',
         'finished_at',
+    ];
+
+    protected array $casts = [
+        'query_http_status' => 'integer',
     ];
 
     protected array $dates = [

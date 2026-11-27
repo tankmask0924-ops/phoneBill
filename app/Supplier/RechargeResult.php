@@ -25,7 +25,14 @@ final class RechargeResult
         public readonly ?string $response = null,
         /** 调供应商接口时出了异常（连不上、超时、握手失败等）或上游回了不确定的结果，不知道上游建没建单 */
         public readonly bool $callFailed = false,
+        /** 这次调用最后一个 HTTP 请求的状态码，0 = 没拿到响应（连不上、超时），null = 没发 HTTP 请求；由 SupplierGateway 填 */
+        public readonly ?int $httpStatus = null,
     ) {
+    }
+
+    public function withHttpStatus(?int $httpStatus): self
+    {
+        return new self($this->status, $this->supplierOrderNo, $this->message, $this->request, $this->response, $this->callFailed, $httpStatus);
     }
 
     public static function success(?string $supplierOrderNo = null, ?string $message = null, ?string $request = null, ?string $response = null): self
