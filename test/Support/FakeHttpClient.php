@@ -13,16 +13,18 @@ declare(strict_types=1);
 namespace HyperfTest\Support;
 
 use App\Network\HttpClient;
+use RuntimeException;
 
 /**
  * 不发真实请求：记下请求，按 $responses 依次返回（用完后一直返回最后一个）。
+ * 某个响应写成 ['exception' => '说明'] 时抛异常，模拟连不上、超时。
  */
 class FakeHttpClient extends HttpClient
 {
     /** @var list<array{method: string, url: string, payload: array<string, mixed>}> */
     public array $requests = [];
 
-    /** @var list<array{status: int, body: string}> */
+    /** @var list<array{exception: string}|array{status: int, body: string}> */
     public array $responses = [['status' => 200, 'body' => 'success']];
 
     public function postJson(string $url, array $payload, float $timeoutSeconds = 5.0): array
@@ -58,6 +60,11 @@ class FakeHttpClient extends HttpClient
     {
         $this->requests[] = ['method' => $method, 'url' => $url, 'payload' => $payload];
 
-        return count($this->responses) > 1 ? array_shift($this->responses) : $this->responses[0];
+        $response = count($this->responses) > 1 ? array_shift($this->responses) : $this->responses[0];
+        if (isset($response['exception'])) {
+            throw new RuntimeException($response['exception']);
+        }
+
+        return $response;
     }
 }

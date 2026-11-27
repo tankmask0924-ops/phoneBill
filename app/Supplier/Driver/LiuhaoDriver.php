@@ -137,7 +137,10 @@ class LiuhaoDriver implements SupplierDriverInterface
         try {
             $result = $this->queryOrder($config, $attemptNo, null);
         } catch (Throwable $e) {
-            $result = RechargeResult::processing(null, '回调后查单出错，等待定时查单：' . mb_substr($e->getMessage(), 0, 100));
+            // 查单出错：按处理中，记到提交上并稍后重新确认，定时查单也会继续
+            $result = RechargeResult::processing(null, '回调后查单出错：' . mb_substr($e->getMessage(), 0, 200));
+
+            return new CallbackResult(true, 'ok', $attemptNo, null, $result, $result);
         }
 
         return new CallbackResult(true, 'ok', $attemptNo, null, $result);

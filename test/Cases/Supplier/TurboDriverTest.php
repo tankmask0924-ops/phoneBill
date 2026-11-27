@@ -22,6 +22,7 @@ use App\Security\Encrypter;
 use App\Security\OpenApiSigner;
 use App\Service\Order\OrderDispatcher;
 use App\Service\Order\OrderProcessService;
+use App\Service\Order\SupplierCallbackService;
 use App\Supplier\Driver\TurboDriver;
 use App\Supplier\RechargeRequest;
 use App\Supplier\RechargeStatus;
@@ -304,6 +305,84 @@ class TurboDriverTest extends HttpTestCase
         $this->assertSame('TD2025042310200558', OrderAttempt::find($attempt->id)->supplier_order_no);
     }
 
+    public function testUnconfirmedCallbackIsRecordedAndConfirmedLater()
+    {
+        [$merchant, $product, $mobile, $supplier] = $this->scenario();
+
+        // 下单超时：转人工处理单，提交上照样记下发出去的请求
+        $this->http->responses = [['exception' => 'cURL error 28: Operation timed out after 10001 milliseconds']];
+        $order = $this->placeOrder($merchant, $product, $mobile);
+        $this->process()->submit($order->id);
+        $attempt = OrderAttempt::where('order_id', $order->id)->first();
+        $this->assertSame([Order::STATUS_ABNORMAL, true], [Order::find($order->id)->status, (bool) Order::find($order->id)->manual_only]);
+        $this->assertSame($attempt->attempt_no, json_decode((string) $attempt->request, true)['externalOrderNo']);
+        $this->assertStringStartsWith('调用异常：cURL error 28', $attempt->message);
+
+        // 回调来了，确认查单超时：回 fail，原因和请求记到提交的查单记录上，30 秒后重新确认
+        $this->http->responses = [['exception' => 'cURL error 28: Operation timed out after 5001 milliseconds']];
+        $this->assertSame([400, 'fail'], $this->supplierCallback($supplier, $this->callbackParams($attempt->attempt_no, 'Succeeded', 1)));
+        $attempt = OrderAttempt::find($attempt->id);
+        $this->assertSame('processing', $attempt->query_status);
+        $this->assertStringStartsWith('回调后确认查单：调用异常：cURL error 28', $attempt->query_message);
+        $this->assertSame($attempt->attempt_no, json_decode((string) $attempt->query_request, true)['orderNo']);
+        $this->assertNotNull($attempt->last_queried_at);
+        $confirms = $this->dispatcher()->callbackConfirms;
+        $this->assertSame([[$supplier->code, 1, 30]], array_map(static fn ($c) => [$c['supplier'], $c['retry'], $c['delay']], $confirms));
+        $this->assertSame($attempt->attempt_no, json_decode($confirms[0]['body'], true)['externalOrderNo']);
+        $this->assertSame(Order::STATUS_ABNORMAL, Order::find($order->id)->status);
+
+        // 第 1 次重新确认：上游还查不到单（回调触发的不凭查无此单判失败），记下上游原样返回，60 秒后再确认
+        $notFound = (string) json_encode(['status' => 'error', 'data' => null, 'error' => ['code' => 'INVALID_PARAMETER', 'details' => 'Order not found.']]);
+        $this->http->responses = [['status' => 400, 'body' => $notFound]];
+        $this->replay($confirms[0]);
+        $attempt = OrderAttempt::find($attempt->id);
+        $this->assertSame('回调后确认查单：上游无此订单：[INVALID_PARAMETER] Order not found.', $attempt->query_message);
+        $this->assertSame($notFound, $attempt->query_response);
+        $this->assertSame([OrderAttempt::STATUS_PROCESSING, Order::STATUS_ABNORMAL], [$attempt->status, Order::find($order->id)->status]);
+        $confirms = $this->dispatcher()->callbackConfirms;
+        $this->assertSame([2, 60], [$confirms[1]['retry'], $confirms[1]['delay']]);
+
+        // 第 2 次确认到成功：和正常回调一样，人工处理单交回正常流程，改成功并通知商户
+        $this->respond($this->ok(['externalOrderNo' => $attempt->attempt_no] + $this->orderData('Succeeded', 1)));
+        $this->replay($confirms[1]);
+        $order = Order::find($order->id);
+        $this->assertSame([Order::STATUS_SUCCESS, false], [$order->status, (bool) $order->manual_only]);
+        $this->assertSame(OrderAttempt::STATUS_SUCCESS, OrderAttempt::find($attempt->id)->status);
+        $this->assertSame([$order->id], array_column($this->dispatcher()->notifies, 'order_id'));
+        $this->assertCount(2, $this->dispatcher()->callbackConfirms, '确认到结果就不再重试');
+
+        // 提交已经有结果：再来确认不了的回调也不记、不重试
+        $this->http->responses = [['exception' => 'timeout']];
+        $this->replay($confirms[1]);
+        $this->assertCount(2, $this->dispatcher()->callbackConfirms);
+        $this->assertSame('success', OrderAttempt::find($attempt->id)->query_status);
+    }
+
+    public function testUnconfirmedCallbackStopsRetryingAfterThreeTimes()
+    {
+        [$merchant, $product, $mobile, $supplier] = $this->scenario();
+        $this->respond($this->ok(['orderNo' => 'TD2025042310200558', 'orderStatus' => 'Processing', 'rechargeStatus' => 0]));
+        $order = $this->placeOrder($merchant, $product, $mobile);
+        $this->process()->submit($order->id);
+        $attempt = OrderAttempt::where('order_id', $order->id)->first();
+
+        // 已经重新确认了 3 次还是不行：只记录，不再推任务，留给定时查单
+        $this->http->responses = [['status' => 503, 'body' => 'Service Unavailable']];
+        $body = (string) json_encode($this->callbackParams($attempt->attempt_no, 'Succeeded', 1));
+        make(SupplierCallbackService::class)->replay($supplier->code, $body, 'application/json', [], count(SupplierCallbackService::RETRY_DELAYS));
+        $this->assertSame([], $this->dispatcher()->callbackConfirms);
+        $this->assertSame('回调后确认查单：查单未拿到明确结果：HTTP 503 Service Unavailable', OrderAttempt::find($attempt->id)->query_message);
+
+        // 定时查单接口超时：查单记录照样带着发出的请求
+        $this->http->responses = [['exception' => 'cURL error 7: Failed to connect']];
+        $this->process()->queryAttempt(OrderAttempt::find($attempt->id));
+        $attempt = OrderAttempt::find($attempt->id);
+        $this->assertSame('调用异常：cURL error 7: Failed to connect', $attempt->query_message);
+        $this->assertSame($attempt->attempt_no, json_decode((string) $attempt->query_request, true)['orderNo']);
+        $this->assertNull($attempt->query_response);
+        $this->assertSame(Order::STATUS_PROCESSING, Order::find($order->id)->status);
+    }
+
     public function testCallbackFailureFailsOrder()
     {
         [$merchant, $product, $mobile, $supplier] = $this->scenario();
@@ -463,6 +542,21 @@ class TurboDriverTest extends HttpTestCase
     private function respond(array $body, int $status = 200): void
     {
         $this->http->responses = [['status' => $status, 'body' => json_encode($body, JSON_UNESCAPED_UNICODE)]];
+    }
+
+    private function dispatcher(): FakeOrderDispatcher
+    {
+        return ApplicationContext::getContainer()->get(OrderDispatcher::class);
+    }
+
+    /**
+     * 执行一个推出去的重新确认任务。
+     *
+     * @param array{supplier: string, body: string, content_type: string, query: array<string, mixed>, retry: int, delay: int} $confirm
+     */
+    private function replay(array $confirm): void
+    {
+        make(SupplierCallbackService::class)->replay($confirm['supplier'], $confirm['body'], $confirm['content_type'], $confirm['query'], $confirm['retry']);
     }
 
     private function process(): OrderProcessService

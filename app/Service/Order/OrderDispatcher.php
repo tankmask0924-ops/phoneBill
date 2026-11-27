@@ -12,6 +12,7 @@ declare(strict_types=1);
 
 namespace App\Service\Order;
 
+use App\Job\ConfirmSupplierCallbackJob;
 use App\Job\NotifyMerchantJob;
 use App\Job\SubmitOrderJob;
 use Hyperf\AsyncQueue\Driver\DriverFactory;
@@ -41,5 +42,16 @@ class OrderDispatcher
     public function notify(int $orderId, int $attemptNo = 1, int $delaySeconds = 0, int $round = 0): void
     {
         $this->driverFactory->get('notify')->push(new NotifyMerchantJob($orderId, $attemptNo, $round), $delaySeconds);
+    }
+
+    /**
+     * 回调后的确认查单没拿到明确结果，过一会重放这条回调重新确认。
+     *
+     * @param array<string, mixed> $query 原回调的查询参数
+     * @param int $retry 第几次重新确认（从 1 开始）
+     */
+    public function confirmCallback(string $supplierCode, string $body, string $contentType, array $query, int $retry, int $delaySeconds): void
+    {
+        $this->driverFactory->get('default')->push(new ConfirmSupplierCallbackJob($supplierCode, $body, $contentType, $query, $retry), $delaySeconds);
     }
 }

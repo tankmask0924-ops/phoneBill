@@ -26,6 +26,11 @@ final class CallbackResult
         public readonly ?string $attemptNo = null,
         public readonly ?string $supplierOrderNo = null,
         public readonly ?RechargeResult $result = null,
+        /**
+         * 认出了是哪笔提交，但回调后的确认查单没拿到明确结果（接口出错、超时、查无此单等）：按处理中算，
+         * 带着原因和查单报文。SupplierCallbackService 记到这次提交的查单记录上，过一会自动重新确认。
+         */
+        public readonly ?RechargeResult $unconfirmed = null,
     ) {
     }
 }

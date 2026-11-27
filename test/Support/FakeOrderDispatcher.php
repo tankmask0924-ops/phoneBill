@@ -25,6 +25,9 @@ class FakeOrderDispatcher extends OrderDispatcher
     /** @var list<array{order_id: int, attempt_no: int, delay: int}> */
     public array $notifies = [];
 
+    /** @var list<array{supplier: string, body: string, content_type: string, query: array<string, mixed>, retry: int, delay: int}> */
+    public array $callbackConfirms = [];
+
     /**
      * 指定了补单的供应商商品时才多记一个 preferred，其余和以前一样。
      */
@@ -39,5 +42,10 @@ class FakeOrderDispatcher extends OrderDispatcher
     public function notify(int $orderId, int $attemptNo = 1, int $delaySeconds = 0, int $round = 0): void
     {
         $this->notifies[] = ['order_id' => $orderId, 'attempt_no' => $attemptNo, 'delay' => $delaySeconds] + ($round === 0 ? [] : ['round' => $round]);
+    }
+
+    public function confirmCallback(string $supplierCode, string $body, string $contentType, array $query, int $retry, int $delaySeconds): void
+    {
+        $this->callbackConfirms[] = ['supplier' => $supplierCode, 'body' => $body, 'content_type' => $contentType, 'query' => $query, 'retry' => $retry, 'delay' => $delaySeconds];
     }
 }

@@ -26,6 +26,7 @@ use App\Supplier\RechargeRequest;
 use App\Supplier\RechargeResult;
 use App\Supplier\SupplierDriverInterface;
 use App\Supplier\SupplierDriverRegistry;
+use App\Supplier\UnclearResultException;
 use App\Supplier\UpstreamProduct;
 use Hyperf\Cache\Annotation\Cacheable;
 use Hyperf\Cache\Annotation\CacheEvict;
@@ -83,6 +84,8 @@ class SupplierGateway extends AbstractService
             'attempt_no' => $result->attemptNo,
             'supplier_order_no' => $result->supplierOrderNo,
             'status' => $result->result?->status->value,
+            // 确认查单没拿到明确结果的原因（接口出错、超时、查无此单等）
+            'unconfirmed' => $result->unconfirmed?->message,
             'body' => mb_substr((string) $request->getBody(), 0, 2000),
         ]);
 
@@ -204,6 +207,9 @@ class SupplierGateway extends AbstractService
 
         try {
             $result = $this->driver($supplier)->{$method}($request);
+        } catch (UnclearResultException $e) {
+            // 驱动带着请求报文报的调用异常（连不上、超时等）
+            $result = $e->result;
         } catch (Throwable $e) {
             $result = RechargeResult::callFailed(mb_substr('调用异常：' . $e->getMessage(), 0, 255));
         }

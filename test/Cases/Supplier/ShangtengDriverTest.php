@@ -214,6 +214,13 @@ class ShangtengDriverTest extends HttpTestCase
         $this->assertSame([400, 'fail'], $this->supplierCallback($supplier, $this->callbackParams($attempt->attempt_no, 5)));
         $this->assertSame(Order::STATUS_PROCESSING, Order::find($order->id)->status);
         $this->assertSame(OrderAttempt::STATUS_PROCESSING, OrderAttempt::find($attempt->id)->status);
+        // 没确认到的原因和上游原样返回记在提交的查单记录上，每次都推一个稍后重新确认的任务
+        $recorded = OrderAttempt::find($attempt->id);
+        $this->assertSame('回调后确认查单：查单未拿到明确结果：HTTP 502 <html>Bad Gateway</html>', $recorded->query_message);
+        $this->assertSame('<html>Bad Gateway</html>', $recorded->query_response);
+        $this->assertSame($attempt->attempt_no, json_decode((string) $recorded->query_request, true)['external_orderno']);
+        $confirms = ApplicationContext::getContainer()->get(OrderDispatcher::class)->callbackConfirms;
+        $this->assertSame([[1, 30], [1, 30], [1, 30]], array_map(static fn ($c) => [$c['retry'], $c['delay']], $confirms));
 
         // 回调说成功，查单还在充值中：以查单为准，订单不变
         $this->http->requests = [];

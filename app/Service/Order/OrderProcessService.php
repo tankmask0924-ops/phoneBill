@@ -445,13 +445,7 @@ class OrderProcessService extends AbstractService
     {
         $order = $this->orderDao->find($attempt->order_id);
         $result = $this->gateway->query($order, $attempt);
-        $this->attemptDao->newQuery()->where('id', $attempt->id)->update([
-            'last_queried_at' => date('Y-m-d H:i:s'),
-            'query_status' => $result->status->value,
-            'query_message' => $result->message === null ? null : mb_substr($result->message, 0, 255),
-            'query_request' => $result->request,
-            'query_response' => $result->response,
-        ]);
+        $this->recordQuery($attempt->id, $result);
         if ($attempt->status === OrderAttempt::STATUS_PROCESSING) {
             if ($byAdmin && $result->status !== RechargeStatus::Processing) {
                 $this->releaseAbnormal($attempt->id, $result->status, false);
@@ -460,6 +454,22 @@ class OrderProcessService extends AbstractService
         }
 
         return $result;
+    }
+
+    /**
+     * 把一次查单（定时、人工、回调后的确认查单）的结果、说明和报文记到提交上，订单详情「供应商提交」里展示。
+     * 只记录，不改提交和订单的状态。
+     */
+    public function recordQuery(int $attemptId, RechargeResult $result, string $messagePrefix = ''): void
+    {
+        $message = $result->message === null ? null : $messagePrefix . $result->message;
+        $this->attemptDao->newQuery()->where('id', $attemptId)->update([
+            'last_queried_at' => date('Y-m-d H:i:s'),
+            'query_status' => $result->status->value,
+            'query_message' => $message === null ? null : mb_substr($message, 0, 255),
+            'query_request' => $result->request,
+            'query_response' => $result->response,
+        ]);
     }
 
     /**

@@ -19,6 +19,7 @@ use App\Supplier\ProvidesUpstreamProducts;
 use App\Supplier\RechargeRequest;
 use App\Supplier\RechargeResult;
 use App\Supplier\SupplierDriverInterface;
+use App\Supplier\UnclearResultException;
 use App\Supplier\UpstreamProduct;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\Logger\LoggerFactory;
@@ -133,9 +134,11 @@ class ShangtengDriver implements SupplierDriverInterface, ProvidesUpstreamProduc
         }
         try {
             $result = $this->queryOrder($config, $attemptNo, null, true);
-        } catch (Throwable) {
-            // 查单出错或没拿到明确结果就不应答 ok，让上游重推；定时查单也会继续
-            return new CallbackResult(false, 'fail');
+        } catch (UnclearResultException $e) {
+            // 查单出错或没拿到明确结果就不应答 ok，让上游重推；带上原因和报文，记到提交上并稍后重新确认，定时查单也会继续
+            return new CallbackResult(false, 'fail', $attemptNo, null, null, $e->result);
+        } catch (Throwable $e) {
+            return new CallbackResult(false, 'fail', $attemptNo, null, null, RechargeResult::processing(null, mb_substr('调用异常：' . $e->getMessage(), 0, 255)));
         }
 
         return new CallbackResult(true, 'ok', $attemptNo, $result->supplierOrderNo, $result);
@@ -209,11 +212,12 @@ class ShangtengDriver implements SupplierDriverInterface, ProvidesUpstreamProduc
         $data = is_array($body['data'] ?? null) ? $body['data'] : [];
         $matched = is_scalar($data['external_orderno'] ?? null) && (string) $data['external_orderno'] === $attemptNo;
         if ($body === null || $body['status'] !== self::STATUS_OK || ! $matched || ! is_numeric($data['status'] ?? null)) {
+            $result = RechargeResult::processing($supplierOrderNo, '查单未拿到明确结果：' . $this->describe($body, $response), $sent, $response['body']);
             if ($throwIfUnclear) {
-                throw new RuntimeException('查单未拿到明确结果：' . $this->describe($body, $response));
+                throw new UnclearResultException($result);
             }
 
-            return RechargeResult::processing($supplierOrderNo, '查单未拿到明确结果：' . $this->describe($body, $response), $sent, $response['body']);
+            return $result;
         }
         $orderNo = is_scalar($data['orderno'] ?? null) && $data['orderno'] !== '' ? (string) $data['orderno'] : $supplierOrderNo;
         $reason = is_scalar($data['msg'] ?? null) ? trim((string) $data['msg']) : '';
@@ -282,12 +286,17 @@ class ShangtengDriver implements SupplierDriverInterface, ProvidesUpstreamProduc
     {
         $timestamp = (string) time();
         [$json, $sign] = self::sign($params, $timestamp, $config['api_key'] ?? '');
-        $response = $this->http->postRaw(rtrim($config['api_url'] ?? '', '/') . $path, $json, [
-            'Content-Type' => 'application/json; charset=utf-8',
-            'Sign' => $sign,
-            'Timestamp' => $timestamp,
-            'Userid' => $config['user_id'] ?? '',
-        ], $timeout);
+        try {
+            $response = $this->http->postRaw(rtrim($config['api_url'] ?? '', '/') . $path, $json, [
+                'Content-Type' => 'application/json; charset=utf-8',
+                'Sign' => $sign,
+                'Timestamp' => $timestamp,
+                'Userid' => $config['user_id'] ?? '',
+            ], $timeout);
+        } catch (Throwable $e) {
+            // 连不上、超时：带上发出的请求报文，提交 / 查单记录里能看到
+            throw new UnclearResultException(RechargeResult::callFailed(mb_substr('调用异常：' . $e->getMessage(), 0, 255), $json), $e);
+        }
 
         return [$json, $response];
     }

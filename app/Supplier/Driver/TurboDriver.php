@@ -19,6 +19,7 @@ use App\Supplier\ProvidesUpstreamProducts;
 use App\Supplier\RechargeRequest;
 use App\Supplier\RechargeResult;
 use App\Supplier\SupplierDriverInterface;
+use App\Supplier\UnclearResultException;
 use App\Supplier\UpstreamProduct;
 use Hyperf\Di\Annotation\Inject;
 use Psr\Http\Message\ServerRequestInterface;
@@ -122,9 +123,11 @@ class TurboDriver implements SupplierDriverInterface, ProvidesUpstreamProducts
         }
         try {
             $result = $this->queryOrder($config, $attemptNo, null, true);
-        } catch (Throwable) {
-            // 查单出错或没拿到明确结果，回调不采用；定时查单会继续
-            return new CallbackResult(false, 'fail');
+        } catch (UnclearResultException $e) {
+            // 查单出错或没拿到明确结果，回调不采用；带上原因和报文，记到提交上并稍后重新确认，定时查单也会继续
+            return new CallbackResult(false, 'fail', $attemptNo, null, null, $e->result);
+        } catch (Throwable $e) {
+            return new CallbackResult(false, 'fail', $attemptNo, null, null, RechargeResult::processing(null, mb_substr('调用异常：' . $e->getMessage(), 0, 255)));
         }
 
         return new CallbackResult(true, 'success', $attemptNo, $result->supplierOrderNo, $result);
@@ -187,11 +190,12 @@ class TurboDriver implements SupplierDriverInterface, ProvidesUpstreamProducts
         $body = $this->decode($response['body']);
         if ($this->isOrderNotFound($body)) {
             // 定时 / 人工查单查无此单判失败；回调不带签名，不凭回调触发的查单判失败
+            $message = '上游无此订单：' . $this->describe($body, $response);
             if ($throwIfUnclear) {
-                throw new RuntimeException('查单：上游无此订单');
+                throw new UnclearResultException(RechargeResult::processing($supplierOrderNo, $message, $sent, $response['body']));
             }
 
-            return RechargeResult::failed('上游无此订单：' . $this->describe($body, $response), $supplierOrderNo, $sent, $response['body']);
+            return RechargeResult::failed($message, $supplierOrderNo, $sent, $response['body']);
         }
         $data = $body !== null && $body['status'] === self::STATUS_OK && is_array($body['data'] ?? null) ? $body['data'] : null;
         $externalOrderNo = is_scalar($data['externalOrderNo'] ?? null) ? (string) $data['externalOrderNo'] : '';
@@ -202,11 +206,12 @@ class TurboDriver implements SupplierDriverInterface, ProvidesUpstreamProducts
             default => null,
         };
         if ($unclear !== null) {
+            $result = RechargeResult::processing($supplierOrderNo, $unclear, $sent, $response['body']);
             if ($throwIfUnclear) {
-                throw new RuntimeException($unclear);
+                throw new UnclearResultException($result);
             }
 
-            return RechargeResult::processing($supplierOrderNo, $unclear, $sent, $response['body']);
+            return $result;
         }
 
         return $this->conclude($data, $this->orderNo($data) ?? $supplierOrderNo, $sent, $response['body']);
@@ -240,14 +245,20 @@ class TurboDriver implements SupplierDriverInterface, ProvidesUpstreamProducts
      * @param array<string, string> $config
      * @param array<string, string> $business
      * @return array{0: string, 1: array{status: int, body: string}} 实际发送的参数（不含 sign）、响应
+     * @throws UnclearResultException 连不上、超时等，结果里带着发出的请求报文
      */
     private function call(array $config, string $path, array $business, float $timeout = 5.0): array
     {
         $params = array_filter(['accessKey' => $config['access_key'] ?? ''] + $business, static fn (string $v) => $v !== '');
         $url = rtrim($config['api_url'] ?? '', '/') . $path;
-        $response = $this->http->postJson($url, $params + ['sign' => self::sign($params, $config['secret_key'] ?? '')], $timeout);
+        $sent = (string) json_encode($params, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        try {
+            $response = $this->http->postJson($url, $params + ['sign' => self::sign($params, $config['secret_key'] ?? '')], $timeout);
+        } catch (Throwable $e) {
+            throw new UnclearResultException(RechargeResult::callFailed(mb_substr('调用异常：' . $e->getMessage(), 0, 255), $sent), $e);
+        }
 
-        return [(string) json_encode($params, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $response];
+        return [$sent, $response];
     }
 
     /**
