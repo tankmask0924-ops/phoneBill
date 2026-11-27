@@ -269,13 +269,18 @@ class SupplierAdminService extends AbstractService
     }
 
     /**
-     * 实时查供应商那边的余额（列表打开时逐个查），见 SupplierGateway::balance()。
+     * 实时查供应商那边的余额（列表打开时逐个查），见 SupplierGateway::balance()。停用的供应商不查（不调上游）。
      *
      * @return array{supported: bool, balance: null|string, error: null|string}
      */
     public function balance(int $id): array
     {
-        return $this->supplierGateway->balance($this->findOrFail($id));
+        $supplier = $this->findOrFail($id);
+        if ($supplier->status !== 'active') {
+            throw new HttpException(422, '供应商已停用，不查余额');
+        }
+
+        return $this->supplierGateway->balance($supplier);
     }
 
     /**

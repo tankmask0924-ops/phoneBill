@@ -19,13 +19,13 @@ const { rows, total, page, perPage, loading, filters } = list
 
 const drivers = ref<SupplierDriver[]>([])
 
-// ---- 余额：列表加载后逐个实时查，同时最多 3 个 ----
+// ---- 余额：列表加载后逐个实时查，同时最多 3 个；停用的供应商不查 ----
 type BalanceState = { loading: boolean; supported?: boolean; balance?: string | null; error?: string | null }
 const balances = reactive<Record<number, BalanceState>>({})
 const balanceLoading = ref(false)
 
 async function loadBalances() {
-  const ids = rows.value.map((r) => r.id)
+  const ids = rows.value.filter((r) => r.status === 'active').map((r) => r.id)
   ids.forEach((id) => (balances[id] = { loading: true }))
   balanceLoading.value = true
   let next = 0
@@ -219,7 +219,8 @@ onMounted(async () => {
       </el-table-column>
       <el-table-column label="余额（元）" width="130" align="right">
         <template #default="{ row }">
-          <span v-if="!balances[row.id] || balances[row.id].loading" class="muted">查询中…</span>
+          <span v-if="row.status !== 'active'" class="muted">已停用</span>
+          <span v-else-if="!balances[row.id] || balances[row.id].loading" class="muted">查询中…</span>
           <el-tooltip v-else-if="balances[row.id].error" :content="balances[row.id].error ?? ''" placement="top">
             <span class="error">查询失败</span>
           </el-tooltip>

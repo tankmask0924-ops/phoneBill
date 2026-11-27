@@ -164,6 +164,13 @@ class SupplierControllerTest extends HttpTestCase
         make(SupplierGateway::class)->forgetBalance($supplier->id);
         $this->assertNotNull($this->body($this->jsonRequest('GET', "/admin/suppliers/{$supplier->id}/balance", $token))['error']);
 
+        // 停用的供应商不查余额，不调上游
+        $supplier->update(['status' => 'disabled', 'driver' => 'mock']);
+        make(SupplierGateway::class)->forgetBalance($supplier->id);
+        $response = $this->jsonRequest('GET', "/admin/suppliers/{$supplier->id}/balance", $token);
+        $this->assertSame(422, $response->getStatusCode());
+        $this->assertStringContainsString('已停用', (string) $response->getBody());
+
         $this->assertSame(404, $this->jsonRequest('GET', '/admin/suppliers/999999999/balance', $token)->getStatusCode());
         $this->assertSame(403, $this->jsonRequest('GET', "/admin/suppliers/{$supplier->id}/balance", $this->loginAs($this->createAdminWithPermissions(['order.view'])))->getStatusCode());
     }
