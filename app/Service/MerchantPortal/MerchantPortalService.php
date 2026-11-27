@@ -332,6 +332,10 @@ class MerchantPortalService extends AbstractService
             } elseif ($o->status === Order::STATUS_TIMEOUT) {
                 $presented['status'] = Order::STATUS_TIMEOUT;
             }
+            // 耗时：下单到出结果的秒数，跟着商户看到的 finished_at 走（人工处理单手动回调前不显示）
+            $presented['duration'] = ($presented['finished_at'] ?? null) !== null && $o->created_at !== null && $o->finished_at !== null
+                ? max(0, $o->finished_at->getTimestamp() - $o->created_at->getTimestamp())
+                : null;
 
             return $presented;
         }, $orders);

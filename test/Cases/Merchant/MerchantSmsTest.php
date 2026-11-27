@@ -93,7 +93,7 @@ class MerchantSmsTest extends HttpTestCase
         }
         $redis = make(Redis::class);
         foreach ($this->mobiles as $mobile) {
-            $redis->del("sms_cooldown:{$mobile}", "sms_daily:{$mobile}:" . date('Ymd'), "sms_code:login:{$mobile}", "sms_code:bind:{$mobile}", "sms_code:reset_secret:{$mobile}");
+            $redis->del("sms_cooldown:{$mobile}", "sms_hourly:{$mobile}:" . date('YmdH'), "sms_daily:{$mobile}:" . date('Ymd'), "sms_code:login:{$mobile}", "sms_code:bind:{$mobile}", "sms_code:reset_secret:{$mobile}");
         }
         $this->cleanUpCatalog();
         $this->cleanUpAdmins();

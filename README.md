@@ -179,7 +179,7 @@ npm run build        # 产物在 merchant-web/dist，部署在 /merchant/ 路径
 ## 部署要点
 
 - `.env` 必须配置 `ADMIN_JWT_SECRET`、`MERCHANT_JWT_SECRET`（两个不要相同）、`APP_ENCRYPTION_KEY`（上线后不能更换），`DB_CHARSET=utf8mb4`
-- 部署在反向代理后面时配置 `TRUSTED_PROXIES`，操作日志、登录日志才能记到真实 IP
+- 部署在反向代理后面时配置 `TRUSTED_PROXIES`，操作日志、登录日志才能记到真实 IP，短信验证码的按 IP 限频才生效（没配时 IP 都是 127.0.0.1，不按 IP 限，见 docs/project.md 8.3）
 - 线上不要配 `SUPPLIER_MOCK_ENABLED`（默认关）：开着时后台能建「固定返回成功」的模拟供应商
 - 确认容器里有 `crontab-dispatcher`、`async-queue`（默认 2 个）、`async-queue-notify` 这几个进程，否则定时任务和异步队列不执行
 - 平台启用了短信时管理员登录要短信验证码，没有手机号的管理员登不上：上线前先在「管理员账号」里给每个管理员补上手机号，或用 `admin:set-mobile` 设置

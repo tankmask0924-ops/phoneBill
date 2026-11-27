@@ -181,6 +181,9 @@ onMounted(async () => {
       <el-table-column label="完成时间" width="170">
         <template #default="{ row }">{{ row.finished_at ?? '-' }}</template>
       </el-table-column>
+      <el-table-column label="耗时" width="100" align="right">
+        <template #default="{ row }">{{ formatDuration(row.duration) }}</template>
+      </el-table-column>
       <el-table-column label="操作" width="80" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" @click="openDetail(row as Order)">详情</el-button>
@@ -217,6 +220,7 @@ onMounted(async () => {
             <div v-if="STATUS_TIPS[detail.status]" class="muted">{{ STATUS_TIPS[detail.status] }}</div>
           </el-descriptions-item>
           <el-descriptions-item label="完成时间">{{ detail.finished_at ?? '-' }}</el-descriptions-item>
+          <el-descriptions-item label="耗时">{{ formatDuration(detail.duration) }}</el-descriptions-item>
           <el-descriptions-item v-if="detail.fail_reason" label="失败原因" :span="2">{{ detail.fail_reason }}</el-descriptions-item>
         </el-descriptions>
         <h4>资金变动</h4>

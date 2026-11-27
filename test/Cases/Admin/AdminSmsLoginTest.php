@@ -88,7 +88,7 @@ class AdminSmsLoginTest extends HttpTestCase
         }
         $redis = make(Redis::class);
         foreach ($this->mobiles as $mobile) {
-            $redis->del("sms_cooldown:{$mobile}", "sms_daily:{$mobile}:" . date('Ymd'), "sms_code:admin_login:{$mobile}");
+            $redis->del("sms_cooldown:{$mobile}", "sms_hourly:{$mobile}:" . date('YmdH'), "sms_daily:{$mobile}:" . date('Ymd'), "sms_code:admin_login:{$mobile}");
         }
         $this->cleanUpAdmins();
         parent::tearDown();

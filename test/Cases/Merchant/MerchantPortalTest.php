@@ -184,6 +184,12 @@ class MerchantPortalTest extends HttpTestCase
 
         $all = $get([]);
         $this->assertSame(4, $all['total']);
+        // 耗时：下单到出结果的秒数；没出结果、人工处理单手动回调前都是 null
+        $durations = array_column($all['data'], 'duration', 'id');
+        $this->assertSame(30, $durations[$success->id]);
+        $this->assertSame(10, $durations[$small->id]);
+        $this->assertNull($durations[$manual->id]);
+        $this->assertSame(30, $this->body($this->jsonRequest('GET', "/merchant/orders/{$success->id}", $token))['duration']);
         $this->assertSame([
             'order_count' => 4,
             'success_count' => 2,

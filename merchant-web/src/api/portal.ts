@@ -39,6 +39,8 @@ export interface Order {
   fail_reason: string | null
   created_at: string | null
   finished_at: string | null
+  /** 耗时（秒）：下单到出结果，还没出结果时为 null */
+  duration: number | null
 }
 
 /** 当前筛选条件下全部订单（不只这一页）的汇总；成功、失败按你看到的状态算 */

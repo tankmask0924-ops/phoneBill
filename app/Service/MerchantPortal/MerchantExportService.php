@@ -19,7 +19,6 @@ use App\Model\Merchant;
 use App\Model\MerchantBalanceLog;
 use App\Model\MerchantExport;
 use App\Model\MerchantUser;
-use App\Model\Order;
 use App\Service\AbstractService;
 use Hyperf\Database\Model\Collection;
 use Hyperf\Di\Annotation\Inject;
@@ -264,8 +263,8 @@ class MerchantExportService extends AbstractService
                 $this->putRow($out, ['平台订单号', '商户订单号', '商品', '手机号', '运营商', '省份', '面值', '扣款金额', '状态', '失败原因', '下单时间', '完成时间', '耗时（秒）']);
                 $builder->chunkByIdDesc(self::CHUNK, function (Collection $orders) use ($out, &$rows) {
                     $presented = $this->portalService->presentOrders($orders->all());
-                    foreach ($orders->values() as $i => $order) {
-                        $this->putRow($out, $this->orderRow($order, $presented[$i]));
+                    foreach ($presented as $o) {
+                        $this->putRow($out, $this->orderRow($o));
                         ++$rows;
                     }
                 });
@@ -292,17 +291,13 @@ class MerchantExportService extends AbstractService
      * @param array<string, mixed> $o MerchantPortalService::presentOrders() 的一行
      * @return list<int|string>
      */
-    private function orderRow(Order $order, array $o): array
+    private function orderRow(array $o): array
     {
-        $duration = $o['finished_at'] !== null && $order->created_at !== null && $order->finished_at !== null
-            ? max(0, $order->finished_at->getTimestamp() - $order->created_at->getTimestamp())
-            : '';
-
         return [
             self::text($o['order_no']), self::text($o['merchant_order_no']), $o['product_name'], self::text($o['mobile']),
             Operator::tryFrom($o['operator'])?->label() ?? $o['operator'], $o['province'], $o['face_value'], $o['amount'],
             self::ORDER_STATUS_LABELS[$o['status']] ?? $o['status'], $o['fail_reason'] ?? '',
-            $o['created_at'] ?? '', $o['finished_at'] ?? '', $duration,
+            $o['created_at'] ?? '', $o['finished_at'] ?? '', $o['duration'] ?? '',
         ];
     }
 
