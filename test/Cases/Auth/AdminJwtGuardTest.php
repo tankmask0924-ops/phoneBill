@@ -38,6 +38,13 @@ class AdminJwtGuardTest extends TestCase
         $this->assertNotSame($guard->passwordVersion('password-hash'), $guard->passwordVersion('other-hash'));
     }
 
+    public function testTokenIsValidFor24Hours()
+    {
+        $guard = $this->getContainer()->get(AdminJwtGuard::class);
+        $payload = json_decode((string) base64_decode(strtr(explode('.', $guard->issue(random_int(100000, 999999), 'password-hash'))[1], '-_', '+/')), true);
+        $this->assertSame(24 * 3600, $payload['exp'] - $payload['iat'], '登录有效期 24 小时');
+    }
+
     public function testTamperedSignatureReturnsNull()
     {
         $guard = $this->getContainer()->get(AdminJwtGuard::class);

@@ -26,14 +26,14 @@ use function Hyperf\Support\env;
 /**
  * 后台登录态的 HS256 JWT，管理端（AdminJwtGuard）和商户端（MerchantJwtGuard）各用各的密钥。
  *
- * 有效期 8 小时（一个工作日），到期重新登录，不做 refresh token。
+ * 有效期 24 小时（2026-11-27 从 8 小时改的），到期重新登录，不做 refresh token。
  * token 里带：
  * - aud：签给哪一端（admin / merchant），校验时必须对上，就算两边密钥配成一样，token 也不能串用；
  * - pv：密码版本（见 passwordVersion()），改密码后之前签发的 token 全部失效。
  */
 abstract class JwtGuard
 {
-    private const TTL_SECONDS = 8 * 3600;
+    private const TTL_SECONDS = 24 * 3600;
 
     private const ALGO = 'HS256';
 
