@@ -464,6 +464,7 @@ app/Supplier/
     ├── QylmDriver.php            # QYLM 卡站话费 API（docs/QYLM开放接口对接文档-代理端下单-V1.0.md）
     ├── YbDriver.php              # YB 话费 API（docs/YB接口文档-2026.md）
     ├── JideshengDriver.php       # 记得省话费 API（docs/记得省.md）
+    ├── KasushouDriver.php        # 卡速售话费 API（docs/卡速售.md）
     └── XxxDriver.php             # 每家供应商一个
 ```
 
@@ -648,6 +649,18 @@ app/Supplier/
 - 字段对应：`clientOrderNo` = 提交单号 `attempt_no`，`productId` = 供应商商品编码，`phone` = 手机号；上游 `orderNo` 存为供应商订单号；查单按 `clientOrderNo`。
 - 签名：去掉 `sign`、null 和空串（数字 0 参与），按名 ASCII 升序拼 `k=v&...`，末尾拼 `&secretKey=`，md5 大写；带 13 位毫秒 `timestamp`。回调用同一算法验签，通过后直接按回调里的状态处理，回 `success`。
 - 结果判定：下单 `code=0` 算受理；`3001` 重复提交按处理中（上游已有这笔单）；`9000` 服务错误和没拿到返回（网络异常、返回无法解析或没有 `code`）立即转异常并标为人工处理单（见 2.5）；其他 code 判失败换下一家。查单 / 回调 `SUCCESS` 成功、`FAILED` 失败（含撤单退款、返销）、`CREATED` / `PROCESSING` / `PENDING_SUPPLEMENT` 处理中；查单 `2003` 查不到只记录（标记查无此单，异常订单人工查单时置失败并通知商户，见 2.5）。
+
+### 7.16 卡速售（驱动 `kasushou`）
+
+上游文档 `docs/卡速售.md`（由上游给的 `docs/卡速售接口.docx` 整理，最后是对接方式、结果判定表和待确认事项）：下单、余额、商品列表、结果回调，全部 POST JSON。只接话费。**上游没有查单接口，回调也不带签名。** 2026-11-28 接入。
+
+- 接口参数：接口域名（不含 `/prod-api`）、`appId`、`appKey`；选填用户 ID（`userId`，查余额用）、余额分类 ID（`categoryIds`）。回调地址自动生成，每单随下单传 `callbackUrl`（见 4.2），后面带本单的 `token`（见下）。
+- 字段对应：`apiOrderSn` = 提交单号 `attempt_no`，`productId` = 供应商商品编码（上游商品 `id`），`number` = 手机号，`buyNum` 固定 `1`，`api` 固定 `api`；上游 `orderNo`（回调的 `orderSn`）存为供应商订单号。
+- 签名：请求体 `{data, sign, timestamp(13 位毫秒), appId, appKey}`，只算 `data`：去掉 null 和空串，按名升序拼 `keyvalue`（无分隔符），前面拼 `appKey + timestamp`，md5 小写。原始报文不记 `appKey`。
+- 回调验证：`callbackUrl` = 回调地址 + `?token=HMAC-SHA256(提交单号, appKey) 前 32 位`；回调按 `apiOrderSn` 重算比对，不对回 `fail`（HTTP 400，上游会重推，最多 5 次），通过回 `success`。
+- 结果判定：下单 `code=200` 且 `data.success=true` 算受理；`success=false` 和其他 code 判失败换下一家；`code=200` 却没有 `data.success`、没拿到返回（网络异常、返回无法解析或没有 `code`）立即转异常并标为人工处理单（见 2.5）。回调 `orderStatus` `3` 已完成成功、`4` 已取消失败、`1` 已支付 / `5` 正在充值和其他处理中。
+- 查单：定时 / 人工查单不发请求，按处理中只记录；一直没回调的订单照常超时，人工到上游后台核实后在后台确认成功 / 失败。
+- 上游商品列表：每页 100 条逐页取完；`carrier` 取值文档没写全，按商品名里的运营商名认；`status=1` 且库存不为 0 才算上架；`categoryName`、`productSn` 作为补充说明。
 
 ## 8. 权限
 

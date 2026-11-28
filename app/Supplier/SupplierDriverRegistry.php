@@ -15,6 +15,7 @@ namespace App\Supplier;
 use App\Supplier\Driver\ChongyidaDriver;
 use App\Supplier\Driver\DayuanrenDriver;
 use App\Supplier\Driver\JideshengDriver;
+use App\Supplier\Driver\KasushouDriver;
 use App\Supplier\Driver\LinxianDriver;
 use App\Supplier\Driver\LiuhaoDriver;
 use App\Supplier\Driver\MockDriver;
@@ -61,6 +62,7 @@ class SupplierDriverRegistry
         QylmDriver::class,
         YbDriver::class,
         JideshengDriver::class,
+        KasushouDriver::class,
     ];
 
     public function __construct(private ContainerInterface $container)
